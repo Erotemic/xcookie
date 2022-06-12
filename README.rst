@@ -3,7 +3,7 @@ The xcookie Module
 
 .. ..  |CircleCI| |Travis| |GitlabCIPipeline| |GitlabCICoverage| |Appveyor| |Codecov| |Pypi| |Downloads| |ReadTheDocs|
 
-|GithubActions| |ReadTheDocs| |Pypi| |Downloads| |Codecov| |CircleCI| |Appveyor| 
+|GithubActions| |ReadTheDocs| |Pypi| |Downloads| |Codecov|
 
 
 The ``xcookie`` module.
