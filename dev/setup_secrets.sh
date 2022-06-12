@@ -8,7 +8,7 @@ TODO: These instructions are currently pieced together from old disparate
 instances, and are not yet fully organized.
 
 The original template file should be:
-~/misc/templates/xcookie/dev/setup_secrets.sh
+~/code/xcookie/dev/setup_secrets.sh
 
 Development script for updating secrets when they rotate
 
@@ -117,6 +117,8 @@ setup_package_environs(){
     "
     echo "Choose an organization specific setting or make your own. This needs to be generalized more"
 }
+
+### FIXME: Should be configurable for general use
 
 setup_package_environs_gitlab_kitware(){
     echo '

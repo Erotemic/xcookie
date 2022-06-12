@@ -29,10 +29,11 @@ import os
 
 class XCookieConfig(scfg.Config):
     default = {
-        'repodir': scfg.Value(
-            None, help='path to the new or existing repo', required=True),
+        'repodir': scfg.Value('.', help='path to the new or existing repo'),
+
         'repo_name': scfg.Value(None, help='defaults to ``repodir.name``'),
-        'pkg_name': scfg.Value(None, help='defaults to ``repo_name``'),
+        'mod_name': scfg.Value(None, help='The name of the importable Python module. defaults to ``repo_name``'),
+        'pkg_name': scfg.Value(None, help='The name of the installable Python package. defaults to ``mod_name``'),
 
         'rotate_secrets': scfg.Value('auto'),
 
@@ -40,7 +41,7 @@ class XCookieConfig(scfg.Config):
 
         'interative': scfg.Value(True),
 
-        'tags': scfg.Value([], nargs='*', help=ub.paragraph(
+        'tags': scfg.Value('auto', nargs='*', help=ub.paragraph(
             '''
             Tags modify what parts of the template are used.
             Valid tags are:
@@ -52,7 +53,28 @@ class XCookieConfig(scfg.Config):
                 "purepy" - this is a pure python repo
             ''')),
     }
+
     def normalize(self):
+
+        if self['repodir'] is None:
+            self['repodir'] = ub.Path.cwd()
+        else:
+            self['repodir'] = ub.Path(self['repodir']).absolute()
+        pyproject_fpath = self['repodir'] / 'pyproject.toml'
+        if pyproject_fpath.exists():
+            try:
+                disk_config = toml.loads(pyproject_fpath.read_text())
+            except Exception as ex:
+                print(f'ex={ex}')
+            if self['tags'] == 'auto':
+                try:
+                    self['tags'] = disk_config['tool']['xcookie']['tags']
+                except KeyError:
+                    pass
+
+        if self['tags'] == 'auto':
+            self['tags'] = []
+
         if self['tags']:
             if isinstance(self['tags'], str):
                 self['tags'] = [self['tags']]
@@ -60,13 +82,13 @@ class XCookieConfig(scfg.Config):
             for t in self['tags']:
                 new.extend([p.strip() for p in t.split(',')])
             self['tags'] = new
-        self['repodir'] = ub.Path(self['repodir'])
+
         if self['repo_name'] is None:
             self['repo_name'] = self['repodir'].name
-        if self['pkg_name'] is None:
-            self['pkg_name'] = self['repo_name']
+        if self['mod_name'] is None:
+            self['mod_name'] = self['repo_name']
         if self['is_new'] == 'auto':
-            self['is_new'] = True
+            self['is_new'] = not (self['repodir'] / '.git').exists()
         if self['rotate_secrets'] == 'auto':
             self['rotate_secrets'] = self['is_new']
 
@@ -99,7 +121,9 @@ class XCookieConfig(scfg.Config):
             cmdline = 0
         """
         config = XCookieConfig(cmdline=cmdline, data=kwargs)
-        repodir = ub.Path(config['repodir'])
+        config.normalize()
+        print('config = {}'.format(ub.repr2(dict(config), nl=1)))
+        repodir = ub.Path(config['repodir']).absolute()
         repodir.ensuredir()
 
         self = TemplateApplier(config)
@@ -114,8 +138,8 @@ class TemplateApplier:
         appropriate properties.
         """
 
-        rel_pkg_fpath = ub.Path(self.config['pkg_name'])
-        # pkg_fpath = self.config['repodir'] / rel_pkg_fpath
+        rel_mod_dpath = ub.Path(self.config['mod_name'])
+        # mod_dpath = self.config['repodir'] / rel_mod_dpath
 
         self.template_infos = [
             # {'template': 1, 'overwrite': False, 'fname': '.circleci/config.yml'},
@@ -127,15 +151,15 @@ class TemplateApplier:
             # {'template': 1, 'overwrite': 1, 'fname': '.coveragerc'},
             {'template': 0, 'overwrite': 1, 'fname': '.readthedocs.yml'},
             # {'template': 0, 'overwrite': 1, 'fname': 'pytest.ini'},
-            {'template': 0, 'overwrite': 1, 'fname': 'pyproject.toml', 'dynamic': 'build_pyproject'},
+            {'template': 0, 'overwrite': 0, 'fname': 'pyproject.toml', 'dynamic': 'build_pyproject'},
 
             {'template': 0, 'overwrite': 1, 'fname': '.github/dependabot.yml', 'tags': 'github'},
-            {'template': 0, 'overwrite': 1, 'fname': '.github/workflows/test_binaries.yml', 'tags': 'binpy,github'},
-            {'template': 1, 'overwrite': 1, 'fname': '.github/workflows/tests.yml', 'tags': 'purepy,github'},
+            {'template': 0, 'overwrite': 1, 'fname': '.github/workflows/test_binaries.yml', 'tags': 'binpy,github', 'input_fname': '.github/workflows/test_binaries.yml.in'},
+            {'template': 1, 'overwrite': 1, 'fname': '.github/workflows/tests.yml', 'tags': 'purepy,github', 'input_fname': '.github/workflows/tests.yml.in'},
 
             {'template': 1, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab'},
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
-            {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt', 'tags': 'binpy'},
+            {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt', 'tags': 'binpy', 'input_fname': 'CMakeLists.txt.in'},
 
             {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh'},
             {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt'},  # 'dynamic': 'build_requirements'},
@@ -153,8 +177,9 @@ class TemplateApplier:
 
             {'template': 1, 'overwrite': 0, 'fname': 'README.rst'},
             {'source': 'dynamic', 'overwrite': 0, 'fname': 'CHANGELOG.md'},
-            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_pkg_fpath / '__init__.py'},
-            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_pkg_fpath / '__main__.py'},
+            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__init__.py'},
+            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__main__.py'},
+            {'source': 'dynamic', 'overwrite': 0, 'fname': 'tests/test_import.py'},
         ]
         if 0:
             # Checker and help autopopulate
@@ -164,8 +189,9 @@ class TemplateApplier:
                 'old',
                 '.circleci',
                 'xcookie',
+                '.git',
             }
-            fname_blocklist = {}
+            fname_blocklist = set()
             for root, ds, fs in self.template_dpath.walk():
                 for d in set(ds) & dname_blocklist:
                     ds.remove(d)
@@ -174,7 +200,14 @@ class TemplateApplier:
                     rel_root = root.relative_to(self.template_dpath)
                     for fname in fs:
                         abs_fpath = root / fname
-                        is_template = int('xcookie' in abs_fpath.read_text())
+                        if abs_fpath.name.endswith('.in'):
+                            is_template = 1
+                        else:
+                            try:
+                                is_template = int('xcookie' in abs_fpath.read_text())
+                            except Exception:
+                                is_template = 0
+                            # is_template = 0
                         rel_fpath = rel_root / fname
                         # overwrite indicates if we dont expect the user to
                         # make modifications
@@ -213,27 +246,32 @@ class TemplateApplier:
 
     def copy_staged_files(self):
         stats, tasks = self.gather_tasks()
+
         copy_tasks = tasks['copy']
-        if copy_tasks:
+        perm_tasks = tasks['perms']
+        task_summary = ub.map_vals(len, tasks)
+        if any(task_summary.values()):
+            print('task_summary = {}'.format(ub.repr2(task_summary, nl=1)))
             if self.config.confirm('Do you want to apply this patch?'):
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
                     d.ensuredir()
                 for src, dst in copy_tasks:
                     shutil.copy2(src, dst)
-        pass
+                for fname, mode in perm_tasks:
+                    os.chmod(fname, mode)
 
     def vcs_checks(self):
         # repodir = self.config['repodir']
-        # pkg_fpath = None
-        # if pkg_fpath is None:
-        #     pkg_name = self.config['pkg_name']
-        #     pkg_fpath = repodir / pkg_name
+        # mod_dpath = None
+        # if mod_dpath is None:
+        #     mod_name = self.config['mod_name']
+        #     mod_dpath = repodir / mod_name
 
         # package_structure = [
         #     repodir / 'CHANGELOG.md',
-        #     pkg_fpath / '__init__.py',
-        #     pkg_fpath / '__main__.py',
+        #     mod_dpath / '__init__.py',
+        #     mod_dpath / '__main__.py',
         # ]
         # missing = []
         # for fpath in package_structure:
@@ -286,6 +324,12 @@ class TemplateApplier:
                 ### Added
                 * Initial version
                 ''')
+        elif fname == 'test_import.py':
+            return ub.codeblock(
+                f'''
+                def test_import():
+                    import {self.config['mod_name']}
+                ''')
         elif fname == '__main__.py':
             return ub.codeblock(
                 '''
@@ -293,8 +337,12 @@ class TemplateApplier:
                 ''')
         elif fname == '__init__.py':
             return ub.codeblock(
-                '''
+                f'''
                 __version__ = '0.0.1'
+
+                __mkinit__ = """
+                mkinit {info['repo_fpath']}
+                """
                 ''')
         else:
             raise KeyError(fname)
@@ -302,6 +350,7 @@ class TemplateApplier:
     def stage_files(self):
         self.staging_infos = []
         for info in ub.ProgIter(self.template_infos, desc='staging'):
+            print('info = {!r}'.format(info))
             tags = info.get('tags', None)
             if tags:
                 tags = set(tags.split(','))
@@ -309,6 +358,9 @@ class TemplateApplier:
                     continue
             stage_fpath = self.staging_dpath / info['fname']
             stage_fpath.parent.ensuredir()
+
+            info['stage_fpath'] = stage_fpath
+            info['repo_fpath'] = self.repodir / info['fname']
 
             dynamic = info.get('dynamic', '') or info.get('source', '') == 'dynamic'
             if dynamic:
@@ -329,9 +381,6 @@ class TemplateApplier:
                     author_email = ub.cmd('git config --global user.email')['out'].strip()
                     xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
                     xdev.sedfile(stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0)
-
-            info['stage_fpath'] = stage_fpath
-            info['repo_fpath'] = self.repodir / info['fname']
             self.staging_infos.append(info)
 
         if 1:
@@ -341,10 +390,12 @@ class TemplateApplier:
 
     def gather_tasks(self):
         tasks = {
-            'copy': []
+            'copy': [],
+            'perms': [],
         }
         stats = {
             'missing': [],
+            'modified': [],
             'dirty': [],
             'clean': [],
         }
@@ -355,11 +406,11 @@ class TemplateApplier:
                 stats['missing'].append(repo_fpath)
                 tasks['copy'].append((stage_fpath, repo_fpath))
                 stage_text = stage_fpath.read_text()
-                difftext = xdev.difftext('', stage_text, colored=1)
-                print(difftext[:10000])
-                print(f'Does not exist repo_fpath={repo_fpath}')
-            elif info['overwrite']:
-                print(f'repo_fpath={repo_fpath}')
+                difftext = xdev.difftext('', stage_text[:10000], colored=1)
+                print(f'<NEW FPATH={repo_fpath}>')
+                print(difftext)
+                print(f'<END FPATH={repo_fpath}>')
+            else:
                 assert stage_fpath.exists()
                 repo_text = repo_fpath.read_text()
                 stage_text = stage_fpath.read_text()
@@ -368,14 +419,25 @@ class TemplateApplier:
                 else:
                     difftext = xdev.difftext(repo_text, stage_text, colored=1)
                 if difftext:
-                    tasks['copy'].append((stage_fpath, repo_fpath))
-                    stats['dirty'].append(repo_fpath)
-                    print(difftext[:10000])
+                    if info['overwrite']:
+                        tasks['copy'].append((stage_fpath, repo_fpath))
+                        stats['dirty'].append(repo_fpath)
+                        print(f'<DIFF FOR repo_fpath={repo_fpath}>')
+                        print(difftext[:10000])
+                        print(f'<END DIFF repo_fpath={repo_fpath}>')
+                    else:
+                        stats['modified'].append(repo_fpath)
                 else:
                     stats['clean'].append(repo_fpath)
+
             if 'x' in info.get('perms', ''):
-                # todo chmod
-                pass
+                import stat
+                if info['repo_fpath'].exists():
+                    st = ub.Path(info['repo_fpath']).stat()
+                    mode_want = st.st_mode | stat.S_IEXEC
+                    if mode_want != st.st_mode:
+                        tasks['perms'].append((info['repo_fpath'], mode_want))
+
         print('stats = {}'.format(ub.repr2(stats, nl=2)))
         return stats, tasks
 
@@ -465,47 +527,60 @@ class TemplateApplier:
                 ]
                 ''').format(REPO_NAME=self.repo_name)))
 
+        WITH_XCOOKIE = 1
+        if WITH_XCOOKIE:
+            pyproj_config['tool']['xcookie'].update(toml.loads(ub.codeblock(
+                f'''
+                tags = {self.config['tags']}
+                mod_name = "{self.config['mod_name']}"
+                repo_name = "{self.config['repo_name']}"
+                ''')))
+
         text = toml.dumps(pyproj_config)
         return text
 
     def rotate_secrets(self):
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
-        if 'erotemic' in self.config['tags']:
-            environ_export = 'setup_package_environs_github_erotemic'
-            upload_secret_cmd = 'upload_github_secrets'
-        elif 'pyutils' in self.config['tags']:
-            environ_export = 'setup_package_environs_github_pyutils'
-            upload_secret_cmd = 'upload_github_secrets'
-        elif 'kitware' in self.config['tags']:
-            environ_export = 'setup_package_environs_gitlab_kitware'
-            upload_secret_cmd = 'upload_gitlab_repo_secrets'
-        else:
-            raise Exception
-
-        import cmd_queue
-        script = cmd_queue.Queue.create()
-        script.submit(ub.codeblock(
-            f'''
-            cd {self.repodir}
-            source {setup_secrets_fpath}
-            {environ_export}
-            load_secrets
-            export_encrypted_code_signing_keys
-            git commit -am "Updated secrets"
-            {upload_secret_cmd}
-            '''))
-
+        # dev/public_gpg_key
         if self.config.confirm('Ready to rotate secrets?'):
+            if 'erotemic' in self.config['tags']:
+                environ_export = 'setup_package_environs_github_erotemic'
+                upload_secret_cmd = 'upload_github_secrets'
+            elif 'pyutils' in self.config['tags']:
+                environ_export = 'setup_package_environs_github_pyutils'
+                upload_secret_cmd = 'upload_github_secrets'
+            elif 'kitware' in self.config['tags']:
+                environ_export = 'setup_package_environs_gitlab_kitware'
+                upload_secret_cmd = 'upload_gitlab_repo_secrets'
+            else:
+                raise Exception
+
+            import cmd_queue
+            script = cmd_queue.Queue.create()
+            script.submit(ub.codeblock(
+                f'''
+                cd {self.repodir}
+                source {setup_secrets_fpath}
+                {environ_export}
+                load_secrets
+                export_encrypted_code_signing_keys
+                git commit -am "Updated secrets"
+                {upload_secret_cmd}
+                '''))
+
             script.rprint()
             print('FIXME: for now, you need to manually execute this')
 
+
+def main():
+    XCookieConfig.main(cmdline={
+        'strict': True,
+        'autocomplete': True,
+    })
 
 if __name__ == '__main__':
     """
     CommandLine:
         python ~/misc/templates/xcookie/apply_template.py --help
     """
-    XCookieConfig.main(cmdline={
-        'strict': True,
-        'autocomplete': True,
-    })
+    main()

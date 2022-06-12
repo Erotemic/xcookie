@@ -208,19 +208,19 @@ VERSION = parse_version('xcookie/__init__.py')
 
 if __name__ == '__main__':
     setupkw = {}
-    setupkw['entry_points'] = {
-        # the console_scripts entry point creates the package CLI
-        'console_scripts': [
-            # '{SCRIPT_NAME}={MODPATH}:{CALLNAME}',
-            'xcookie = xcookie.__main__:main'
-        ]
-    }
+    # setupkw['entry_points'] = {
+    #     # the console_scripts entry point creates the package CLI
+    #     'console_scripts': [
+    #         # '{SCRIPT_NAME}={MODPATH}:{CALLNAME}',
+    #         'xcookie = xcookie.__main__:main'
+    #     ]
+    # }
 
     setup(
         name=NAME,
         version=VERSION,
-        author='joncrall',
-        author_email='jon.crall@kitware.com',
+        author='<AUTHOR>',
+        author_email='<AUTHOR_EMAIL>',
         description=('The xcookie Module'),
         url='<xcookie url>',
         long_description=parse_description(),
@@ -235,6 +235,7 @@ if __name__ == '__main__':
         },
         license='Apache 2',
         packages=find_packages('.'),
+        python_requires='>=3.6',
         classifiers=[
             # List of classifiers available at:
             # https://pypi.python.org/pypi?%3Aaction=list_classifiers
