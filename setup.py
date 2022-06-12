@@ -208,19 +208,19 @@ VERSION = parse_version('xcookie/__init__.py')
 
 if __name__ == '__main__':
     setupkw = {}
-    setupkw['entry_points'] = {
-        # the console_scripts entry point creates the package CLI
-        'console_scripts': [
-            # '{SCRIPT_NAME}={MODPATH}:{CALLNAME}',
-            'xcookie = xcookie.__main__:main'
-        ]
-    }
+    # setupkw['entry_points'] = {
+    #     # the console_scripts entry point creates the package CLI
+    #     'console_scripts': [
+    #         # '{SCRIPT_NAME}={MODPATH}:{CALLNAME}',
+    #         'xcookie = xcookie.__main__:main'
+    #     ]
+    # }
 
     setup(
         name=NAME,
         version=VERSION,
-        author='<AUTHOR>',
-        author_email='<AUTHOR_EMAIL>',
+        author='joncrall',
+        author_email='jon.crall@kitware.com',
         description=('The xcookie Module'),
         url='<xcookie url>',
         long_description=parse_description(),
