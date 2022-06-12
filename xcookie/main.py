@@ -99,8 +99,8 @@ class XCookieConfig(scfg.Config):
             cmdline = 0
         """
         config = XCookieConfig(cmdline=cmdline, data=kwargs)
-        repo_dpath = ub.Path(config['repodir'])
-        repo_dpath.ensuredir()
+        repodir = ub.Path(config['repodir'])
+        repodir.ensuredir()
 
         self = TemplateApplier(config)
         self.setup().apply()
@@ -113,11 +113,14 @@ class TemplateApplier:
         Take stock of the files in the template repo and ensure they all have
         appropriate properties.
         """
+
+        rel_pkg_fpath = ub.Path(self.config['pkg_name'])
+        # pkg_fpath = self.config['repodir'] / rel_pkg_fpath
+
         self.template_infos = [
             # {'template': 1, 'overwrite': False, 'fname': '.circleci/config.yml'},
             # {'template': 1, 'overwrite': False, 'fname': '.travis.yml'},
 
-            {'template': 0, 'overwrite': 1, 'fname': 'publish.sh'},
             {'template': 0, 'overwrite': 1, 'fname': 'dev/setup_secrets.sh'},
 
             {'template': 0, 'overwrite': 0, 'fname': '.gitignore'},
@@ -133,7 +136,6 @@ class TemplateApplier:
             {'template': 1, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab'},
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
             {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt', 'tags': 'binpy'},
-            {'template': 1, 'overwrite': 0, 'fname': 'README.rst'},
 
             {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh'},
             {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt'},  # 'dynamic': 'build_requirements'},
@@ -143,10 +145,16 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
 
-            {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh'},
-            {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh'},
-            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py'},
-            {'template': 1, 'overwrite': 0, 'fname': 'setup.py'},
+            {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x'},
+            {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x'},
+            {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh', 'perms': 'x'},
+            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py', 'perms': 'x'},
+            {'template': 1, 'overwrite': 0, 'fname': 'setup.py', 'input_fname': 'setup.py.in', 'perms': 'x'},
+
+            {'template': 1, 'overwrite': 0, 'fname': 'README.rst'},
+            {'source': 'dynamic', 'overwrite': 0, 'fname': 'CHANGELOG.md'},
+            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_pkg_fpath / '__init__.py'},
+            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_pkg_fpath / '__main__.py'},
         ]
         if 0:
             # Checker and help autopopulate
@@ -184,9 +192,9 @@ class TemplateApplier:
 
     def __init__(self, config):
         self.config = config
-        self.repo_dpath = ub.Path(self.config['repodir'])
+        self.repodir = ub.Path(self.config['repodir'])
         if self.config['repo_name'] is None:
-            self.config['repo_name'] = self.repo_dpath.name
+            self.config['repo_name'] = self.repodir.name
         self.repo_name = self.config['repo_name']
         self._tmpdir = tempfile.TemporaryDirectory(prefix=self.repo_name)
 
@@ -215,27 +223,24 @@ class TemplateApplier:
                     shutil.copy2(src, dst)
         pass
 
-    def setup_initial_files(self):
-        repo_dpath = self.config['repodir']
-        pkg_fpath = None
-        if pkg_fpath is None:
-            pkg_name = self.config['pkgname']
-            pkg_fpath = repo_dpath / pkg_name
+    def vcs_checks(self):
+        # repodir = self.config['repodir']
+        # pkg_fpath = None
+        # if pkg_fpath is None:
+        #     pkg_name = self.config['pkg_name']
+        #     pkg_fpath = repodir / pkg_name
 
-        package_structure = [
-            repo_dpath / 'CHANGELOG.md',
-            pkg_fpath / '__init__.py',
-            pkg_fpath / '__main__.py',
-        ]
-        missing = []
-        for fpath in package_structure:
-            if not fpath.exists():
-                missing.append(fpath)
-
-        if missing:
-            print('missing = {}'.format(ub.repr2(missing, nl=1)))
-            if self.config.confirm('Make initial files?'):
-                pass
+        # package_structure = [
+        #     repodir / 'CHANGELOG.md',
+        #     pkg_fpath / '__init__.py',
+        #     pkg_fpath / '__main__.py',
+        # ]
+        # missing = []
+        # for fpath in package_structure:
+        #     if not fpath.exists():
+        #         missing.append(fpath)
+        # if missing:
+        #     print('missing = {}'.format(ub.repr2(missing, nl=1)))
 
         if self.config['is_new']:
             create_new_repo_info = ub.codeblock(
@@ -252,12 +257,47 @@ class TemplateApplier:
                 # https://cli.github.com/manual/gh_repo_create
                 ''')
             print(create_new_repo_info)
+            git_dpath = self.repodir / '.git'
+            if not git_dpath.exists():
+                if self.config.confirm('Do git init?'):
+                    print('todo: not implemented')
+            # if self.config.confirm('Make initial files?'):
+            #     print('todo: not implemented')
 
     def apply(self):
-        self.setup_initial_files()
+        self.vcs_checks()
         self.copy_staged_files()
         if self.config['rotate_secrets']:
             self.rotate_secrets()
+
+    def lut(self, info):
+        fname = ub.Path(info['fname']).name
+        if fname == 'CHANGELOG.md':
+            return ub.codeblock(
+                '''
+                # Changelog
+
+                We are currently working on porting this changelog to the specifications in
+                [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+                This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+                ## [Version 0.0.1] -
+
+                ### Added
+                * Initial version
+                ''')
+        elif fname == '__main__.py':
+            return ub.codeblock(
+                '''
+                #!/usr/bin/env python
+                ''')
+        elif fname == '__init__.py':
+            return ub.codeblock(
+                '''
+                __version__ = '0.0.1'
+                ''')
+        else:
+            raise KeyError(fname)
 
     def stage_files(self):
         self.staging_infos = []
@@ -268,18 +308,30 @@ class TemplateApplier:
                 if not set(self.config['tags']).issuperset(tags):
                     continue
             stage_fpath = self.staging_dpath / info['fname']
-            if info.get('dynamic', ''):
-                text = getattr(self, info.get('dynamic', ''))()
+            stage_fpath.parent.ensuredir()
+
+            dynamic = info.get('dynamic', '') or info.get('source', '') == 'dynamic'
+            if dynamic:
+                dynamic_var = info.get('dynamic', '')
+                if dynamic_var == '':
+                    text = self.lut(info)
+                else:
+                    text = getattr(self, dynamic_var)()
                 stage_fpath.write_text(text)
             else:
-                raw_fpath = self.template_dpath / info['fname']
-                stage_fpath.parent.ensuredir()
+                # dst_fname = info['fname']
+                in_fname = info.get('input_fname', info['fname'])
+                raw_fpath = self.template_dpath / in_fname
                 shutil.copy2(raw_fpath, stage_fpath)
                 if info['template']:
                     xdev.sedfile(stage_fpath, 'xcookie', self.repo_name, verbose=0)
+                    author = ub.cmd('git config --global user.name')['out'].strip()
+                    author_email = ub.cmd('git config --global user.email')['out'].strip()
+                    xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
+                    xdev.sedfile(stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0)
 
             info['stage_fpath'] = stage_fpath
-            info['repo_fpath'] = self.repo_dpath / info['fname']
+            info['repo_fpath'] = self.repodir / info['fname']
             self.staging_infos.append(info)
 
         if 1:
@@ -302,6 +354,9 @@ class TemplateApplier:
             if not repo_fpath.exists():
                 stats['missing'].append(repo_fpath)
                 tasks['copy'].append((stage_fpath, repo_fpath))
+                stage_text = stage_fpath.read_text()
+                difftext = xdev.difftext('', stage_text, colored=1)
+                print(difftext[:10000])
                 print(f'Does not exist repo_fpath={repo_fpath}')
             elif info['overwrite']:
                 print(f'repo_fpath={repo_fpath}')
@@ -315,9 +370,12 @@ class TemplateApplier:
                 if difftext:
                     tasks['copy'].append((stage_fpath, repo_fpath))
                     stats['dirty'].append(repo_fpath)
-                    print(difftext)
+                    print(difftext[:10000])
                 else:
                     stats['clean'].append(repo_fpath)
+            if 'x' in info.get('perms', ''):
+                # todo chmod
+                pass
         print('stats = {}'.format(ub.repr2(stats, nl=2)))
         return stats, tasks
 
@@ -411,7 +469,7 @@ class TemplateApplier:
         return text
 
     def rotate_secrets(self):
-        setup_secrets_fpath = self.repo_dpath / 'dev/setup_secrets.sh'
+        setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
         if 'erotemic' in self.config['tags']:
             environ_export = 'setup_package_environs_github_erotemic'
             upload_secret_cmd = 'upload_github_secrets'
@@ -428,7 +486,7 @@ class TemplateApplier:
         script = cmd_queue.Queue.create()
         script.submit(ub.codeblock(
             f'''
-            cd {self.repo_dpath}
+            cd {self.repodir}
             source {setup_secrets_fpath}
             {environ_export}
             load_secrets
