@@ -216,6 +216,19 @@ class TemplateApplier:
         pass
 
     def setup_initial_files(self):
+        repo_dpath = self.config['repodir']
+        pkg_fpath = None
+        if pkg_fpath is None:
+            pkg_name = self.config['pkgname']
+            pkg_fpath = repo_dpath / pkg_name
+
+        package_structure = [
+            pkg_fpath / '__init__.py',
+            pkg_fpath / '__main__.py',
+        ]
+        for fpath in package_structure:
+            pass
+
         if self.config['is_new']:
             create_new_repo_info = ub.codeblock(
                 f'''
@@ -224,7 +237,9 @@ class TemplateApplier:
                 # API call
                 # https://github.com/new
 
-                gh repo create {self.repo_name} [flags]
+                git init
+
+                gh repo create {self.repo_name} --public
 
                 # https://cli.github.com/manual/gh_repo_create
                 ''')
