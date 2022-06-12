@@ -1,7 +1,7 @@
 The xcookie Module
 ==================
 
-.. ..  |CircleCI| |Travis| |GitlabCIPipeline| |GitlabCICoverage| |Appveyor| |Codecov| |Pypi| |Downloads| |ReadTheDocs|
+.. ..  |CircleCI| |GitlabCIPipeline| |GitlabCICoverage| |Appveyor| |Codecov| |Pypi| |Downloads| |ReadTheDocs|
 
 |GithubActions| |ReadTheDocs| |Pypi| |Downloads| |Codecov|
 
@@ -39,18 +39,12 @@ The ``xcookie`` module.
     .. .. |CircleCI| image:: https://circleci.com/gh/Erotemic/xcookie.svg?style=svg
     ..    :target: https://circleci.com/gh/Erotemic/xcookie
 
-    .... |Travis| image:: https://img.shields.io/travis/Erotemic/xcookie/master.svg?label=Travis%20CI
-    ..   :target: https://travis-ci.org/Erotemic/xcookie
-
     .... |Codecov| image:: https://codecov.io/github/Erotemic/xcookie/badge.svg?branch=master&service=github
     ..   :target: https://codecov.io/github/Erotemic/xcookie?branch=master
 
 
 .. |CircleCI| image:: https://circleci.com/gh/Erotemic/xcookie.svg?style=svg
     :target: https://circleci.com/gh/Erotemic/xcookie
-
-.. |Travis| image:: https://img.shields.io/travis/Erotemic/xcookie/main.svg?label=Travis%20CI
-   :target: https://travis-ci.org/Erotemic/xcookie?branch=main
 
 .. |Appveyor| image:: https://ci.appveyor.com/api/projects/status/github/Erotemic/xcookie?branch=main&svg=True
    :target: https://ci.appveyor.com/project/Erotemic/xcookie/branch/main

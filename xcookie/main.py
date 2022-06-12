@@ -223,11 +223,19 @@ class TemplateApplier:
             pkg_fpath = repo_dpath / pkg_name
 
         package_structure = [
+            repo_dpath / 'CHANGELOG.md',
             pkg_fpath / '__init__.py',
             pkg_fpath / '__main__.py',
         ]
+        missing = []
         for fpath in package_structure:
-            pass
+            if not fpath.exists():
+                missing.append(fpath)
+
+        if missing:
+            print('missing = {}'.format(ub.repr2(missing, nl=1)))
+            if self.config.confirm('Make initial files?'):
+                pass
 
         if self.config['is_new']:
             create_new_repo_info = ub.codeblock(
