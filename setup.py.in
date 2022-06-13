@@ -208,13 +208,24 @@ VERSION = parse_version('xcookie/__init__.py')
 
 if __name__ == '__main__':
     setupkw = {}
-    # setupkw['entry_points'] = {
-    #     # the console_scripts entry point creates the package CLI
-    #     'console_scripts': [
-    #         # '{SCRIPT_NAME}={MODPATH}:{CALLNAME}',
-    #         'xcookie = xcookie.__main__:main'
-    #     ]
-    # }
+
+    if 0:
+        setupkw['entry_points'] = {
+            # the console_scripts entry point creates the package CLI
+            'console_scripts': [
+                # '{SCRIPT_NAME}={MODPATH}:{CALLNAME}',
+                'xcookie = xcookie.__main__:main'
+            ]
+        }
+
+    setupkw['install_requires'] = parse_requirements('requirements/runtime.txt')
+    setupkw['extras_require'] = {
+        'all': parse_requirements('requirements.txt'),
+        'tests': parse_requirements('requirements/tests.txt'),
+        'optional': parse_requirements('requirements/optional.txt'),
+        # 'headless': parse_requirements('requirements/headless.txt'),
+        # 'graphics': parse_requirements('requirements/graphics.txt'),
+    }
 
     setup(
         name=NAME,
