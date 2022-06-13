@@ -191,7 +191,7 @@ jobs:
         # Get path to installed package
         MOD_DPATH=$(python -c "import xcookie, os; print(os.path.dirname(xcookie.__file__))")
         echo "MOD_DPATH = $MOD_DPATH"
-        python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pypackage.toml --cov-report term --cov=xcookie $MOD_DPATH ../tests
+        python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov=xcookie $MOD_DPATH ../tests
         mv .coverage "../.coverage.$WORKSPACE_DNAME"
         cd ..
         # Move coverage file to a new name
