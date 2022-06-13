@@ -3,6 +3,7 @@
 # python ~/local/tools/supported_python_versions_pip.py ubelt
 # python ~/local/tools/supported_python_versions_pip.py scriptconfig
 # python ~/local/tools/supported_python_versions_pip.py toml
+# python ~/local/tools/supported_python_versions_pip.py rich
 
 xdev>=0.3.0     ;                            python_version >= '3.6'    # Python 3.6+
 xdev>=0.2.0     ; python_version < '3.6' and python_version >= '2.7'    # Python 2.7
@@ -16,3 +17,6 @@ toml>=0.10.2    ; python_version < '2.7' and python_version >= '2.6'    # Python
 
 scriptconfig>=0.6.0     ;                            python_version >= '3.6'    # Python 3.6+
 scriptconfig>=0.5.0     ; python_version < '3.6' and python_version >= '2.7'    # Python 2.7
+
+rich>=12.4.4    ;                            python_version >= '3.8'    # Python 3.8+
+rich>=11.2.0    ; python_version < '3.8' and python_version >= '3.6'    # Python 3.6 
