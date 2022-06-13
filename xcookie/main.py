@@ -93,6 +93,14 @@ class XCookieConfig(scfg.Config):
             self['rotate_secrets'] = self['is_new']
 
     def confirm(self, msg, default=True):
+        """
+        Args:
+            msg (str): display to the user
+            default (bool): default value if non-interactive
+
+        Returns:
+            bool:
+        """
         if self['interative']:
             flag = Confirm.ask(msg)
         else:
@@ -309,6 +317,10 @@ class TemplateApplier:
             self.rotate_secrets()
 
     def lut(self, info):
+        """
+        Returns:
+            str: templated code
+        """
         fname = ub.Path(info['fname']).name
         if fname == 'CHANGELOG.md':
             return ub.codeblock(
@@ -445,6 +457,10 @@ class TemplateApplier:
     #     pass
 
     def build_pyproject(self):
+        """
+        Returns:
+            str: templated code
+        """
         # data = toml.loads((self.template_dpath / 'pyproject.toml').read_text())
         # print('data = {}'.format(ub.repr2(data, nl=5)))
         pyproj_config = ub.AutoDict()
