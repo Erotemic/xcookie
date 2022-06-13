@@ -1,5 +1,6 @@
 # This workflow will install Python dependencies, run tests and lint with a variety of Python versions
 # For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+# Based on ~/code/xcookie/.github/workflows/tests.yml.in
 
 name: Tests
 
@@ -16,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python 3.8
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v2
       with:
         python-version: 3.8
     - name: Install dependencies
@@ -37,7 +38,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python 3.8
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v2
       with:
         python-version: 3.8
     - name: Upgrade pip 
@@ -76,7 +77,7 @@ jobs:
 
 
     - name: Upload sdist artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v2
       with:
         name: wheels
         path: ./dist/*.tar.gz
@@ -90,10 +91,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
         python-version: 
-          - '3.5'
           - '3.6'
           - '3.7'
           - '3.8'
+          - '3.9'
+          - '3.10'
         arch: [auto]
         #cibw_build: [cp3*-*]
         #cibw_skip: ["*-win32"]
@@ -139,7 +141,7 @@ jobs:
     # Emulate aarch64 ppc64le s390x under linux
     - name: Set up QEMU
       if: runner.os == 'Linux' && matrix.arch != 'auto'
-      uses: docker/setup-qemu-action@v2
+      uses: docker/setup-qemu-action@v1
       with:
         platforms: all
 
@@ -159,7 +161,7 @@ jobs:
     #    CIBW_ARCHS_LINUX: ${{ matrix.arch }}
     
     # Setup Python environemtn for a pure wheel
-    - uses: actions/setup-python@v4
+    - uses: actions/setup-python@v2
       with:
         python-version: ${{ matrix.python-version }}
     
@@ -200,7 +202,7 @@ jobs:
 
     - name: Set up Python 3.8 to combine coverage Linux
       if: runner.os == 'Linux'
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v2
       with:
         python-version: 3.8
 
@@ -225,7 +227,7 @@ jobs:
         file: ./tests/coverage.xml
 
     - name: Upload wheels artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v2
       with:
         name: wheels
         path: ./wheelhouse/xcookie*.whl
@@ -241,7 +243,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Download wheels and sdist
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
         with:
           name: wheels
           path: dist
@@ -298,7 +300,7 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Download wheels and sdist
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
         with:
           name: wheels
           path: dist
