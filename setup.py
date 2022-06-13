@@ -215,6 +215,14 @@ if __name__ == '__main__':
             'xcookie = xcookie.__main__:main'
         ]
     }
+    setupkw['install_requires'] = parse_requirements('requirements/runtime.txt')
+    setupkw['extras_require'] = {
+        'all': parse_requirements('requirements.txt'),
+        'tests': parse_requirements('requirements/tests.txt'),
+        'optional': parse_requirements('requirements/optional.txt'),
+        # 'headless': parse_requirements('requirements/headless.txt'),
+        # 'graphics': parse_requirements('requirements/graphics.txt'),
+    }
 
     setup(
         name=NAME,
@@ -225,14 +233,6 @@ if __name__ == '__main__':
         url='<xcookie url>',
         long_description=parse_description(),
         long_description_content_type='text/x-rst',
-        install_requires=parse_requirements('requirements/runtime.txt'),
-        extras_require={
-            'all': parse_requirements('requirements.txt'),
-            'tests': parse_requirements('requirements/tests.txt'),
-            'optional': parse_requirements('requirements/optional.txt'),
-            # 'headless': parse_requirements('requirements/headless.txt'),
-            # 'graphics': parse_requirements('requirements/graphics.txt'),
-        },
         license='Apache 2',
         packages=find_packages('.'),
         package_data={
