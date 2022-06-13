@@ -1,2 +1,19 @@
 # Add requirements here, use the script for help (erotemic needs to publish this script)
-# python ~/local/tools/supported_python_versions_pip.py six
+# python ~/local/tools/supported_python_versions_pip.py pygments
+
+python ~/local/tools/supported_python_versions_pip.py ubelt
+python ~/local/tools/supported_python_versions_pip.py scriptconfig
+python ~/local/tools/supported_python_versions_pip.py toml
+
+xdev>=0.3.0     ;                            python_version >= '3.6'    # Python 3.6+
+xdev>=0.2.0     ; python_version < '3.6' and python_version >= '2.7'    # Python 2.7
+
+ubelt>=1.0.0     ;                            python_version >= '3.6'    # Python 3.6+
+ubelt>=0.8.1     ; python_version < '3.6' and python_version >= '2.7'    # Python 2.7
+
+# toml>=stdlib[0.10.2] is in the stdlib for python_version < '3.10' and python_version >= '3.10'    # Python 3.10
+toml>=0.9.6     ; python_version < '3.10' and python_version >= '2.7'    # Python 2.7
+toml>=0.10.2    ; python_version < '2.7' and python_version >= '2.6'    # Python 2.6
+
+scriptconfig>=0.6.0     ;                            python_version >= '3.6'    # Python 3.6+
+scriptconfig>=0.5.0     ; python_version < '3.6' and python_version >= '2.7'    # Python 2.7
