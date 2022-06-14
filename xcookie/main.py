@@ -176,6 +176,11 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
+            {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt'},
+            {'template': 1, 'overwrite': 0, 'fname': 'docs/source/conf.py'},
+
+            {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
+            {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
 
             {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x'},
             {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x'},
@@ -255,15 +260,17 @@ class TemplateApplier:
 
     def copy_staged_files(self):
         stats, tasks = self.gather_tasks()
-
         copy_tasks = tasks['copy']
         perm_tasks = tasks['perms']
+        mkdir_tasks = tasks['mkdir']
         task_summary = ub.map_vals(len, tasks)
         if any(task_summary.values()):
             print('task_summary = {}'.format(ub.repr2(task_summary, nl=1)))
             if self.config.confirm('Do you want to apply this patch?'):
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
+                    d.ensuredir()
+                for d in mkdir_tasks:
                     d.ensuredir()
                 for src, dst in copy_tasks:
                     shutil.copy2(src, dst)
@@ -369,31 +376,38 @@ class TemplateApplier:
                 tags = set(tags.split(','))
                 if not set(self.config['tags']).issuperset(tags):
                     continue
-            stage_fpath = self.staging_dpath / info['fname']
-            stage_fpath.parent.ensuredir()
 
+            path_name = info['fname']
+            path_type = info.get('path_type', 'file')
+
+            stage_fpath = self.staging_dpath / path_name
             info['stage_fpath'] = stage_fpath
-            info['repo_fpath'] = self.repodir / info['fname']
-
-            dynamic = info.get('dynamic', '') or info.get('source', '') == 'dynamic'
-            if dynamic:
-                dynamic_var = info.get('dynamic', '')
-                if dynamic_var == '':
-                    text = self.lut(info)
-                else:
-                    text = getattr(self, dynamic_var)()
-                stage_fpath.write_text(text)
+            info['repo_fpath'] = self.repodir / path_name
+            info['path_type'] = path_type
+            if path_type == 'dir':
+                stage_fpath.ensuredir()
             else:
-                # dst_fname = info['fname']
-                in_fname = info.get('input_fname', info['fname'])
-                raw_fpath = self.template_dpath / in_fname
-                shutil.copy2(raw_fpath, stage_fpath)
-                if info['template']:
-                    xdev.sedfile(stage_fpath, 'xcookie', self.repo_name, verbose=0)
-                    author = ub.cmd('git config --global user.name')['out'].strip()
-                    author_email = ub.cmd('git config --global user.email')['out'].strip()
-                    xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
-                    xdev.sedfile(stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0)
+                stage_fpath.parent.ensuredir()
+                dynamic = info.get('dynamic', '') or info.get('source', '') == 'dynamic'
+                if dynamic:
+                    dynamic_var = info.get('dynamic', '')
+                    if dynamic_var == '':
+                        text = self.lut(info)
+                    else:
+                        text = getattr(self, dynamic_var)()
+                    stage_fpath.write_text(text)
+                else:
+                    in_fname = info.get('input_fname', path_name)
+                    raw_fpath = self.template_dpath / in_fname
+                    if not raw_fpath.exists():
+                        raise IOError(f'Template file: {raw_fpath=} does not exist')
+                    shutil.copy2(raw_fpath, stage_fpath)
+                    if info['template']:
+                        xdev.sedfile(stage_fpath, 'xcookie', self.repo_name, verbose=0)
+                        author = ub.cmd('git config --global user.name')['out'].strip()
+                        author_email = ub.cmd('git config --global user.email')['out'].strip()
+                        xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
+                        xdev.sedfile(stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0)
             self.staging_infos.append(info)
 
         if 1:
@@ -405,26 +419,34 @@ class TemplateApplier:
         tasks = {
             'copy': [],
             'perms': [],
+            'mkdir': [],
         }
         stats = {
             'missing': [],
             'modified': [],
             'dirty': [],
             'clean': [],
+            'missing_dir': [],
         }
         for info in self.staging_infos:
             stage_fpath = info['stage_fpath']
             repo_fpath = info['repo_fpath']
             if not repo_fpath.exists():
-                stats['missing'].append(repo_fpath)
-                tasks['copy'].append((stage_fpath, repo_fpath))
-                stage_text = stage_fpath.read_text()
-                difftext = xdev.difftext('', stage_text[:10000], colored=1)
-                print(f'<NEW FPATH={repo_fpath}>')
-                print(difftext)
-                print(f'<END FPATH={repo_fpath}>')
+                if stage_fpath.is_dir():
+                    tasks['mkdir'].append(repo_fpath)
+                    stats['missing_dir'].append(repo_fpath)
+                else:
+                    stats['missing'].append(repo_fpath)
+                    tasks['copy'].append((stage_fpath, repo_fpath))
+                    stage_text = stage_fpath.read_text()
+                    difftext = xdev.difftext('', stage_text[:10000], colored=1)
+                    print(f'<NEW FPATH={repo_fpath}>')
+                    print(difftext)
+                    print(f'<END FPATH={repo_fpath}>')
             else:
                 assert stage_fpath.exists()
+                if stage_fpath.is_dir():
+                    continue
                 repo_text = repo_fpath.read_text()
                 stage_text = stage_fpath.read_text()
                 if stage_text.strip() == repo_text.strip():
@@ -587,6 +609,34 @@ class TemplateApplier:
 
             script.rprint()
             print('FIXME: for now, you need to manually execute this')
+
+    def _docs_quickstart():
+        # Probably just need to copy/paste the conf.py
+        r"""
+        REPO_NAME=xcookie
+        REPO_DPATH=$HOME/code/$REPO_NAME
+        AUTHOR=$(git config --global user.name)
+        cd $REPO_DPATH/docs
+        sphinx-quickstart -q --sep \
+            --project="$REPO_NAME" \
+            --author="$AUTHOR" \
+            --ext-autodoc \
+            --ext-viewcode \
+            --ext-intersphinx \
+            --ext-todo \
+            --extensions=sphinx.ext.autodoc,sphinx.ext.viewcode,sphinx.ext.napoleon,sphinx.ext.intersphinx,sphinx.ext.todo,sphinx.ext.autosummary \
+            "$REPO_DPATH/docs"
+
+        # THEN NEED TO:
+        REPO_NAME=kwarray
+        REPO_DPATH=$HOME/code/$REPO_NAME
+        MOD_DPATH=$REPO_DPATH/$REPO_NAME
+        sphinx-apidoc -f -o "$REPO_DPATH/docs/source"  "$MOD_DPATH" --separate
+        cd "$REPO_DPATH/docs"
+        make html
+
+        """
+        pass
 
 
 def main():
