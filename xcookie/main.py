@@ -631,6 +631,13 @@ class TemplateApplier:
     def _docs_quickstart():
         # Probably just need to copy/paste the conf.py
         r"""
+
+        TODO:
+            - [ ] Auto-edit the index.py to include the magic reference to `__init__`
+            - [ ] If this is a utility library, populate the "usefulness section"
+            - [ ] Try and find out how to auto-expand the toc tree
+            - [ ] Auto-run the sphinx-apidoc for the user
+
         REPO_NAME=xcookie
         REPO_DPATH=$HOME/code/$REPO_NAME
         AUTHOR=$(git config --global user.name)
@@ -653,6 +660,22 @@ class TemplateApplier:
         cd "$REPO_DPATH/docs"
         make html
 
+        The user will need to enable the repo on their readthedocs account:
+        https://readthedocs.org/dashboard/import/manual/?
+
+        To enable the read-the-docs go to https://readthedocs.org/dashboard/ and login
+
+        Make sure you have a .readthedocs.yml file
+
+        Click import project: (for github you can select, but gitlab you need to import manually)
+            Set the Repository NAME: $REPO_NAME
+            Set the Repository URL: $REPO_URL
+
+        For gitlab you also need to setup an integrations and add gitlab incoming webhook
+        Then go to $REPO_URL/hooks and add the URL
+
+        Will also need to activate the main branch:
+            https://readthedocs.org/projects/xcookie/versions/
         """
         pass
 
