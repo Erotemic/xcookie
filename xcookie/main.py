@@ -16,6 +16,12 @@ ExampleUsage:
 
     # Create this repo
     python -m xcookie.main --repo_name=xcookie --repodir=$HOME/code/xcookie --tags="erotemic,github,purepy"
+
+    # Create a new python repo
+    python -m xcookie.main --repo_name=cookiecutter_purepy --repodir=$HOME/code/cookiecutter_purepy --tags="github,purepy"
+
+    # Create a new binary repo
+    python -m xcookie.main --repo_name=cookiecutter_binpy --repodir=$HOME/code/cookiecutter_binpy --tags="github,binpy,gdal"
 """
 import toml
 import shutil
@@ -57,6 +63,8 @@ class XCookieConfig(scfg.Config):
                 "kitware" - this is an kitware repo
                 "pyutils" - this is an pyutils repo
                 "purepy" - this is a pure python repo
+                "gdal" - add in our gdal hack # TODO
+                "cv2" - enable the headless hack # TODO
             ''')),
     }
 
@@ -329,6 +337,8 @@ class TemplateApplier:
         self.copy_staged_files()
         if self.config['rotate_secrets']:
             self.rotate_secrets()
+
+        self.print_help_tips()
 
     def lut(self, info):
         """
@@ -627,6 +637,26 @@ class TemplateApplier:
 
             script.rprint()
             print('FIXME: for now, you need to manually execute this')
+
+    def print_help_tips(self):
+        text = ub.codeblock(
+            f'''
+            Things that xcookie might eventually do that you should do for
+            yourself for now:
+
+            * Add typing to the module
+
+                # Generate stubs and check them
+                xdev doctypes {self.repo_name} && mypy {self.repo_name}
+
+                # Make sure you add the following to setup.py
+                package_data={{
+                    '{self.repo_name}': ['py.typed', '*.pyi'],
+                }},
+
+
+            ''')
+        print(text)
 
     def _docs_quickstart():
         # Probably just need to copy/paste the conf.py

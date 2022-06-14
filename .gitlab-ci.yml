@@ -120,8 +120,8 @@ stages:
 
     before_script:
         - *_setup_virtualenv_template
-        - pip install .[tests-strict]
-        #- pip install .[tests-strict,headless-strict]
+        - pip install .[tests-strict]                   # xcookie +COMMENT_IF(cv2)
+        #- pip install .[tests-strict,headless-strict]  # xcookie +UNCOMMENT_IF(cv2)
 
 
 .test_full_strict_template: &test_full_strict_template
@@ -131,8 +131,8 @@ stages:
 
     before_script:
         - *_setup_virtualenv_template
-        - pip install .[all-strict]
-        #- pip install .[all-strict,headless-strict]
+        - pip install .[all-strict]                   # xcookie +COMMENT_IF(cv2)
+        #- pip install .[all-strict,headless-strict]  # xcookie +UNCOMMENT_IF(cv2)
 
 .test_minimal_loose_template: &test_minimal_loose_template
     # Tags define which runners will accept which jobs
@@ -141,8 +141,8 @@ stages:
 
     before_script:
         - *_setup_virtualenv_template
-        - pip install .[tests]
-        #- pip install .[tests,headless]
+        - pip install .[tests]            # xcookie +COMMENT_IF(cv2)
+        #- pip install .[tests,headless]  # xcookie +UNCOMMENT_IF(cv2)
 
 
 .test_full_loose_template: &test_full_loose_template
@@ -152,8 +152,8 @@ stages:
 
     before_script:
         - *_setup_virtualenv_template
-        - pip install .[all]  
-        #- pip install .[all,headless]  
+        - pip install .[all]            # xcookie +COMMENT_IF(cv2)
+        #- pip install .[all,headless]  # xcookie +UNCOMMENT_IF(cv2)
 
 
 
