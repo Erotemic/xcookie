@@ -41,6 +41,12 @@ class XCookieConfig(scfg.Config):
 
         'interative': scfg.Value(True),
 
+        'regen': scfg.Value(None, help=ub.paragraph(
+            '''
+            if specified, any modified template file that matches this pattern
+            will be considered for re-write
+            ''')),
+
         'tags': scfg.Value('auto', nargs='*', help=ub.paragraph(
             '''
             Tags modify what parts of the template are used.
@@ -428,6 +434,12 @@ class TemplateApplier:
             'clean': [],
             'missing_dir': [],
         }
+
+        if self.config['regen'] is not None:
+            regen_pat = xdev.Pattern.coerce(self.config['regen'])
+        else:
+            regen_pat = None
+
         for info in self.staging_infos:
             stage_fpath = info['stage_fpath']
             repo_fpath = info['repo_fpath']
@@ -454,7 +466,13 @@ class TemplateApplier:
                 else:
                     difftext = xdev.difftext(repo_text, stage_text, colored=1)
                 if difftext:
-                    if info['overwrite']:
+                    want_rewrite = info['overwrite']
+                    if not want_rewrite:
+                        if regen_pat is not None:
+                            if regen_pat.search(info['fname']):
+                                want_rewrite = True
+
+                    if want_rewrite:
                         tasks['copy'].append((stage_fpath, repo_fpath))
                         stats['dirty'].append(repo_fpath)
                         print(f'<DIFF FOR repo_fpath={repo_fpath}>')
