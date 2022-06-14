@@ -74,7 +74,9 @@ def parse_requirements(fname='requirements.txt', with_version=False):
 
     Args:
         fname (str): path to requirements file
-        with_version (bool, default=False): if true include version specs
+        with_version (bool | str, default=False):
+            If true include version specs.
+            If strict, then pin to the minimum version.
 
     Returns:
         List[str]: list of requirements items
@@ -143,7 +145,16 @@ def parse_requirements(fname='requirements.txt', with_version=False):
             for info in parse_require_file(require_fpath):
                 parts = [info['package']]
                 if with_version and 'version' in info:
-                    parts.extend(info['version'])
+                    if with_version == 'strict':
+                        print(f'with_version={with_version}')
+                        # In strict mode, we pin to the minimum version
+                        print(info['version'])
+                        if info['version']:
+                            # Only replace the first >= instance
+                            verstr = ''.join(info['version']).replace('>=', '==', 1)
+                            parts.append(verstr)
+                    else:
+                        parts.extend(info['version'])
                 if not sys.version.startswith('3.4'):
                     # apparently package_deps are broken in 3.4
                     plat_deps = info.get('platform_deps')

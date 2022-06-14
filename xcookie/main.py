@@ -169,7 +169,7 @@ class TemplateApplier:
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
             {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt', 'tags': 'binpy', 'input_fname': 'CMakeLists.txt.in'},
 
-            {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh'},
+            {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh', 'perms': 'x'},
             {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt'},  # 'dynamic': 'build_requirements'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/graphics.txt', 'tags': 'graphics'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/headless.txt', 'tags': 'graphics'},
@@ -179,14 +179,15 @@ class TemplateApplier:
 
             {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x'},
             {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x'},
-            {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh', 'perms': 'x'},
-            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py', 'perms': 'x'},
+            {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh', 'perms': 'x', 'tags': 'binpy'},
+            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py', 'perms': 'x', 'tags': 'binpy', 'input_fname': 'run_tests.binpy.py.in'},
+            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py', 'perms': 'x', 'tags': 'purepy', 'input_fname': 'run_tests.purepy.py.in'},
             {'template': 1, 'overwrite': 0, 'fname': 'setup.py', 'input_fname': 'setup.py.in', 'perms': 'x'},
 
             {'template': 1, 'overwrite': 0, 'fname': 'README.rst'},
             {'source': 'dynamic', 'overwrite': 0, 'fname': 'CHANGELOG.md'},
             {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__init__.py'},
-            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__main__.py'},
+            # {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__main__.py'},
             {'source': 'dynamic', 'overwrite': 0, 'fname': 'tests/test_import.py'},
         ]
         if 0:
