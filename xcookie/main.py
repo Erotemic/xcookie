@@ -28,9 +28,12 @@ import shutil
 import ubelt as ub
 import tempfile
 import scriptconfig as scfg
-from rich.prompt import Confirm
 import xdev
 import os
+
+
+class SkipFile(Exception):
+    pass
 
 
 class XCookieConfig(scfg.Config):
@@ -45,7 +48,7 @@ class XCookieConfig(scfg.Config):
 
         'is_new': scfg.Value('auto'),
 
-        'interative': scfg.Value(True),
+        'interactive': scfg.Value(True),
 
         'regen': scfg.Value(None, help=ub.paragraph(
             '''
@@ -115,7 +118,8 @@ class XCookieConfig(scfg.Config):
         Returns:
             bool:
         """
-        if self['interative']:
+        if self['interactive']:
+            from rich.prompt import Confirm
             flag = Confirm.ask(msg)
         else:
             flag = default
@@ -159,6 +163,7 @@ class TemplateApplier:
         Take stock of the files in the template repo and ensure they all have
         appropriate properties.
         """
+        from xcookie import rc
 
         rel_mod_dpath = ub.Path(self.config['mod_name'])
         # mod_dpath = self.config['repodir'] / rel_mod_dpath
@@ -176,14 +181,23 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'pyproject.toml', 'dynamic': 'build_pyproject'},
 
             {'template': 0, 'overwrite': 1, 'fname': '.github/dependabot.yml', 'tags': 'github'},
-            {'template': 0, 'overwrite': 1, 'fname': '.github/workflows/test_binaries.yml', 'tags': 'binpy,github', 'input_fname': '.github/workflows/test_binaries.yml.in'},
-            {'template': 1, 'overwrite': 1, 'fname': '.github/workflows/tests.yml', 'tags': 'purepy,github', 'input_fname': '.github/workflows/tests.yml.in'},
 
-            {'template': 1, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab'},
+            {'template': 0, 'overwrite': 1, 'fname': '.github/workflows/test_binaries.yml',
+             'tags': 'binpy,github',
+             'input_fname': '.github/workflows/test_binaries.yml.in'},
+
+            {'template': 1, 'overwrite': 1, 'fname': '.github/workflows/tests.yml',
+             'tags': 'purepy,github', 'input_fname': '.github/workflows/tests.yml.in'},
+
+            {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab'},
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
-            {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt', 'tags': 'binpy', 'input_fname': 'CMakeLists.txt.in'},
 
-            {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh', 'perms': 'x'},
+            {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt',
+             'tags': 'binpy',
+             'input_fname': rc.resource_fpath('CMakeLists.txt.in')},
+
+            # {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh', 'perms': 'x'},
+
             {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt'},  # 'dynamic': 'build_requirements'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/graphics.txt', 'tags': 'graphics'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/headless.txt', 'tags': 'graphics'},
@@ -192,16 +206,26 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt'},
             {'template': 1, 'overwrite': 0, 'fname': 'docs/source/conf.py'},
+            {'template': 0, 'overwrite': 0, 'fname': 'docs/source/index.rst', 'dynamic': '_build_docs_index'},
 
-            {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
-            {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
+            # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
+            # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
 
             {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x'},
             {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x'},
             {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh', 'perms': 'x', 'tags': 'binpy'},
-            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py', 'perms': 'x', 'tags': 'binpy', 'input_fname': 'run_tests.binpy.py.in'},
-            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py', 'perms': 'x', 'tags': 'purepy', 'input_fname': 'run_tests.purepy.py.in'},
-            {'template': 1, 'overwrite': 0, 'fname': 'setup.py', 'input_fname': 'setup.py.in', 'perms': 'x'},
+
+            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py',
+             'perms': 'x', 'tags': 'binpy',
+             'input_fname': rc.resource_fpath('run_tests.binpy.py.in')},
+
+            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py',
+             'perms': 'x', 'tags': 'purepy',
+             'input_fname': rc.resource_fpath('run_tests.purepy.py.in')},
+
+            {'template': 1, 'overwrite': 0, 'fname': 'setup.py',
+             'input_fname': rc.resource_fpath('setup.py.in'),
+             'perms': 'x'},
 
             {'template': 1, 'overwrite': 0, 'fname': 'README.rst'},
             {'source': 'dynamic', 'overwrite': 0, 'fname': 'CHANGELOG.md'},
@@ -383,51 +407,170 @@ class TemplateApplier:
         else:
             raise KeyError(fname)
 
+    def _stage_file(self, info):
+        """
+        Example:
+            >>> from xcookie.main import *  # NOQA
+            >>> dpath = ub.Path.appdir('xcookie/tests/test-stage').delete().ensuredir()
+            >>> kwargs = {
+            >>>     'repodir': dpath / 'testrepo',
+            >>>     'tags': ['gitlab', 'kitware', 'purepy', 'cv2'],
+            >>>     'rotate_secrets': False,
+            >>>     'is_new': False,
+            >>>     'interactive': False,
+            >>> }
+            >>> config = XCookieConfig(cmdline=0, data=kwargs)
+            >>> config.normalize()
+            >>> print('config = {}'.format(ub.repr2(dict(config), nl=1)))
+            >>> self = TemplateApplier(config)
+            >>> self._build_template_registry()
+            >>> info = [d for d in self.template_infos if d['fname'] == 'setup.py'][0]
+            >>> info = [d for d in self.template_infos if d['fname'] == '.gitlab-ci.yml'][0]
+            >>> self._stage_file(info)
+        """
+        print('info = {!r}'.format(info))
+        tags = info.get('tags', None)
+        if tags:
+            tags = set(tags.split(','))
+            if not set(self.config['tags']).issuperset(tags):
+                raise SkipFile
+
+        path_name = info['fname']
+        path_type = info.get('path_type', 'file')
+
+        stage_fpath = self.staging_dpath / path_name
+        info['stage_fpath'] = stage_fpath
+        info['repo_fpath'] = self.repodir / path_name
+        info['path_type'] = path_type
+        if path_type == 'dir':
+            stage_fpath.ensuredir()
+        else:
+            stage_fpath.parent.ensuredir()
+            dynamic = info.get('dynamic', '') or info.get('source', '') == 'dynamic'
+            if dynamic:
+                dynamic_var = info.get('dynamic', '')
+                if dynamic_var == '':
+                    text = self.lut(info)
+                else:
+                    text = getattr(self, dynamic_var)()
+                stage_fpath.write_text(text)
+            else:
+                in_fname = info.get('input_fname', path_name)
+                raw_fpath = self.template_dpath / in_fname
+                if not raw_fpath.exists():
+                    raise IOError(f'Template file: {raw_fpath=} does not exist')
+                shutil.copy2(raw_fpath, stage_fpath)
+
+                self._apply_xcookie_directives(stage_fpath)
+
+                if info['template']:
+                    xdev.sedfile(stage_fpath, 'xcookie', self.repo_name, verbose=0)
+                    author = ub.cmd('git config --global user.name')['out'].strip()
+                    author_email = ub.cmd('git config --global user.email')['out'].strip()
+                    xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
+                    xdev.sedfile(stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0)
+        return info
+
+    def _apply_xcookie_directives(self, stage_fpath):
+        text = stage_fpath.read_text()
+        from xcookie.directive import DirectiveExtractor
+        namespace = 'xcookie'
+        commands = ['UNCOMMENT_IF', 'COMMENT_IF']
+        extractor = DirectiveExtractor(namespace, commands)
+
+        import re
+        def comment_line(line):
+            """
+
+            line = '       #- pip install .[tests-strict,headless-strict]  # testrepo: +UNCOMMENT_IF(cv2)'
+            uncomment_line(line)
+
+            cases = [
+                '   foobar',
+                'foobar',
+                '   def fds(): # hello',
+            ]
+            for line in cases:
+                cline = comment_line(line)
+                uline = uncomment_line(cline)
+                print(f'line={line}')
+                print(f'cline={cline}')
+                print(f'uline={uline}')
+                assert uline == line
+            cases = [
+                '#   foobar',
+                '   #  foobar',
+                '   #foobar',
+                '#foobar',
+                '#  foobar',
+                '# foobar',
+                '#   def fds(): # hello',
+                '   #def fds(): # hello',
+            ]
+            for line in cases:
+                uline = uncomment_line(cline)
+                cline = comment_line(line)
+                print(f'line={line}')
+                print(f'cline={cline}')
+                print(f'uline={uline}')
+            """
+            return re.sub(r'^(\s*)([^\s])', r'\g<1># \g<2>', line)
+
+        def uncomment_line(line):
+            return re.sub(r'^(\s*)#\s*', r'\g<1>', line, count=1)
+
+        def tags_satisfied(directive, tags):
+            value = tags.issuperset(set(directive.args))
+            return value
+
+        tags = set(self.config['tags'])
+        new_lines = []
+        did_work = 0
+        for line in text.split('\n'):
+            extracted = list(extractor.extract(line))
+            if 'COMMENT' in line:
+                print(f'line={line}')
+                print(f'extracted={extracted}')
+            if extracted:
+                for directive in extracted:
+                    action = None
+                    if directive.name == 'COMMENT_IF':
+                        value = tags_satisfied(directive, tags)
+                        if value:
+                            action = comment_line
+                            print(f'action={action}')
+                            did_work = 1
+                    if directive.name == 'UNCOMMENT_IF':
+                        value = tags_satisfied(directive, tags)
+                        if value:
+                            action = uncomment_line
+                            print(f'action={action}')
+                            did_work = 1
+                    if action is not None:
+                        print(f'directive.name={directive.name}')
+                        print(f'action={action}')
+                        print(f'old line={line}')
+                        line = action(line)
+                        print(f'new line={line}')
+            new_lines.append(line)
+
+        if did_work:
+            stage_fpath.write_text('\n'.join(new_lines))
+        print(f'did_work={did_work}')
+
     def stage_files(self):
         self.staging_infos = []
         for info in ub.ProgIter(self.template_infos, desc='staging'):
-            print('info = {!r}'.format(info))
-            tags = info.get('tags', None)
-            if tags:
-                tags = set(tags.split(','))
-                if not set(self.config['tags']).issuperset(tags):
-                    continue
-
-            path_name = info['fname']
-            path_type = info.get('path_type', 'file')
-
-            stage_fpath = self.staging_dpath / path_name
-            info['stage_fpath'] = stage_fpath
-            info['repo_fpath'] = self.repodir / path_name
-            info['path_type'] = path_type
-            if path_type == 'dir':
-                stage_fpath.ensuredir()
+            try:
+                info = self._stage_file(info)
+            except SkipFile:
+                continue
             else:
-                stage_fpath.parent.ensuredir()
-                dynamic = info.get('dynamic', '') or info.get('source', '') == 'dynamic'
-                if dynamic:
-                    dynamic_var = info.get('dynamic', '')
-                    if dynamic_var == '':
-                        text = self.lut(info)
-                    else:
-                        text = getattr(self, dynamic_var)()
-                    stage_fpath.write_text(text)
-                else:
-                    in_fname = info.get('input_fname', path_name)
-                    raw_fpath = self.template_dpath / in_fname
-                    if not raw_fpath.exists():
-                        raise IOError(f'Template file: {raw_fpath=} does not exist')
-                    shutil.copy2(raw_fpath, stage_fpath)
-                    if info['template']:
-                        xdev.sedfile(stage_fpath, 'xcookie', self.repo_name, verbose=0)
-                        author = ub.cmd('git config --global user.name')['out'].strip()
-                        author_email = ub.cmd('git config --global user.email')['out'].strip()
-                        xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
-                        xdev.sedfile(stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0)
-            self.staging_infos.append(info)
+                self.staging_infos.append(info)
 
         if 1:
             import pandas as pd
+            print('self.staging_infos = {}'.format(ub.repr2(self.staging_infos, nl=1)))
             df = pd.DataFrame(self.staging_infos)
             print(df)
 
@@ -461,7 +604,7 @@ class TemplateApplier:
                     stats['missing'].append(repo_fpath)
                     tasks['copy'].append((stage_fpath, repo_fpath))
                     stage_text = stage_fpath.read_text()
-                    difftext = xdev.difftext('', stage_text[:10000], colored=1)
+                    difftext = xdev.difftext('', stage_text[:1000], colored=1)
                     print(f'<NEW FPATH={repo_fpath}>')
                     print(difftext)
                     print(f'<END FPATH={repo_fpath}>')
@@ -486,7 +629,7 @@ class TemplateApplier:
                         tasks['copy'].append((stage_fpath, repo_fpath))
                         stats['dirty'].append(repo_fpath)
                         print(f'<DIFF FOR repo_fpath={repo_fpath}>')
-                        print(difftext[:10000])
+                        print(difftext)
                         print(f'<END DIFF repo_fpath={repo_fpath}>')
                     else:
                         stats['modified'].append(repo_fpath)
@@ -550,6 +693,12 @@ class TemplateApplier:
                 for plat in req_commands.keys():
                     cmd = ' && '.join(req_commands[plat])
                     cibw[plat]['before-all'] = cmd
+        else:
+            pyproj_config['build-system']['requires'] = [
+                "setuptools>=41.0.1",
+                # setuptools_scm[toml]
+                "wheel>=0.37.1",
+            ]
 
         WITH_PYTEST_INI = 1
         if WITH_PYTEST_INI:
@@ -593,6 +742,8 @@ class TemplateApplier:
                     "*/setup.py"
                 ]
                 ''').format(REPO_NAME=self.repo_name)))
+
+        pyproj_config['tool']['mypy']['ignore_missing_imports'] = True
 
         WITH_XCOOKIE = 1
         if WITH_XCOOKIE:
@@ -657,6 +808,69 @@ class TemplateApplier:
 
             ''')
         print(text)
+
+    def _build_docs_index(self):
+        parts = []
+
+        tags = set(self.config['tags'])
+        mod_name = self.config['mod_name']
+
+        if {'gitlab', 'kitware'}.issubset(tags):
+            parts.append(ub.codeblock(
+                f'''
+                :gitlab_url: https://gitlab.kitware.com/computer-vision/{mod_name}
+                '''))
+
+        logo_part = ub.codeblock(
+            '''
+            .. The large version wont work because github strips rst image rescaling. https://i.imgur.com/AcWVroL.png
+                # TODO: Add a logo
+                .. image:: https://i.imgur.com/PoYIsWE.png
+                   :height: 100px
+                   :align: left
+            ''')
+
+        parts.append(logo_part)
+
+        title = f"Welcome to {mod_name}'s documentation!"
+        underline = '=' * len(title)
+        title_part = title + '\n' + underline
+        parts.append(title_part)
+
+        init_part = ub.codeblock(
+            f'''
+            .. The __init__ files contains the top-level documentation overview
+            .. automodule:: {mod_name}.__init__
+               :show-inheritance:
+            ''')
+        parts.append(init_part)
+
+        if 0:
+            usefulness_part = ub.codeblock(
+                '''
+                .. # Computed function usefulness
+                .. include:: function_usefulness.rst
+                ''')
+            parts.append(usefulness_part)
+
+        sidebar_part = ub.codeblock(
+            f'''
+            .. toctree::
+               :maxdepth: 5
+
+               {mod_name}
+
+
+            Indices and tables
+            ==================
+
+            * :ref:`genindex`
+            * :ref:`modindex`
+            ''')
+        parts.append(sidebar_part)
+
+        text = '\n\n'.join(parts)
+        return text
 
     def _docs_quickstart():
         # Probably just need to copy/paste the conf.py

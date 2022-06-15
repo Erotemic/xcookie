@@ -248,6 +248,12 @@ if __name__ == '__main__':
         packages=find_packages('.'),
         package_data={
             'xcookie': ['py.typed', '*.pyi'],
+            'xcookie.rc': [
+                'CMakeLists.txt.in',
+                'setup.py.in',
+                'run_tests.purepy.in',
+                'run_tests.binpy.in',
+            ],
         },
         python_requires='>=3.6',
         classifiers=[
