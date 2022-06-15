@@ -16,7 +16,6 @@ Notes:
     sphinx-apidoc -f -o ~/code/xcookie/docs/source ~/code/xcookie/xcookie --separate
     make html
 
-
     Also:
         To turn on PR checks
 
@@ -72,7 +71,6 @@ def parse_version(fpath):
     visitor.visit(pt)
     return visitor.version
 
-language = 'en'
 project = 'xcookie'
 copyright = '2022, Jon Crall'
 author = 'Jon Crall'
@@ -99,6 +97,7 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
     'sphinx.ext.autosummary',
+    # 'myst_parser',  # TODO
 ]
 
 todo_include_todos = True
@@ -118,10 +117,24 @@ intersphinx_mapping = {
     # 'xxhash': ('https://pypi.org/project/xxhash/', None),
     # 'pygments': ('https://pygments.org/docs/', None),
     # 'tqdm': ('https://tqdm.github.io/', None),
+    # Requries that the repo have objects.inv
+    'kwarray': ('https://kwarray.readthedocs.io/en/latest/', None),
+    'kwimage': ('https://kwimage.readthedocs.io/en/latest/', None),
+    # 'kwplot': ('https://kwplot.readthedocs.io/en/latest/', None),
+    'ndsampler': ('https://ndsampler.readthedocs.io/en/latest/', None),
+    'ubelt': ('https://ubelt.readthedocs.io/en/latest/', None),
+    'xdoctest': ('https://xdoctest.readthedocs.io/en/latest/', None),
+    'networkx': ('https://networkx.org/documentation/stable/', None),
+    'scriptconfig': ('https://scriptconfig.readthedocs.io/en/latest/', None),
+
 }
 __dev_note__ = """
 python -m sphinx.ext.intersphinx https://docs.python.org/3/objects.inv
-python -m sphinx.ext.intersphinx https://xcookie.readthedocs.io/en/latest/objects.inv
+python -m sphinx.ext.intersphinx https://kwcoco.readthedocs.io/en/latest/objects.inv
+python -m sphinx.ext.intersphinx https://networkx.org/documentation/stable/objects.inv
+python -m sphinx.ext.intersphinx https://kwarray.readthedocs.io/en/latest/objects.inv
+python -m sphinx.ext.intersphinx https://kwimage.readthedocs.io/en/latest/objects.inv
+python -m sphinx.ext.intersphinx https://ubelt.readthedocs.io/en/latest/objects.inv
 python -m sphinx.ext.intersphinx https://networkx.org/documentation/stable/objects.inv
 """
 
@@ -142,7 +155,7 @@ master_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -192,7 +205,7 @@ html_static_path = ['_static']
 # -- Options for HTMLHelp output ---------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'UBeltdoc'
+htmlhelp_basename = 'xcookiedoc'
 
 
 # -- Options for LaTeX output ------------------------------------------------
