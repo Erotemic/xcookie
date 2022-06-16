@@ -22,6 +22,9 @@ ExampleUsage:
 
     # Create a new binary repo
     python -m xcookie.main --repo_name=cookiecutter_binpy --repodir=$HOME/code/cookiecutter_binpy --tags="github,binpy,gdal"
+
+    # Create a new binary gitlab kitware repo
+    python -m xcookie.main --repo_name=kwimage_ext --repodir=$HOME/code/kwimage_ext --tags="kitware,gitlab,binpy"
 """
 import toml
 import shutil
@@ -61,13 +64,12 @@ class XCookieConfig(scfg.Config):
             Tags modify what parts of the template are used.
             Valid tags are:
                 "binpy" - do we build binpy wheels?
-                "graphics" - do we need opencv / opencv-headless?
                 "erotemic" - this is an erotemic repo
                 "kitware" - this is an kitware repo
                 "pyutils" - this is an pyutils repo
                 "purepy" - this is a pure python repo
                 "gdal" - add in our gdal hack # TODO
-                "cv2" - enable the headless hack # TODO
+                "cv2" - enable the headless hack
             ''')),
     }
 
@@ -189,7 +191,10 @@ class TemplateApplier:
             {'template': 1, 'overwrite': 1, 'fname': '.github/workflows/tests.yml',
              'tags': 'purepy,github', 'input_fname': '.github/workflows/tests.yml.in'},
 
-            {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab'},
+            {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,purepy'},
+
+            {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,binpy',
+             'input_fname': rc.resource_fpath('gitlab-ci.binpy.yml.in')},
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
 
             {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt',
@@ -199,8 +204,8 @@ class TemplateApplier:
             # {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh', 'perms': 'x'},
 
             {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt'},  # 'dynamic': 'build_requirements'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/graphics.txt', 'tags': 'graphics'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/headless.txt', 'tags': 'graphics'},
+            {'template': 0, 'overwrite': 0, 'fname': 'requirements/graphics.txt', 'tags': 'cv2'},
+            {'template': 0, 'overwrite': 0, 'fname': 'requirements/headless.txt', 'tags': 'cv2'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
@@ -290,6 +295,9 @@ class TemplateApplier:
             xcookie_dpath = ub.Path('~/misc/templates/xcookie').expand()
         self.template_dpath = xcookie_dpath
         self.staging_dpath = ub.Path(self._tmpdir.name)
+        self.remote_info = {
+            'type': 'unknown'
+        }
 
     def setup(self):
         self._build_template_registry()
@@ -334,27 +342,50 @@ class TemplateApplier:
         # if missing:
         #     print('missing = {}'.format(ub.repr2(missing, nl=1)))
 
+        tags = set(self.config['tags'])
+        self.remote_info = {
+            'type': 'unknown'
+        }
+        if 'gitlab' in tags:
+            self.remote_info['type'] = 'gitlab'
+
+        if 'github' in tags:
+            self.remote_info['type'] = 'github'
+        if self.remote_info['type'] == 'gitlab':
+            if 'kitware' in tags:
+                self.remote_info['host'] = 'https://gitlab.kitware.com'
+                self.remote_info['group'] = 'computer-vision'  # hack
+        if self.remote_info['type'] == 'github':
+            if 'erotemic' in tags:
+                self.remote_info['host'] = 'https://github.com'
+                self.remote_info['group'] = 'Erotemic'  # hack
+        print(f'tags={tags}')
+        print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
+        assert self.remote_info['type'] != 'unknown'
+        self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
+
         if self.config['is_new']:
             create_new_repo_info = ub.codeblock(
                 f'''
-                # TODO:
-                # At least instructions on how to create a new repo, or maybe an
-                # API call
-                # https://github.com/new
-
+                TODO: call the APIS
                 git init
-
                 gh repo create {self.repo_name} --public
-
                 # https://cli.github.com/manual/gh_repo_create
                 ''')
             print(create_new_repo_info)
+            import cmd_queue
+            queue = cmd_queue.Queue.create(cwd=self.repodir)
             git_dpath = self.repodir / '.git'
             if not git_dpath.exists():
+                    queue.submit('git init')
+                    queue.sync().submit(f'git remote add origin {self.remote_info["url"]}')
+
+            if queue.jobs:
+                queue.rprint()
                 if self.config.confirm('Do git init?'):
-                    print('todo: not implemented')
-            # if self.config.confirm('Make initial files?'):
-            #     print('todo: not implemented')
+                    queue.run()
+
+
 
     def apply(self):
         self.vcs_checks()
@@ -428,7 +459,7 @@ class TemplateApplier:
             >>> info = [d for d in self.template_infos if d['fname'] == '.gitlab-ci.yml'][0]
             >>> self._stage_file(info)
         """
-        print('info = {!r}'.format(info))
+        # print('info = {!r}'.format(info))
         tags = info.get('tags', None)
         if tags:
             tags = set(tags.split(','))
@@ -528,9 +559,9 @@ class TemplateApplier:
         did_work = 0
         for line in text.split('\n'):
             extracted = list(extractor.extract(line))
-            if 'COMMENT' in line:
-                print(f'line={line}')
-                print(f'extracted={extracted}')
+            # if 'COMMENT' in line:
+            #     print(f'line={line}')
+            #     print(f'extracted={extracted}')
             if extracted:
                 for directive in extracted:
                     action = None
@@ -538,7 +569,7 @@ class TemplateApplier:
                         value = tags_satisfied(directive, tags)
                         if value:
                             action = comment_line
-                            print(f'action={action}')
+                            # print(f'action={action}')
                             did_work = 1
                     if directive.name == 'UNCOMMENT_IF':
                         value = tags_satisfied(directive, tags)
@@ -547,16 +578,15 @@ class TemplateApplier:
                             print(f'action={action}')
                             did_work = 1
                     if action is not None:
-                        print(f'directive.name={directive.name}')
-                        print(f'action={action}')
-                        print(f'old line={line}')
+                        # print(f'directive.name={directive.name}')
+                        # print(f'action={action}')
+                        # print(f'old line={line}')
                         line = action(line)
-                        print(f'new line={line}')
+                        # print(f'new line={line}')
             new_lines.append(line)
 
         if did_work:
             stage_fpath.write_text('\n'.join(new_lines))
-        print(f'did_work={did_work}')
 
     def stage_files(self):
         self.staging_infos = []
@@ -570,7 +600,7 @@ class TemplateApplier:
 
         if 1:
             import pandas as pd
-            print('self.staging_infos = {}'.format(ub.repr2(self.staging_infos, nl=1)))
+            # print('self.staging_infos = {}'.format(ub.repr2(self.staging_infos, nl=1)))
             df = pd.DataFrame(self.staging_infos)
             print(df)
 
@@ -915,8 +945,8 @@ class TemplateApplier:
             Set the Repository NAME: $REPO_NAME
             Set the Repository URL: $REPO_URL
 
-        For gitlab you also need to setup an integrations and add gitlab incoming webhook
-        Then go to $REPO_URL/hooks and add the URL
+        For gitlab you also need to setup an integrations and add gitlab
+        incoming webhook Then go to $REPO_URL/hooks and add the URL
 
         Will also need to activate the main branch:
             https://readthedocs.org/projects/xcookie/versions/
