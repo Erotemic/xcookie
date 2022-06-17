@@ -41,7 +41,7 @@ class SkipFile(Exception):
 
 class XCookieConfig(scfg.Config):
     default = {
-        'repodir': scfg.Value('.', help='path to the new or existing repo'),
+        'repodir': scfg.Value('.', help='path to the new or existing repo', position=1),
 
         'repo_name': scfg.Value(None, help='defaults to ``repodir.name``'),
         'mod_name': scfg.Value(None, help='The name of the importable Python module. defaults to ``repo_name``'),
@@ -300,6 +300,31 @@ class TemplateApplier:
         }
 
     def setup(self):
+        tags = set(self.config['tags'])
+        self.remote_info = {
+            'type': 'unknown'
+        }
+        if 'gitlab' in tags:
+            self.remote_info['type'] = 'gitlab'
+
+        if 'github' in tags:
+            self.remote_info['type'] = 'github'
+        if self.remote_info['type'] == 'gitlab':
+            if 'kitware' in tags:
+                self.remote_info['host'] = 'https://gitlab.kitware.com'
+                self.remote_info['group'] = 'computer-vision'  # hack
+        if self.remote_info['type'] == 'github':
+            if 'erotemic' in tags:
+                self.remote_info['host'] = 'https://github.com'
+                self.remote_info['group'] = 'Erotemic'  # hack
+        print(f'tags={tags}')
+        print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
+        assert self.remote_info['type'] != 'unknown'
+        self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name']])
+        self.remote_info['git_url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
+        self.remote_info['author'] = ub.cmd('git config --global user.name')['out'].strip()
+        self.remote_info['email'] = ub.cmd('git config --global user.email')['out'].strip()
+
         self._build_template_registry()
         self.stage_files()
         return self
@@ -341,29 +366,6 @@ class TemplateApplier:
         #         missing.append(fpath)
         # if missing:
         #     print('missing = {}'.format(ub.repr2(missing, nl=1)))
-
-        tags = set(self.config['tags'])
-        self.remote_info = {
-            'type': 'unknown'
-        }
-        if 'gitlab' in tags:
-            self.remote_info['type'] = 'gitlab'
-
-        if 'github' in tags:
-            self.remote_info['type'] = 'github'
-        if self.remote_info['type'] == 'gitlab':
-            if 'kitware' in tags:
-                self.remote_info['host'] = 'https://gitlab.kitware.com'
-                self.remote_info['group'] = 'computer-vision'  # hack
-        if self.remote_info['type'] == 'github':
-            if 'erotemic' in tags:
-                self.remote_info['host'] = 'https://github.com'
-                self.remote_info['group'] = 'Erotemic'  # hack
-        print(f'tags={tags}')
-        print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
-        assert self.remote_info['type'] != 'unknown'
-        self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
-
         if self.config['is_new']:
             create_new_repo_info = ub.codeblock(
                 f'''
@@ -377,15 +379,13 @@ class TemplateApplier:
             queue = cmd_queue.Queue.create(cwd=self.repodir)
             git_dpath = self.repodir / '.git'
             if not git_dpath.exists():
-                    queue.submit('git init')
-                    queue.sync().submit(f'git remote add origin {self.remote_info["url"]}')
+                queue.submit('git init')
+                queue.sync().submit(f'git remote add origin {self.remote_info["url"]}')
 
             if queue.jobs:
                 queue.rprint()
                 if self.config.confirm('Do git init?'):
                     queue.run()
-
-
 
     def apply(self):
         self.vcs_checks()
@@ -429,7 +429,13 @@ class TemplateApplier:
         elif fname == '__init__.py':
             return ub.codeblock(
                 f'''
+                """
+                Basic
+                """
                 __version__ = '0.0.1'
+                __author__ = '{self.remote_info['author']}'
+                __author_email__ = '{self.remote_info['email']}'
+                __url__ = '{self.remote_info['url']}'
 
                 __mkinit__ = """
                 mkinit {info['repo_fpath']}
@@ -697,6 +703,7 @@ class TemplateApplier:
                 "scikit-build>=0.9.0",
                 "numpy",
                 "ninja"
+                "cmake"
             ]
             pyproj_config['tool']['cibuildwheel'].update({
                 'build': "cp37-* cp38-* cp39-* cp310-*",
@@ -790,34 +797,42 @@ class TemplateApplier:
     def rotate_secrets(self):
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
         # dev/public_gpg_key
+        # if self.config.confirm('Ready to rotate secrets?'):
+        if 'erotemic' in self.config['tags']:
+            environ_export = 'setup_package_environs_github_erotemic'
+            upload_secret_cmd = 'upload_github_secrets'
+        elif 'pyutils' in self.config['tags']:
+            environ_export = 'setup_package_environs_github_pyutils'
+            upload_secret_cmd = 'upload_github_secrets'
+        elif 'kitware' in self.config['tags']:
+            environ_export = 'setup_package_environs_gitlab_kitware'
+            upload_secret_cmd = 'upload_gitlab_repo_secrets'
+        else:
+            raise Exception
+
+        import cmd_queue
+        script = cmd_queue.Queue.create(cwd=self.repodir)
+        script.submit(f'source {setup_secrets_fpath}')
+        script.sync().submit(f'{environ_export}')
+        # script.sync().submit('load_secrets')
+        script.sync().submit('export_encrypted_code_signing_keys')
+        script.sync().submit('git commit -am "Updated secrets"')
+        script.sync().submit(f'{upload_secret_cmd}')
+        # script.submit(ub.codeblock(
+        #     f'''
+        #     cd {self.repodir}
+        #     source {setup_secrets_fpath}
+        #     {environ_export}
+        #     load_secrets
+        #     export_encrypted_code_signing_keys
+        #     git commit -am "Updated secrets"
+        #     {upload_secret_cmd}
+        #     '''))
+        script.rprint()
+        # print('FIXME: for now, you need to manually execute this')
+        # print('Note: need to load_secrets before running this')
         if self.config.confirm('Ready to rotate secrets?'):
-            if 'erotemic' in self.config['tags']:
-                environ_export = 'setup_package_environs_github_erotemic'
-                upload_secret_cmd = 'upload_github_secrets'
-            elif 'pyutils' in self.config['tags']:
-                environ_export = 'setup_package_environs_github_pyutils'
-                upload_secret_cmd = 'upload_github_secrets'
-            elif 'kitware' in self.config['tags']:
-                environ_export = 'setup_package_environs_gitlab_kitware'
-                upload_secret_cmd = 'upload_gitlab_repo_secrets'
-            else:
-                raise Exception
-
-            import cmd_queue
-            script = cmd_queue.Queue.create()
-            script.submit(ub.codeblock(
-                f'''
-                cd {self.repodir}
-                source {setup_secrets_fpath}
-                {environ_export}
-                load_secrets
-                export_encrypted_code_signing_keys
-                git commit -am "Updated secrets"
-                {upload_secret_cmd}
-                '''))
-
-            script.rprint()
-            print('FIXME: for now, you need to manually execute this')
+            script.run()
 
     def print_help_tips(self):
         text = ub.codeblock(
