@@ -51,6 +51,8 @@ class XCookieConfig(scfg.Config):
 
         'is_new': scfg.Value('auto'),
 
+        'min_python': scfg.Value('3.7'),
+
         'interactive': scfg.Value(True),
 
         'regen': scfg.Value(None, help=ub.paragraph(
@@ -74,7 +76,6 @@ class XCookieConfig(scfg.Config):
     }
 
     def normalize(self):
-
         if self['repodir'] is None:
             self['repodir'] = ub.Path.cwd()
         else:
@@ -180,16 +181,36 @@ class TemplateApplier:
             # {'template': 1, 'overwrite': 1, 'fname': '.coveragerc'},
             {'template': 0, 'overwrite': 1, 'fname': '.readthedocs.yml'},
             # {'template': 0, 'overwrite': 1, 'fname': 'pytest.ini'},
-            {'template': 0, 'overwrite': 0, 'fname': 'pyproject.toml', 'dynamic': 'build_pyproject'},
+
+            {'template': 0, 'overwrite': 0, 'fname': 'pyproject.toml',
+             'dynamic': 'build_pyproject'},
+
+            {'template': 1, 'overwrite': 0, 'fname': 'setup.py',
+             # 'input_fname': rc.resource_fpath('setup.py.in'),
+             'dynamic': 'build_setup',
+             'perms': 'x'},
+
+            {'template': 0, 'overwrite': 0, 'fname': 'docs/source/index.rst',
+             'dynamic': 'build_docs_index'},
+            {'template': 0, 'overwrite': 0, 'fname': 'README.rst',
+             'dynamic': 'build_readme'},
+            #
+            {'source': 'dynamic', 'overwrite': 0, 'fname': 'CHANGELOG.md'},
+            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__init__.py'},
+            # {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__main__.py'},
+            {'source': 'dynamic', 'overwrite': 0, 'fname': 'tests/test_import.py'},
 
             {'template': 0, 'overwrite': 1, 'fname': '.github/dependabot.yml', 'tags': 'github'},
 
-            {'template': 0, 'overwrite': 1, 'fname': '.github/workflows/test_binaries.yml',
+            {'template': 0, 'overwrite': 1,
              'tags': 'binpy,github',
-             'input_fname': '.github/workflows/test_binaries.yml.in'},
+             'fname': '.github/workflows/test_binaries.yml',
+             'input_fname': rc.resource_fpath('test_binaries.yml.in')},
 
-            {'template': 1, 'overwrite': 1, 'fname': '.github/workflows/tests.yml',
-             'tags': 'purepy,github', 'input_fname': '.github/workflows/tests.yml.in'},
+            {'template': 1, 'overwrite': 1,
+             'tags': 'purepy,github',
+             'fname': '.github/workflows/tests.yml',
+             'input_fname': rc.resource_fpath('tests.yml.in')},
 
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,purepy'},
 
@@ -211,15 +232,14 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt'},
             {'template': 1, 'overwrite': 0, 'fname': 'docs/source/conf.py'},
-            {'template': 0, 'overwrite': 0, 'fname': 'docs/source/index.rst', 'dynamic': '_build_docs_index'},
 
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
 
             {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x'},
-            {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x'},
             {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh', 'perms': 'x', 'tags': 'binpy'},
-
+            {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x'},
+            {'template': 1, 'overwrite': 1, 'fname': 'run_linter.sh', 'perms': 'x'},
             {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py',
              'perms': 'x', 'tags': 'binpy',
              'input_fname': rc.resource_fpath('run_tests.binpy.py.in')},
@@ -228,15 +248,6 @@ class TemplateApplier:
              'perms': 'x', 'tags': 'purepy',
              'input_fname': rc.resource_fpath('run_tests.purepy.py.in')},
 
-            {'template': 1, 'overwrite': 0, 'fname': 'setup.py',
-             'input_fname': rc.resource_fpath('setup.py.in'),
-             'perms': 'x'},
-
-            {'template': 0, 'overwrite': 0, 'fname': 'README.rst', 'dynamic': 'build_readme'},
-            {'source': 'dynamic', 'overwrite': 0, 'fname': 'CHANGELOG.md'},
-            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__init__.py'},
-            # {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__main__.py'},
-            {'source': 'dynamic', 'overwrite': 0, 'fname': 'tests/test_import.py'},
         ]
         if 0:
             # Checker and help autopopulate
@@ -279,6 +290,10 @@ class TemplateApplier:
             unexpected_fpaths = exist_fpaths - known_fpaths
             if unexpected_fpaths:
                 print(f'WARNING UNREGISTERED unexpected_fpaths={unexpected_fpaths}')
+
+    @property
+    def tags(self):
+        return set(self.config['tags'])
 
     def __init__(self, config):
         self.config = config
@@ -396,55 +411,6 @@ class TemplateApplier:
 
         self.print_help_tips()
 
-    def lut(self, info):
-        """
-        Returns:
-            str: templated code
-        """
-        fname = ub.Path(info['fname']).name
-        if fname == 'CHANGELOG.md':
-            return ub.codeblock(
-                '''
-                # Changelog
-
-                We are currently working on porting this changelog to the specifications in
-                [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
-                This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-                ## [Version 0.0.1] -
-
-                ### Added
-                * Initial version
-                ''')
-        elif fname == 'test_import.py':
-            return ub.codeblock(
-                f'''
-                def test_import():
-                    import {self.config['mod_name']}
-                ''')
-        elif fname == '__main__.py':
-            return ub.codeblock(
-                '''
-                #!/usr/bin/env python
-                ''')
-        elif fname == '__init__.py':
-            return ub.codeblock(
-                f'''
-                """
-                Basic
-                """
-                __version__ = '0.0.1'
-                __author__ = '{self.remote_info['author']}'
-                __author_email__ = '{self.remote_info['email']}'
-                __url__ = '{self.remote_info['url']}'
-
-                __mkinit__ = """
-                mkinit {info['repo_fpath']}
-                """
-                ''')
-        else:
-            raise KeyError(fname)
-
     def _stage_file(self, info):
         """
         Example:
@@ -491,7 +457,12 @@ class TemplateApplier:
                     text = self.lut(info)
                 else:
                     text = getattr(self, dynamic_var)()
-                stage_fpath.write_text(text)
+                try:
+                    stage_fpath.write_text(text)
+                except Exception:
+                    print(f'text={text}')
+                    raise
+                    pass
             else:
                 in_fname = info.get('input_fname', path_name)
                 raw_fpath = self.template_dpath / in_fname
@@ -680,189 +651,14 @@ class TemplateApplier:
                     mode_want = st.st_mode | stat.S_IEXEC
                     if mode_want != st.st_mode:
                         tasks['perms'].append((info['repo_fpath'], mode_want))
+                else:
+                    tasks['perms'].append((info['repo_fpath'], mode_want))
 
         print('stats = {}'.format(ub.repr2(stats, nl=2)))
         return stats, tasks
 
     # def build_requirements(self):
     #     pass
-
-    def build_pyproject(self):
-        """
-        Returns:
-            str: templated code
-        """
-        # data = toml.loads((self.template_dpath / 'pyproject.toml').read_text())
-        # print('data = {}'.format(ub.repr2(data, nl=5)))
-        pyproj_config = ub.AutoDict()
-        # {'tool': {}}
-        if 'binpy' in self.config['tags']:
-            pyproj_config['build-system']['requires'] = [
-                "setuptools>=41.0.1",
-                # setuptools_scm[toml]
-                "wheel",
-                "scikit-build>=0.9.0",
-                "numpy",
-                "ninja"
-                "cmake"
-            ]
-            pyproj_config['tool']['cibuildwheel'].update({
-                'build': "cp37-* cp38-* cp39-* cp310-*",
-                'build-frontend': "build",
-                'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
-                'build-verbosity': 1,
-                'test-requires': ["-r requirements/tests.txt"],
-                'test-command': "python {project}/run_tests.py"
-            })
-
-            if True:
-                cibw = pyproj_config['tool']['cibuildwheel']
-                req_commands = {
-                    'linux': [
-                        'yum install epel-release lz4 lz4-devel -y',
-                    ],
-                    'windows': [
-                        'choco install lz4 -y',
-                    ],
-                    'macos': [
-                        'brew install lz4',
-                    ]
-                }
-                for plat in req_commands.keys():
-                    cmd = ' && '.join(req_commands[plat])
-                    cibw[plat]['before-all'] = cmd
-        else:
-            pyproj_config['build-system']['requires'] = [
-                "setuptools>=41.0.1",
-                # setuptools_scm[toml]
-                "wheel>=0.37.1",
-            ]
-
-        WITH_PYTEST_INI = 1
-        if WITH_PYTEST_INI:
-            pytest_ini_opts = pyproj_config['tool']['pytest']['ini_options']
-            pytest_ini_opts['addopts'] = "-p no:doctest --xdoctest --xdoctest-style=google --ignore-glob=setup.py"
-            pytest_ini_opts['norecursedirs'] = ".git ignore build __pycache__ dev _skbuild"
-            pytest_ini_opts['filterwarnings'] = [
-                "default",
-                "ignore:.*No cfgstr given in Cacher constructor or call.*:Warning",
-                "ignore:.*Define the __nice__ method for.*:Warning",
-                "ignore:.*private pytest class or function.*:Warning",
-            ]
-
-        WITH_COVERAGE = 1
-        if WITH_COVERAGE:
-            pyproj_config['tool']['coverage'].update(toml.loads(ub.codeblock(
-                '''
-                [run]
-                branch = true
-
-                [report]
-                exclude_lines =[
-                    "pragma: no cover",
-                    ".*  # pragma: no cover",
-                    ".*  # nocover",
-                    "def __repr__",
-                    "raise AssertionError",
-                    "raise NotImplementedError",
-                    "if 0:",
-                    "if trace is not None",
-                    "verbose = .*",
-                    "^ *raise",
-                    "^ *pass *$",
-                    "if _debug:",
-                    "if __name__ == .__main__.:",
-                    ".*if six.PY2:"
-                ]
-
-                omit=[
-                    "{REPO_NAME}/__main__.py",
-                    "*/setup.py"
-                ]
-                ''').format(REPO_NAME=self.repo_name)))
-
-        pyproj_config['tool']['mypy']['ignore_missing_imports'] = True
-
-        WITH_XCOOKIE = 1
-        if WITH_XCOOKIE:
-            pyproj_config['tool']['xcookie'].update(toml.loads(ub.codeblock(
-                f'''
-                tags = {self.config['tags']}
-                mod_name = "{self.config['mod_name']}"
-                repo_name = "{self.config['repo_name']}"
-                ''')))
-
-        text = toml.dumps(pyproj_config)
-        return text
-
-    def build_readme(self):
-        badges = {}
-        remote_info = self.remote_info
-        main_branch = 'main'
-        group = remote_info['group']
-        repo_name = remote_info['repo_name']
-
-        badges['CircleCI'] = {
-            'image': f'https://circleci.com/gh/{group}/{repo_name}.svg?style=svg',
-            'target': f'https://circleci.com/gh/{group}/{repo_name}',
-        }
-        badges['Appveyor'] = {
-            'image': f'https://ci.appveyor.com/api/projects/status/github/{group}/{repo_name}?branch={main_branch}&svg=True',
-            'target': f'https://ci.appveyor.com/project/{group}/{repo_name}/branch/{main_branch}',
-        }
-        badges['Codecov'] = {
-            'image': f'https://codecov.io/github/{group}/{repo_name}/badge.svg?branch={main_branch}&service=github',
-            'target': f'https://codecov.io/github/{group}/{repo_name}?branch={main_branch}',
-        }
-        badges['Pypi'] = {
-            'image': f'https://img.shields.io/pypi/v/{repo_name}.svg',
-            'target': f'https://pypi.python.org/pypi/{repo_name}',
-        }
-        badges['PypiDownloads'] = {
-            'image': f'https://img.shields.io/pypi/dm/{repo_name}.svg',
-            'target': f'https://pypistats.org/packages/{repo_name}',
-        }
-        badges['ReadTheDocs'] = {
-            'image': f'https://readthedocs.org/projects/{repo_name}/badge/?version=latest',
-            'target': f'http://{repo_name}.readthedocs.io/en/latest/',
-        }
-        badges['GithubActions'] = {
-            'image': f'https://github.com/{group}/{repo_name}/actions/workflows/tests.yml/badge.svg?branch={main_branch}',
-            'target': f'https://github.com/{group}/{repo_name}/actions?query=branch%3Amain',
-        }
-        # badges['CodeQuality'] = {
-        #     'image': f'image:: https://api.codacy.com/project/badge/Grade/4d815305fc014202ba7dea09c4676343',
-        #     'target': f'https://www.codacy.com/manual/{group}/{repo_name}?utm_source=github.com&amp;utm_medium=referral&amp;utm_content={group}/{repo_name}&amp;utm_campaign=Badge_Grade',
-        # }
-
-        parts = []
-
-        title = f'The {repo_name} Module'
-        title = title + '\n' + ('=' * len(title))
-        parts.append(title)
-        parts.append('')
-
-        chosen_badges = ['Pypi', 'PypiDownloads']
-        if 'github' in self.config['tags']:
-            chosen_badges += ['GithubActions', 'Codecov']
-
-        badge_header = ' '.join(['|{}|'.format(b) for b in chosen_badges])
-        parts.append(badge_header)
-        parts.append('')
-
-        for b in chosen_badges:
-            badge = badges[b]
-            badge_def = ub.codeblock(
-                f'''
-                .. |{b}| image:: {badge['image']}
-                    :target: {badge['target']}
-                '''
-            )
-            parts.append(badge_def)
-
-        readme_text = '\n\n'.join(parts)
-
-        return readme_text
 
     def rotate_secrets(self):
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
@@ -924,68 +720,78 @@ class TemplateApplier:
             ''')
         print(text)
 
-    def _build_docs_index(self):
-        parts = []
+    def build_setup(self):
+        """
+        Returns:
+            str: templated code
+        """
+        from xcookie.builders import setup
+        return setup.build_setup(self)
 
-        tags = set(self.config['tags'])
-        mod_name = self.config['mod_name']
+    def build_pyproject(self):
+        """
+        Returns:
+            str: templated code
+        """
+        from xcookie.builders import pyproject
+        return pyproject.build_pyproject(self)
 
-        if {'gitlab', 'kitware'}.issubset(tags):
-            parts.append(ub.codeblock(
-                f'''
-                :gitlab_url: https://gitlab.kitware.com/computer-vision/{mod_name}
-                '''))
+    def build_readme(self):
+        from xcookie.builders import readme
+        return readme.build_readme(self)
 
-        logo_part = ub.codeblock(
-            '''
-            .. The large version wont work because github strips rst image rescaling. https://i.imgur.com/AcWVroL.png
-                # TODO: Add a logo
-                .. image:: https://i.imgur.com/PoYIsWE.png
-                   :height: 100px
-                   :align: left
-            ''')
+    def build_docs_index(self):
+        from xcookie.builders import docs
+        return docs.build_docs_index(self)
 
-        parts.append(logo_part)
-
-        title = f"Welcome to {mod_name}'s documentation!"
-        underline = '=' * len(title)
-        title_part = title + '\n' + underline
-        parts.append(title_part)
-
-        init_part = ub.codeblock(
-            f'''
-            .. The __init__ files contains the top-level documentation overview
-            .. automodule:: {mod_name}.__init__
-               :show-inheritance:
-            ''')
-        parts.append(init_part)
-
-        if 0:
-            usefulness_part = ub.codeblock(
+    def lut(self, info):
+        """
+        Returns:
+            str: templated code
+        """
+        fname = ub.Path(info['fname']).name
+        if fname == 'CHANGELOG.md':
+            return ub.codeblock(
                 '''
-                .. # Computed function usefulness
-                .. include:: function_usefulness.rst
+                # Changelog
+
+                We are currently working on porting this changelog to the specifications in
+                [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+                This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+                ## [Version 0.0.1] -
+
+                ### Added
+                * Initial version
                 ''')
-            parts.append(usefulness_part)
+        elif fname == 'test_import.py':
+            return ub.codeblock(
+                f'''
+                def test_import():
+                    import {self.config['mod_name']}
+                ''')
+        elif fname == '__main__.py':
+            return ub.codeblock(
+                '''
+                #!/usr/bin/env python
+                ''')
+        elif fname == '__init__.py':
+            return ub.codeblock(
+                f'''
+                """
+                Basic
+                """
+                __version__ = '0.0.1'
+                __author__ = '{self.remote_info['author']}'
+                __author_email__ = '{self.remote_info['email']}'
+                __url__ = '{self.remote_info['url']}'
 
-        sidebar_part = ub.codeblock(
-            f'''
-            .. toctree::
-               :maxdepth: 5
-
-               {mod_name}
-
-
-            Indices and tables
-            ==================
-
-            * :ref:`genindex`
-            * :ref:`modindex`
-            ''')
-        parts.append(sidebar_part)
-
-        text = '\n\n'.join(parts)
-        return text
+                __mkinit__ = """
+                mkinit {info['repo_fpath']}
+                """
+                ''')
+        else:
+            raise KeyError(fname)
 
     def _docs_quickstart():
         # Probably just need to copy/paste the conf.py

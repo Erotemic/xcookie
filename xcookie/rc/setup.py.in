@@ -3,7 +3,9 @@ import sys
 from os.path import exists
 
 from setuptools import find_packages
+from setuptools import setup
 
+### xcookie: +IF(binpy)
 if exists('CMakeLists.txt'):
     try:
         import os
@@ -23,11 +25,13 @@ if exists('CMakeLists.txt'):
 else:
     use_setuptools = True
 
-if use_setuptools:
-    from setuptools import setup
-else:
-    from skbuild import setup
+if not use_setuptools:
+    from skbuild import skb_setup
+    setup = skb_setup  # NOQA
+### xcookie: -IF(binpy)
 
+
+### HELPERS
 
 def parse_version(fpath):
     """
@@ -225,6 +229,9 @@ def native_mb_python_tag(plat_impl=None, version_info=None):
     return mb_tag
 
 
+### HELPERS
+
+
 NAME = 'xcookie'
 INIT_PATH = 'xcookie/__init__.py'
 VERSION = parse_version('xcookie/__init__.py')
@@ -270,7 +277,7 @@ if __name__ == '__main__':
         long_description_content_type='text/x-rst',
         license='Apache 2',
         packages=find_packages('.'),
-        python_requires='>=3.6',
+        python_requires='>=3.7',
         classifiers=[
             # List of classifiers available at:
             # https://pypi.python.org/pypi?%3Aaction=list_classifiers
@@ -283,7 +290,7 @@ if __name__ == '__main__':
             # Supported Python versions
             # 'Programming Language :: Python :: 2.7',
             # 'Programming Language :: Python :: 3.5',
-            'Programming Language :: Python :: 3.6',
+            # 'Programming Language :: Python :: 3.6',
             'Programming Language :: Python :: 3.7',
             'Programming Language :: Python :: 3.8',
             'Programming Language :: Python :: 3.9',
