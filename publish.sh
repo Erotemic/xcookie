@@ -404,13 +404,9 @@ readarray -t WHEEL_PATHS < <(printf '%s\n' "${WHEEL_PATHS[@]}" | sort -u)
 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
 
 echo "
-======
-GLOBED
-------
 MODE=$MODE
 VERSION='$VERSION'
 WHEEL_PATHS='$WHEEL_PATHS_STR'
-=====
 "
 
 
