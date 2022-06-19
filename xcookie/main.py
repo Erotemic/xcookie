@@ -39,6 +39,8 @@ class SkipFile(Exception):
     pass
 
 
+# TODO: split up into a configuration that is saved to pyproject.toml and one
+# that is on only used when executing
 class XCookieConfig(scfg.Config):
     default = {
         'repodir': scfg.Value('.', help='path to the new or existing repo', position=1),
@@ -49,11 +51,23 @@ class XCookieConfig(scfg.Config):
 
         'rotate_secrets': scfg.Value('auto'),
 
+        'os': scfg.Value('all', help='all or any of win,osx,linux'),
+
         'is_new': scfg.Value('auto'),
 
         'min_python': scfg.Value('3.7'),
 
+        'autostage': scfg.Value(False, help='if true, automatically add changes to version control'),
+
         'interactive': scfg.Value(True),
+
+        'version': scfg.Value(None, help='repo metadata: url for the project'),
+        'url': scfg.Value(None, help='repo metadata: url for the project'),
+        'author': scfg.Value(None, help='repo metadata: author for the project'),
+        'author_email': scfg.Value(None, help='repo metadata'),
+        'description': scfg.Value(None, help='repo metadata'),
+        'license': scfg.Value(None, help='repo metadata'),
+        'dev_status': scfg.Value('planning'),
 
         'regen': scfg.Value(None, help=ub.paragraph(
             '''
@@ -80,20 +94,6 @@ class XCookieConfig(scfg.Config):
             self['repodir'] = ub.Path.cwd()
         else:
             self['repodir'] = ub.Path(self['repodir']).absolute()
-        pyproject_fpath = self['repodir'] / 'pyproject.toml'
-        if pyproject_fpath.exists():
-            try:
-                disk_config = toml.loads(pyproject_fpath.read_text())
-            except Exception as ex:
-                print(f'ex={ex}')
-            if self['tags'] == 'auto':
-                try:
-                    self['tags'] = disk_config['tool']['xcookie']['tags']
-                except KeyError:
-                    pass
-
-        if self['tags'] == 'auto':
-            self['tags'] = []
 
         if self['tags']:
             if isinstance(self['tags'], str):
@@ -103,6 +103,18 @@ class XCookieConfig(scfg.Config):
                 new.extend([p.strip() for p in t.split(',')])
             self['tags'] = new
 
+        if self['os']:
+            if isinstance(self['os'], str):
+                self['os'] = [self['os']]
+            new = []
+            for t in self['os']:
+                new.extend([p.strip() for p in t.split(',')])
+            self['os'] = set(new)
+            if 'all' in self['os']:
+                self['os'].add('win')
+                self['os'].add('osx')
+                self['os'].add('linux')
+
         if self['repo_name'] is None:
             self['repo_name'] = self['repodir'].name
         if self['mod_name'] is None:
@@ -111,6 +123,29 @@ class XCookieConfig(scfg.Config):
             self['is_new'] = not (self['repodir'] / '.git').exists()
         if self['rotate_secrets'] == 'auto':
             self['rotate_secrets'] = self['is_new']
+        if self['author'] is None:
+            self['author'] = ub.cmd('git config --global user.name')['out'].strip()
+        if self['license'] is None:
+            self['license'] = 'Apache 2'
+        if self['author_email'] is None:
+            self['author_email'] = ub.cmd('git config --global user.email')['out'].strip()
+        if self['version'] is None:
+            # TODO: read from __init__.py
+            self['version'] = '0.0.1'
+        if self['description'] is None:
+            self['description'] = 'A module cut from xcookie'
+
+    def _load_pyproject_settings(self):
+        pyproject_fpath = self['repodir'] / 'pyproject.toml'
+        if pyproject_fpath.exists():
+            try:
+                disk_config = toml.loads(pyproject_fpath.read_text())
+            except Exception:
+                raise
+                # print(f'ex={ex}')
+            else:
+                settings = disk_config.get('tool', {}).get('xcookie', {})
+                return settings
 
     def confirm(self, msg, default=True):
         """
@@ -149,8 +184,18 @@ class XCookieConfig(scfg.Config):
             }
             cmdline = 0
         """
+        # We load the config multiple times to get the right defaults.
         config = XCookieConfig(cmdline=cmdline, data=kwargs)
         config.normalize()
+        settings = config._load_pyproject_settings()
+        if settings:
+            print(f'settings={settings}')
+            config = XCookieConfig(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
+        config.normalize()
+
+        # import xdev
+        # xdev.embed()
+
         print('config = {}'.format(ub.repr2(dict(config), nl=1)))
         repodir = ub.Path(config['repodir']).absolute()
         repodir.ensuredir()
@@ -160,6 +205,58 @@ class XCookieConfig(scfg.Config):
 
 
 class TemplateApplier:
+
+    def __init__(self, config):
+        self.config = config
+        self.repodir = ub.Path(self.config['repodir'])
+        if self.config['repo_name'] is None:
+            self.config['repo_name'] = self.repodir.name
+        self.repo_name = self.config['repo_name']
+        self._tmpdir = tempfile.TemporaryDirectory(prefix=self.repo_name)
+
+        self.template_infos = None
+        try:
+            xcookie_dpath = ub.Path(__file__).parent.parent
+        except NameError:
+            xcookie_dpath = ub.Path('~/misc/templates/xcookie').expand()
+        self.template_dpath = xcookie_dpath
+        self.staging_dpath = ub.Path(self._tmpdir.name)
+        self.remote_info = {
+            'type': 'unknown'
+        }
+
+    def apply(self):
+        self.vcs_checks()
+        self.copy_staged_files()
+        if self.config['rotate_secrets']:
+            self.rotate_secrets()
+        self.print_help_tips()
+
+        if self.config['autostage']:
+            self.autostage()
+
+    def autostage(self):
+        import git
+        repo = git.Repo(self.repodir)
+
+        # Find untracked files
+        untracked = []
+        for info in self.staging_infos:
+            fpath = info['repo_fpath']
+            if not repo.git.ls_files(fpath):
+                untracked.append(fpath)
+
+        repo.git.add(untracked)
+
+    @property
+    def mod_dpath(self):
+        # TODO: allow src/{modname}
+        return self.repodir / self.config['mod_name']
+
+    @property
+    def mod_name(self):
+        # TODO: allow src/{modname}
+        return self.config['mod_name']
 
     def _build_template_registry(self):
         """
@@ -210,7 +307,9 @@ class TemplateApplier:
             {'template': 1, 'overwrite': 1,
              'tags': 'purepy,github',
              'fname': '.github/workflows/tests.yml',
-             'input_fname': rc.resource_fpath('tests.yml.in')},
+             'dynamic': 'build_github_actions',
+             # 'input_fname': rc.resource_fpath('tests.yml.in')
+             },
 
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,purepy'},
 
@@ -295,25 +394,6 @@ class TemplateApplier:
     def tags(self):
         return set(self.config['tags'])
 
-    def __init__(self, config):
-        self.config = config
-        self.repodir = ub.Path(self.config['repodir'])
-        if self.config['repo_name'] is None:
-            self.config['repo_name'] = self.repodir.name
-        self.repo_name = self.config['repo_name']
-        self._tmpdir = tempfile.TemporaryDirectory(prefix=self.repo_name)
-
-        self.template_infos = None
-        try:
-            xcookie_dpath = ub.Path(__file__).parent.parent
-        except NameError:
-            xcookie_dpath = ub.Path('~/misc/templates/xcookie').expand()
-        self.template_dpath = xcookie_dpath
-        self.staging_dpath = ub.Path(self._tmpdir.name)
-        self.remote_info = {
-            'type': 'unknown'
-        }
-
     def setup(self):
         tags = set(self.config['tags'])
         self.remote_info = {
@@ -338,8 +418,6 @@ class TemplateApplier:
         self.remote_info['repo_name'] = self.config['repo_name']
         self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name']])
         self.remote_info['git_url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
-        self.remote_info['author'] = ub.cmd('git config --global user.name')['out'].strip()
-        self.remote_info['email'] = ub.cmd('git config --global user.email')['out'].strip()
 
         self._build_template_registry()
         self.stage_files()
@@ -402,14 +480,6 @@ class TemplateApplier:
                 queue.rprint()
                 if self.config.confirm('Do git init?'):
                     queue.run()
-
-    def apply(self):
-        self.vcs_checks()
-        self.copy_staged_files()
-        if self.config['rotate_secrets']:
-            self.rotate_secrets()
-
-        self.print_help_tips()
 
     def _stage_file(self, info):
         """
@@ -736,6 +806,10 @@ class TemplateApplier:
         from xcookie.builders import pyproject
         return pyproject.build_pyproject(self)
 
+    def build_github_actions(self):
+        from xcookie.builders import github_actions
+        return github_actions.build_github_actions(self)
+
     def build_readme(self):
         from xcookie.builders import readme
         return readme.build_readme(self)
@@ -781,10 +855,10 @@ class TemplateApplier:
                 """
                 Basic
                 """
-                __version__ = '0.0.1'
-                __author__ = '{self.remote_info['author']}'
-                __author_email__ = '{self.remote_info['email']}'
-                __url__ = '{self.remote_info['url']}'
+                __version__ = '{self.config['version']}'
+                __author__ = '{self.config['author']}'
+                __author_email__ = '{self.config['author_email']}'
+                __url__ = '{self.config['url']}'
 
                 __mkinit__ = """
                 mkinit {info['repo_fpath']}

@@ -163,7 +163,8 @@ setup_package_environs_github_pyutils(){
 upload_github_secrets(){
     load_secrets
     unset GITHUB_TOKEN
-    gh auth login
+    #printf "%s" "$GITHUB_TOKEN" | gh auth login --hostname Github.com --with-token 
+    gh auth login 
     source dev/secrets_configuration.sh
     gh secret set "$VARNAME_CI_SECRET" -b"${!VARNAME_CI_SECRET}"
     gh secret set "$VARNAME_TWINE_USERNAME" -b"${!VARNAME_TWINE_USERNAME}"
