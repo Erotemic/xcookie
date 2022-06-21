@@ -389,6 +389,10 @@ export_encrypted_code_signing_keys(){
 }
 
 
+#gitlab_set_protected_branches(){
+#}
+
+
 _test_gnu(){
     # shellcheck disable=SC2155
     export GNUPGHOME=$(mktemp -d -t)

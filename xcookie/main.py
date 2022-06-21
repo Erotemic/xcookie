@@ -87,6 +87,8 @@ class XCookieConfig(scfg.Config):
                 "gdal" - add in our gdal hack # TODO
                 "cv2" - enable the headless hack
             ''')),
+
+        'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything'))
     }
 
     def normalize(self):
