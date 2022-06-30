@@ -100,12 +100,24 @@ def build_pyproject(self):
 
     WITH_XCOOKIE = 1
     if WITH_XCOOKIE:
-        pyproj_config['tool']['xcookie'].update(toml.loads(ub.codeblock(
-            f'''
-            tags = {self.config['tags']}
-            mod_name = "{self.config['mod_name']}"
-            repo_name = "{self.config['repo_name']}"
-            ''')))
+        options_to_save = [
+            'tags',
+            'mod_name',
+            'repo_name',
+            'pkg_name',
+            'rel_mod_parent_dpath',
+            'os',
+            'min_python',
+            'version',
+            'url',
+            'author',
+            'author_email',
+            'description',
+            'license',
+            'dev_status',
+        ]
+        config_to_save = ub.dict_subset(self.config, options_to_save)
+        pyproj_config['tool']['xcookie'].update(config_to_save)
 
     text = toml.dumps(pyproj_config)
     return text
