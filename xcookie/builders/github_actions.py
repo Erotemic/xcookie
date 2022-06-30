@@ -95,7 +95,29 @@ def build_github_actions(self):
         "jobs": jobs
     }
 
-    text = header + '\n\n' + yaml_dumps(body)
+    footer = ub.codeblock(
+        r'''
+        ###
+        # Unfortunately we cant (yet) use the yaml docstring trick here
+        # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
+        #__doc__: |
+        #    # How to run locally
+        #    # https://packaging.python.org/guides/using-testpypi/
+        #    git clone https://github.com/nektos/act.git $HOME/code/act
+        #    chmod +x $HOME/code/act/install.sh
+        #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
+        #
+        #    load_secrets
+        #    unset GITHUB_TOKEN
+        #    $HOME/.local/opt/act/act \
+        #        --secret=EROTEMIC_TWINE_PASSWORD=$EROTEMIC_TWINE_PASSWORD \
+        #        --secret=EROTEMIC_TWINE_USERNAME=$EROTEMIC_TWINE_USERNAME \
+        #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET \
+        #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
+        #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD
+        ''')
+
+    text = header + '\n\n' + yaml_dumps(body) + '\n\n' + footer
     # print(text)
     return text
 
@@ -144,7 +166,16 @@ def lint_job(self):
                 "run": ub.codeblock(
                     f'''
                     # stop the build if there are Python syntax errors or undefined names
-                    flake8 {self.mod_name} --count --select=E9,F63,F7,F82 --show-source --statistics
+                    flake8 ./{self.rel_mod_dpath} --count --select=E9,F63,F7,F82 --show-source --statistics
+                    ''')
+            },
+            {
+                "name": "Typecheck with mypy",
+                "run": ub.codeblock(
+                    f'''
+                    python -m pip install mypy
+                    mypy --install-types --non-interactive ./{self.rel_mod_dpath}
+                    mypy ./{self.rel_mod_dpath}
                     ''')
             }
         ]
@@ -170,13 +201,20 @@ def build_and_test_sdist(self):
             },
             {
                 "name": "Build sdist",
-                "run": "python setup.py sdist\n"
+                # "run": "python setup.py sdist\n"
+                "shell": "bash",
+                "run": [
+                    # "python -m pip install setuptools>=0.8 wheel",
+                    # "python -m pip wheel --wheel-dir wheelhouse .",
+                    "python -m pip install setuptools>=0.8 wheel build",
+                    "python -m build --sdist --outdir wheelhouse",
+                ]
             },
             {
                 "name": "Install sdist",
                 "run": [
-                    "ls -al ./dist",
-                    f'pip install dist/{self.mod_name}*.tar.gz -v',
+                    "ls -al ./wheelhouse",
+                    f'pip install wheelhouse/{self.mod_name}*.tar.gz -v',
                 ]
             },
             {
@@ -219,7 +257,7 @@ def build_and_test_sdist(self):
                 "uses": "actions/upload-artifact@v3",
                 "with": {
                     "name": "wheels",
-                    "path": "./dist/*.tar.gz"
+                    "path": "./wheelhouse/*.tar.gz"
                 }
             }
         ]
@@ -236,7 +274,19 @@ def build_and_test_wheels(self):
     if 'osx' in self.config['os']:
         os.append("macOS-latest")
 
-    python_versions = ["3.7", "3.8", "3.9", "3.10"]
+    # TODO: use min ersions
+    min_python = str(self.config['min_python'])
+    from packaging.version import parse as Version
+
+    # python_versions = ["3.7", "3.8", "3.9", "3.10"]
+    supported_python_versions = [
+        "2.7", "3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10"
+    ]
+
+    # TODO:
+    # - '3.11-dev'
+    # - 'pypy-3.7'
+    python_versions = [v for v in supported_python_versions if Version(v) >= Version(min_python)]
 
     job = {
         "name": "${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }}",
@@ -278,8 +328,10 @@ def build_and_test_wheels(self):
                 "name": "Build pure wheel",
                 "shell": "bash",
                 "run": [
-                    "python -m pip install setuptools>=0.8 wheel",
-                    "python -m pip wheel --wheel-dir wheelhouse .",
+                    # "python -m pip install setuptools>=0.8 wheel",
+                    # "python -m pip wheel --wheel-dir wheelhouse .",
+                    "python -m pip install setuptools>=0.8 wheel build",
+                    "python -m build --wheel --outdir wheelhouse",
                 ]
             },
             {
@@ -365,7 +417,8 @@ def build_deploy(self, mode='live'):
             "TWINE_REPOSITORY_URL": "https://upload.pypi.org/legacy/",
             "TWINE_USERNAME": "${{ secrets.TWINE_USERNAME }}",
             "TWINE_PASSWORD": "${{ secrets.TWINE_PASSWORD }}",
-            "EROTEMIC_CI_SECRET": "${{ secrets.EROTEMIC_CI_SECRET }}"
+            # TODO: make this not me-specific
+            "CI_SECRET": "${{ secrets.EROTEMIC_CI_SECRET }}"
         }
         condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
     elif mode == 'test':
@@ -373,7 +426,8 @@ def build_deploy(self, mode='live'):
             "TWINE_REPOSITORY_URL": "https://test.pypi.org/legacy/",
             "TWINE_USERNAME": "${{ secrets.TEST_TWINE_USERNAME }}",
             "TWINE_PASSWORD": "${{ secrets.TEST_TWINE_PASSWORD }}",
-            "EROTEMIC_CI_SECRET": "${{ secrets.EROTEMIC_CI_SECRET }}"
+            # TODO: make this not me-specific
+            "CI_SECRET": "${{ secrets.EROTEMIC_CI_SECRET }}"
         }
         condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
     else:
@@ -389,8 +443,8 @@ def build_deploy(self, mode='live'):
         ],
         "steps": [
             Actions.checkout(name='Checkout source'),
-            Actions.download_artifact({"name": "Download wheels and sdist", "with": {"name": "wheels", "path": "dist"}}),
-            {"name": "Show files to upload", "shell": "bash", "run": "ls -la dist"},
+            Actions.download_artifact({"name": "Download wheels and sdist", "with": {"name": "wheels", "path": "wheelhouse"}}),
+            {"name": "Show files to upload", "shell": "bash", "run": "ls -la wheelhouse"},
             {
                 "name": "Sign and Publish",
                 "env": env,
@@ -401,9 +455,9 @@ def build_deploy(self, mode='live'):
                     'openssl version',
                     '$GPG_EXECUTABLE --list-keys',
                     'echo "Decrypting Keys"',
-                    'GLKWS=$EROTEMIC_CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:GLKWS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import',
-                    'GLKWS=$EROTEMIC_CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:GLKWS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust',
-                    'GLKWS=$EROTEMIC_CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:GLKWS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import',
+                    'CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import',
+                    'CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust',
+                    'CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import',
                     'echo "Finish Decrypt Keys"',
                     '$GPG_EXECUTABLE --list-keys || true',
                     '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',

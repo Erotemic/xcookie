@@ -4,7 +4,7 @@
 # GITLAB LINTER
 # https://gitlab.kitware.com/computer-vision/xcookie/-/ci/lint
 
-.__heredoc__: &__heredoc__
+.__doc__: &__doc__
     - | 
         NOTE: INSTRUCTION HAVE BEEN MOVED TO ./dev/setup_secrets.sh
         This file should need minimal modification.

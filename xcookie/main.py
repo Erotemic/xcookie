@@ -48,12 +48,26 @@ class XCookieConfig(scfg.Config):
         'repo_name': scfg.Value(None, help='defaults to ``repodir.name``'),
         'mod_name': scfg.Value(None, help='The name of the importable Python module. defaults to ``repo_name``'),
         'pkg_name': scfg.Value(None, help='The name of the installable Python package. defaults to ``mod_name``'),
+        'rel_mod_parent_dpath': scfg.Value('.', help=ub.paragraph(
+            '''
+            The location of the module directory relative to the repository
+            root.  This defaults to simply placing the module in ".", but
+            another common pattern is to specify this as "./src".
+            '''
+        )),
 
-        'rotate_secrets': scfg.Value('auto'),
+        'rotate_secrets': scfg.Value('auto', help='If True will execute secret rotation'),
 
         'os': scfg.Value('all', help='all or any of win,osx,linux'),
 
-        'is_new': scfg.Value('auto'),
+        'is_new': scfg.Value('auto', help=ub.paragraph(
+            '''
+            If the repo is detected or specified as being new, then steps to
+            create a project for the repo on github/gitlab and other
+            initialization procedures will be executed. Otherwise we assume
+            that we are updating an existing repo.
+            '''
+        )),
 
         'min_python': scfg.Value('3.7'),
 
@@ -251,13 +265,15 @@ class TemplateApplier:
         repo.git.add(untracked)
 
     @property
+    def rel_mod_dpath(self):
+        return ub.Path(self.config['rel_mod_parent_dpath']) / self.config['mod_name']
+
+    @property
     def mod_dpath(self):
-        # TODO: allow src/{modname}
-        return self.repodir / self.config['mod_name']
+        return self.repodir / self.rel_mod_dpath
 
     @property
     def mod_name(self):
-        # TODO: allow src/{modname}
         return self.config['mod_name']
 
     def _build_template_registry(self):
@@ -267,8 +283,7 @@ class TemplateApplier:
         """
         from xcookie import rc
 
-        rel_mod_dpath = ub.Path(self.config['mod_name'])
-        # mod_dpath = self.config['repodir'] / rel_mod_dpath
+        rel_mod_dpath = self.rel_mod_dpath
 
         self.template_infos = [
             # {'template': 1, 'overwrite': False, 'fname': '.circleci/config.yml'},
@@ -278,7 +293,7 @@ class TemplateApplier:
 
             {'template': 0, 'overwrite': 0, 'fname': '.gitignore'},
             # {'template': 1, 'overwrite': 1, 'fname': '.coveragerc'},
-            {'template': 0, 'overwrite': 1, 'fname': '.readthedocs.yml'},
+            {'template': 1, 'overwrite': 1, 'fname': '.readthedocs.yml'},
             # {'template': 0, 'overwrite': 1, 'fname': 'pytest.ini'},
 
             {'template': 0, 'overwrite': 0, 'fname': 'pyproject.toml',
