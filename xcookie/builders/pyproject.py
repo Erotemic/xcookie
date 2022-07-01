@@ -15,7 +15,7 @@ def build_pyproject(self):
         pyproj_config['build-system']['requires'] = [
             "setuptools>=41.0.1",
             # setuptools_scm[toml]
-            "wheel",
+            # "wheel",
             "scikit-build>=0.9.0",
             "numpy",
             "ninja"
@@ -50,7 +50,7 @@ def build_pyproject(self):
         pyproj_config['build-system']['requires'] = [
             "setuptools>=41.0.1",
             # setuptools_scm[toml]
-            "wheel>=0.37.1",
+            # "wheel>=0.37.1",
         ]
 
     WITH_PYTEST_INI = 1
