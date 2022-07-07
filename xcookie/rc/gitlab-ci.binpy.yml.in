@@ -42,20 +42,18 @@ stages:
     script:
         - podman --version
         - podman info --debug
-        #- python3 -m pip install git+https://github.com/Erotemic/cibuildwheel.git@new_podman_support-backup-2022-06-16
-        - python3 -m pip install git+https://github.com/Erotemic/cibuildwheel.git@new_podman_support
+        - python3 -m pip install cibuildwheel>=2.8.0 
         - pwd
         - ls -al
         # NOTE: this requires that some mechanism exists in cibuildwheel to
         # ignore this directory when it copys the repo into the container
         - mkdir -p ".cache/containers/vfs-storage/"
         # Configure podman options (specific to custom cibuildwheel fork)
-        - export CIBW_CONTAINER_ENGINE="podman"
         - |
           codeblock()
           {
               PYEXE=python3
-              echo "$1" | $PYEXE -c "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()).strip('\n'))"
+              echo "$1" | $PYEXE -c "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()).strip(chr(10)))"
           }
           # Make a storage.conf and containers.conf file
           #
@@ -99,6 +97,7 @@ stages:
           cat $CONTAINERS_CONF
           cat $CONTAINERS_STORAGE_CONF
         - podman info --debug
+        - export CIBW_CONTAINER_ENGINE="podman"
         - cibuildwheel --config-file pyproject.toml --platform linux --print-build-identifiers
         - cibuildwheel --config-file pyproject.toml --output-dir wheelhouse --platform linux
         # - cibuildwheel --output-dir wheelhouse --platform linux --archs x86_64,i686,aarch64,ppc64le,s390x,universal2,arm64,x86,AMD64
@@ -182,7 +181,7 @@ stages:
     script: 
       - ls wheelhouse || echo "wheelhouse does not exist"
       - pip install toml
-      - MOD_NAME=$(python -c "import toml; print(toml.load(open('pyproject.toml'))['tool']['xcookie']['mod_name'])")
+      - MOD_NAME=$(python -c "import toml; print(toml.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
       - pip install "${MOD_NAME}"[all,headless] -f wheelhouse
       - *_run_tests_in_sandboxed_dir
 
@@ -197,7 +196,7 @@ stages:
     script:
       - ls wheelhouse || echo "wheelhouse does not exist"
       - pip install toml
-      - MOD_NAME=$(python -c "import toml; print(toml.load(open('pyproject.toml'))['tool']['xcookie']['mod_name'])")
+      - MOD_NAME=$(python -c "import toml; print(toml.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
       - pip install "${MOD_NAME}"[tests,headless] -f wheelhouse
       - *_run_tests_in_sandboxed_dir
 
@@ -210,8 +209,8 @@ stages:
 
     script: 
       - ls wheelhouse || echo "wheelhouse does not exist"
-      - pip install toml
-      - MOD_NAME=$(python -c "import toml; print(toml.load(open('pyproject.toml'))['tool']['xcookie']['mod_name'])")
+      - pip install tomli
+      - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
       - pip install "${MOD_NAME}"[all-strict,headless-strict] -f wheelhouse
       - *_run_tests_in_sandboxed_dir
 
@@ -225,8 +224,8 @@ stages:
 
     script:
       - ls wheelhouse || echo "wheelhouse does not exist"
-      - pip install toml
-      - MOD_NAME=$(python -c "import toml; print(toml.load(open('pyproject.toml'))['tool']['xcookie']['mod_name'])")
+      - pip install tomli
+      - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
       - pip install "${MOD_NAME}"[runtime-strict,tests-strict,headless-strict] -f wheelhouse
       - *_run_tests_in_sandboxed_dir
 
