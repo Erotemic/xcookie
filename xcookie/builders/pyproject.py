@@ -18,13 +18,15 @@ def build_pyproject(self):
             # "wheel",
             "scikit-build>=0.9.0",
             "numpy",
-            "ninja"
-            "cmake"
+            "ninja",
+            "cmake",
+            "cython",
         ]
         pyproj_config['tool']['cibuildwheel'].update({
             'build': "cp37-* cp38-* cp39-* cp310-*",
             'build-frontend': "build",
-            'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
+            # 'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
+            'skip': "pp* cp36-* *-musllinux_*",
             'build-verbosity': 1,
             'test-requires': ["-r requirements/tests.txt"],
             'test-command': "python {project}/run_tests.py"
