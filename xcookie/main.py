@@ -25,6 +25,14 @@ ExampleUsage:
 
     # Create a new binary gitlab kitware repo
     python -m xcookie.main --repo_name=kwimage_ext --repodir=$HOME/code/kwimage_ext --tags="kitware,gitlab,binpy"
+
+    # Create a new binary github repo
+    python -m xcookie.main --repodir=$HOME/code/networkx_algo_common_subtree --tags="github,erotemic,binpy"
+
+    # Create a new purepy github repo
+    python -m xcookie.main --repodir=$HOME/code/googledoc --tags="github,erotemic,purepy"
+
+    python -m xcookie.main --repodir=$HOME/code/networkx_algo_common_subtree_cython --tags="github,erotemic,binpy"
 """
 import toml
 import shutil
@@ -316,13 +324,13 @@ class TemplateApplier:
 
             {'template': 0, 'overwrite': 1, 'fname': '.github/dependabot.yml', 'tags': 'github'},
 
-            {'template': 0, 'overwrite': 1,
-             'tags': 'binpy,github',
-             'fname': '.github/workflows/test_binaries.yml',
-             'input_fname': rc.resource_fpath('test_binaries.yml.in')},
+            # {'template': 0, 'overwrite': 1,
+            #  'tags': 'binpy,github',
+            #  'fname': '.github/workflows/test_binaries.yml',
+            #  'input_fname': rc.resource_fpath('test_binaries.yml.in')},
 
             {'template': 1, 'overwrite': 1,
-             'tags': 'purepy,github',
+             'tags': 'github',
              'fname': '.github/workflows/tests.yml',
              'dynamic': 'build_github_actions',
              # 'input_fname': rc.resource_fpath('tests.yml.in')
@@ -497,6 +505,21 @@ class TemplateApplier:
                 queue.rprint()
                 if self.config.confirm('Do git init?'):
                     queue.run()
+
+            if self.config.confirm('Do you want to create the repo on the remote?'):
+                if 'gitlab' in self.tags:
+                    from xcookie.vcs_remotes import GitlabRemote
+                    vcs_remote = GitlabRemote(self.remote_info['repo_name'],
+                                              self.remote_info['host'],
+                                              self.remote_info['url'])
+                    vcs_remote.auth()
+                    vcs_remote.new_project()
+                elif 'github' in self.tags:
+                    from xcookie.vcs_remotes import GithubRemote
+                    vcs_remote = GithubRemote(self.remote_info['repo_name'])
+                    vcs_remote.new_project()
+                else:
+                    raise NotImplementedError('unknown vcs remote')
 
     def _stage_file(self, info):
         """
@@ -738,8 +761,8 @@ class TemplateApplier:
                     mode_want = st.st_mode | stat.S_IEXEC
                     if mode_want != st.st_mode:
                         tasks['perms'].append((info['repo_fpath'], mode_want))
-                else:
-                    tasks['perms'].append((info['repo_fpath'], mode_want))
+                # else:
+                #     tasks['perms'].append((info['repo_fpath'], mode_want))
 
         print('stats = {}'.format(ub.repr2(stats, nl=2)))
         return stats, tasks
@@ -764,10 +787,10 @@ class TemplateApplier:
             raise Exception
 
         import cmd_queue
-        script = cmd_queue.Queue.create(cwd=self.repodir)
+        script = cmd_queue.Queue.create(cwd=self.repodir, backend='serial')
         script.submit(f'source {setup_secrets_fpath}')
         script.sync().submit(f'{environ_export}')
-        # script.sync().submit('load_secrets')
+        script.sync().submit('source $(secret_loader.sh)')
         script.sync().submit('export_encrypted_code_signing_keys')
         script.sync().submit('git commit -am "Updated secrets"')
         script.sync().submit(f'{upload_secret_cmd}')
@@ -785,7 +808,7 @@ class TemplateApplier:
         # print('FIXME: for now, you need to manually execute this')
         # print('Note: need to load_secrets before running this')
         if self.config.confirm('Ready to rotate secrets?'):
-            script.run()
+            script.run(system=True)
 
     def print_help_tips(self):
         text = ub.codeblock(

@@ -25,8 +25,8 @@ jobs:
         ## Add additional workers to reduce overall build time
         include: 
           - {"os": "ubuntu-latest", "arch": "x86_64"}
-          #- {"os": "macOS-latest", "arch": "x86_64"} 
-          #- {"os": "windows-latest", "arch": "x86_64"}
+          - {"os": "macOS-latest", "arch": "x86_64"} 
+          - {"os": "windows-latest", "arch": "x86_64"}
           
         #  - os: windows-latest
         #    cibw_build: cp3*-win32
@@ -79,7 +79,7 @@ jobs:
 
     # See: https://github.com/pypa/cibuildwheel/blob/main/action.yml
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.3.1
+      uses: pypa/cibuildwheel@v2.8.0
       with:
         output-dir: wheelhouse
         config-file: pyproject.toml
@@ -88,8 +88,8 @@ jobs:
         CIBW_BUILD_VERBOSITY: 1
         #CIBW_SKIP: ${{ matrix.cibw_skip }}
         #CIBW_BUILD: ${{ matrix.cibw_build }}
-        #CIBW_TEST_REQUIRES: -r requirements/tests.txt
-        #CIBW_TEST_COMMAND: python {project}/run_tests.py
+        CIBW_TEST_REQUIRES: -r requirements/tests.txt
+        CIBW_TEST_COMMAND: python {project}/run_tests.py
         # configure cibuildwheel to build native archs ('auto'), or emulated ones
         CIBW_ARCHS_LINUX: ${{ matrix.arch }}
 
