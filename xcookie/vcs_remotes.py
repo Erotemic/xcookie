@@ -1,13 +1,4 @@
 import os
-
-
-
-
-
-
-
-
-
 import ubelt as ub
 
 
@@ -146,8 +137,8 @@ class GitlabRemote:
 
 
 class GithubRemote:
+    def __init__(self, proj_name):
+        self.proj_name = proj_name
+
     def new_project(self):
-        """
-        TODO:
-            gh repo create {self.repo_name} --public
-        """
+        ub.cmd(f'gh repo create {self.proj_name} --public', verbose=3, system=True)

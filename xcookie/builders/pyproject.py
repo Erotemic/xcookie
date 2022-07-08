@@ -16,17 +16,17 @@ def build_pyproject(self):
             "setuptools>=41.0.1",
             # setuptools_scm[toml]
             # "wheel",
-            "scikit-build>=0.9.0",
+            "scikit-build>=0.11.1",
             "numpy",
-            "ninja",
-            "cmake",
-            "cython",
+            "ninja>=1.10.2",
+            "cmake>=3.21.2",
+            "cython>=0.29.24",
         ]
         pyproj_config['tool']['cibuildwheel'].update({
-            'build': "cp37-* cp38-* cp39-* cp310-*",
+            'build': "cp36-* cp37-* cp38-* cp39-* cp310-*",
             'build-frontend': "build",
             # 'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
-            'skip': "pp* cp36-* *-musllinux_*",
+            'skip': "pp* *-musllinux_*",
             'build-verbosity': 1,
             'test-requires': ["-r requirements/tests.txt"],
             'test-command': "python {project}/run_tests.py"
@@ -58,7 +58,7 @@ def build_pyproject(self):
     WITH_PYTEST_INI = 1
     if WITH_PYTEST_INI:
         pytest_ini_opts = pyproj_config['tool']['pytest']['ini_options']
-        pytest_ini_opts['addopts'] = "-p no:doctest --xdoctest --xdoctest-style=google --ignore-glob=setup.py"
+        pytest_ini_opts['addopts'] = "-p no:doctest --xdoctest --xdoctest-style=google --ignore-glob=setup.py --ignore-glob=dev"
         pytest_ini_opts['norecursedirs'] = ".git ignore build __pycache__ dev _skbuild"
         pytest_ini_opts['filterwarnings'] = [
             "default",

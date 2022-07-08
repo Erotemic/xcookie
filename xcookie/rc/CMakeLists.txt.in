@@ -84,6 +84,7 @@ set(PYTHON_SETUP_STATUS "
 
 
 
+# TODO: template this so we only add deps we need
 find_package(Cython REQUIRED)
 find_package(NumPy REQUIRED)
 
@@ -117,20 +118,24 @@ function(cpu_cython_module cython_source module_name)
 endfunction(cpu_cython_module)
 
 
+find_package(PythonExtensions REQUIRED)
+
 
 # Typically you would place this CMake code next to your Cython module
-#add_subdirectory("xcookie/submod/submod")
-option(BUILD_CPU_FEATURE "A Cython CPU Feature" True)
-if (BUILD_CPU_FEATURE)
+# TODO: template to point at the mod dpath
+add_subdirectory("xcookie")
 
-  #set(cython_source "cpu_nms.pyx")
-  #set(module_name "cpu_nms")
-  cpu_cython_module("cpu_nms.pyx" "cpu_nms")
+#option(BUILD_CPU_FEATURE "A Cython CPU Feature" True)
+#if (BUILD_CPU_FEATURE)
 
-  #set(cython_source "cpu_soft_nms.pyx")
-  #set(module_name "cpu_soft_nms.pyx")
-  cpu_cython_module("cpu_soft_nms.pyx" "cpu_soft_nms")
-endif()
+#  ##set(cython_source "cpu_nms.pyx")
+#  ##set(module_name "cpu_nms")
+#  #cpu_cython_module("cpu_nms.pyx" "cpu_nms")
+
+#  ##set(cython_source "cpu_soft_nms.pyx")
+#  ##set(module_name "cpu_soft_nms.pyx")
+#  #cpu_cython_module("cpu_soft_nms.pyx" "cpu_soft_nms")
+#endif()
 
 
 
