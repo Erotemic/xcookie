@@ -1,2 +1,2 @@
 #!/bin/bash
-xdoctest xcookie --style=google all
+xdoctest xcookie --style=google all "$@"
