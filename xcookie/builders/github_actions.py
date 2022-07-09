@@ -216,7 +216,6 @@ def build_github_actions(self):
         ''')
 
     text = header + '\n\n' + yaml_dumps(body) + '\n\n' + footer
-    print(text)
     return text
 
 

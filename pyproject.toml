@@ -2,6 +2,10 @@
 tags = [ "erotemic", "github", "purepy",]
 mod_name = "xcookie"
 repo_name = "xcookie"
+author_email = "erotemic@gmail.com"
+author = "Jon Crall"
+url = "https://github.com/Erotemic/xcookie"
+description = "The xcookie cookie-cutter Module"
 
 [tool.pytest.ini_options]
 addopts = "-p no:doctest --xdoctest --xdoctest-style=google --ignore-glob=setup.py"

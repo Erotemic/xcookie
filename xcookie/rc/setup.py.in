@@ -1,9 +1,13 @@
+### xcookie: +HEADER
+
 #!/usr/bin/env python
 import sys
 from os.path import exists
 
 from setuptools import find_packages
 from setuptools import setup
+
+### xcookie: -HEADER
 
 ### xcookie: +IF(binpy)
 if exists('CMakeLists.txt'):
@@ -26,12 +30,20 @@ else:
     use_setuptools = True
 
 if not use_setuptools:
-    from skbuild import setup as skb_setup
-    setup = skb_setup  # NOQA
+    try:
+        from skbuild import setup as skb_setup
+        setup = skb_setup  # NOQA
+    except Exception:
+        use_setuptools = True
+        import warnings
+        warnings.warn('scikit-build was not found, but is required to build binaries')
+
+if use_setuptools:
+    from setuptools import setup
 ### xcookie: -IF(binpy)
 
 
-### HELPERS
+### xcookie: +HELPERS
 
 def parse_version(fpath):
     """
@@ -183,8 +195,10 @@ def parse_requirements(fname='requirements.txt', versions=False):
     return packages
 
 
-### HELPERS
+### xcookie: -HELPERS
 
+
+### xcookie: +MAIN
 
 NAME = 'xcookie'
 INIT_PATH = 'xcookie/__init__.py'
@@ -252,3 +266,5 @@ if __name__ == '__main__':
         ],
         **setupkw,
     )
+
+### xcookie: -MAIN
