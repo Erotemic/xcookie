@@ -181,11 +181,27 @@ class XCookieConfig(scfg.Config):
             bool:
         """
         if self['interactive']:
-            from rich.prompt import Confirm
-            flag = Confirm.ask(msg)
+            from rich import prompt
+            flag = prompt.Confirm.ask(msg)
         else:
             flag = default
         return flag
+
+    def prompt(self, msg, choices, default=True):
+        """
+        Args:
+            msg (str): display to the user
+            default (bool): default value if non-interactive
+
+        Returns:
+            bool:
+        """
+        if self['interactive']:
+            from xcookie.rich_ext import FuzzyPrompt
+            ans = FuzzyPrompt.ask(msg, choices=choices)
+        else:
+            ans = default
+        return ans
 
     @classmethod
     def main(cls, cmdline=0, **kwargs):
@@ -456,7 +472,8 @@ class TemplateApplier:
         task_summary = ub.map_vals(len, tasks)
         if any(task_summary.values()):
             print('task_summary = {}'.format(ub.repr2(task_summary, nl=1)))
-            if self.config.confirm('Do you want to apply this patch?'):
+            ans = self.config.prompt('What parts of the patch to apply?', ['all', 'some', 'none'])
+            if ans == 'all':
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
                     d.ensuredir()
@@ -464,6 +481,17 @@ class TemplateApplier:
                     d.ensuredir()
                 for src, dst in copy_tasks:
                     shutil.copy2(src, dst)
+                for fname, mode in perm_tasks:
+                    os.chmod(fname, mode)
+            elif ans == 'some':
+                dirs = {d.parent for s, d in copy_tasks}
+                for d in dirs:
+                    d.ensuredir()
+                for d in mkdir_tasks:
+                    d.ensuredir()
+                for src, dst in copy_tasks:
+                    if self.config.confirm(f'Apply {dst}?'):
+                        shutil.copy2(src, dst)
                 for fname, mode in perm_tasks:
                     os.chmod(fname, mode)
 

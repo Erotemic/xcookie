@@ -508,7 +508,8 @@ def build_and_test_purepy_wheels(self):
         'strategy': {
             'matrix': {
                 'os': os_list,
-                'python-version': python_versions,
+                # 3.4 is broken on github actions it seems
+                'python-version': [v for v in python_versions if v != '3.4'],
                 'install-extras': install_extras[0:2],
                 'arch': [
                     'auto'
