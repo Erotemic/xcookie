@@ -1,9 +1,18 @@
 def build_setup(self):
     from xcookie import rc
     import ubelt as ub
+    import re
+    # from distutils.version import LooseVersion
+    from packaging.version import parse as LooseVersion
+
+
+    repo_name = self.config['repo_name']
+    min_python = self.config['min_python']
+    min_py_version = str(self.config['min_python'])
+    dev_status = self.config['dev_status']
+
     fpath = rc.resource_fpath('setup.py.in')
 
-    import re
     template_text = fpath.read_text()
     parts = re.split('(### xcookie: .*$)', template_text, flags=re.MULTILINE)
 
@@ -18,10 +27,6 @@ def build_setup(self):
         else:
             assert key not in lut
             lut[key] = p
-
-    lut['IF(binpy)']
-
-    repo_name = self.config['repo_name']
 
     parts = []
     parts.append(ub.codeblock(
@@ -50,17 +55,13 @@ def build_setup(self):
         '''))
 
     version_classifiers = []
-    from distutils.version import LooseVersion
-    min_python = self.config['min_python']
-    min_py_version = str(self.config['min_python'])
     min_py_version = LooseVersion(min_py_version)
     known_pythons_versions = ['2.7', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10']
     for ver in known_pythons_versions:
-        if ver >= min_py_version:
+        if LooseVersion(ver) >= min_py_version:
             version_classifiers.append(f'Programming Language :: Python :: {ver}')
 
     # List of classifiers available at:
-    dev_status = self.config['dev_status']
     if dev_status == 'planning':
         dev_status = 'Development Status :: 1 - Planning'
     elif dev_status == 'pre-alpha':
@@ -87,18 +88,18 @@ def build_setup(self):
 
     classifiers = [dev_status] + other_classifiers + version_classifiers
 
+    # if 0:
+    #     setupkw['entry_points'] = {
+    #         # the console_scripts entry point creates the package CLI
+    #         'console_scripts': [
+    #             'xcookie = xcookie.__main__:main'
+    #         ]
+    #     }
     parts.append(ub.identity(
         '''
 if __name__ == '__main__':
     setupkw = {}
 
-    if 0:
-        setupkw['entry_points'] = {
-            # the console_scripts entry point creates the package CLI
-            'console_scripts': [
-                'xcookie = xcookie.__main__:main'
-            ]
-        }
     setupkw['install_requires'] = parse_requirements('requirements/runtime.txt')
     setupkw['extras_require'] = {
         'all': parse_requirements('requirements.txt'),
@@ -127,34 +128,43 @@ if __name__ == '__main__':
         }
         '''))
 
-    classifier_text = ub.indent(ub.repr2(classifiers), ' ' * 8)
-
-    description = self.config['description']
+    classifier_text = ub.repr2(classifiers)
 
     # author=static_parse('__author__', INIT_PATH),
     # author_email=static_parse('__author_email__', INIT_PATH),
     # url=static_parse('__url__', INIT_PATH),
 
-    parts.append(
-        f'''
-    setup(
-        name=NAME,
-        version=VERSION,
-        author={self.config['author']!r},
-        author_email={self.config['author_email']!r},
-        url={self.config['url']!r},
-        description={description!r},
-        long_description=parse_description(),
-        long_description_content_type='text/x-rst',
-        license='Apache 2',
-        packages=find_packages('.'),
-        python_requires='>={min_python}',
-        classifiers={classifier_text},
-        **setupkw,
+    # TODO: Try placing most of this into a setup.cfg instead
+    setupkw_parts = {}
+    setupkw_parts['name'] = 'NAME'
+    setupkw_parts['version'] = 'VERSION'
+    setupkw_parts['author'] = f'{self.config["author"]!r}'
+    setupkw_parts['author_email'] = f'{self.config["author_email"]!r}'
+    setupkw_parts['url'] = f'{self.config["url"]!r}'
+    setupkw_parts['description'] = f'{self.config["description"]!r}'
+    setupkw_parts['long_description'] = 'parse_description()'
+    setupkw_parts['long_description_content_type'] = "'text/x-rst'"
+    setupkw_parts['license'] = f'{self.config["license"]!r}'
+    setupkw_parts['packages'] = "find_packages('.')"
+    setupkw_parts['python_requires'] = f"'>={min_python}'"
+    setupkw_parts['classifiers'] = f'{classifier_text}'
+
+    if self.config['rel_mod_parent_dpath'] != '.':
+        setupkw_parts['package_dir'] = ub.repr2(
+            {'': self.config['rel_mod_parent_dpath']}
         )
-        ''')
+
+    # hack
+    pyproject_settings = self.config._load_pyproject_settings()
+    if 'entry_points' in pyproject_settings:
+        setupkw_parts['entry_points'] = ub.repr2(pyproject_settings['entry_points'])
+
+    for k, v in setupkw_parts.items():
+        parts.append(ub.indent(f"setupkw[{k!r}] = {v}"))
+    parts.append(ub.indent('setup(**setupkw)'))
 
     text = '\n'.join(parts)
+    print(text)
 
     # Its annoying, but other than that insufferable quote issue, black is very
     # good. I have a patch, but I need to find the best way to integrate it.
