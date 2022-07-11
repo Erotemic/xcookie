@@ -178,34 +178,38 @@ class GithubRemote:
         print(command)
         ub.cmd(command, verbose=3)
 
-        #### Do a version bump on the repo
-        # Update the changelog
-        changelog_fpath = ub.Path(fpath)
-        NEXT_VERSION = '{}.{}.{}'.format(latest_version.major,
-                                         latest_version.minor,
-                                         latest_version.micro + 1)
-        text = changelog_fpath.read_text()
-        text = text.replace('Unreleased', 'Released ' + ub.timeparse(ub.timestamp()).date().isoformat())
-        lines = text.split(chr(10))
-        for ix, line in enumerate(lines):
-            if 'Version ' in line:
-                break
-        newline = fr'## Version {NEXT_VERSION} - Unreleased'
-        newlines = lines[:ix] + [newline, '', ''] + lines[ix:]
-        new_text = chr(10).join(newlines)
-        changelog_fpath.write_text(new_text)
 
-        init_fpath = ub.Path('src/xdoctest/__init__.py')  # hack, hard code
-        init_text = init_fpath.read_text()
-        init_text = init_text.replace(f'__version__ = {VERSION!r}', f'__version__ = {NEXT_VERSION!r}', )
-        init_fpath.write_text(init_text)
+def version_bump():
+    #### Do a version bump on the repo
+    # Update the changelog
+    VERSION = LooseVersion(ub.cmd('python -c "import setup; print(setup.VERSION)"')['out'].strip())
+    DEPLOY_REMOTE = 'origin'
+    fpath = "CHANGELOG.md"
+    changelog_fpath = ub.Path(fpath)
+    NEXT_VERSION = '{}.{}.{}'.format(VERSION.major, VERSION.minor,
+                                     VERSION.micro + 1)
+    text = changelog_fpath.read_text()
+    text = text.replace('Unreleased', 'Released ' + ub.timeparse(ub.timestamp()).date().isoformat())
+    lines = text.split(chr(10))
+    for ix, line in enumerate(lines):
+        if 'Version ' in line:
+            break
+    newline = fr'## Version {NEXT_VERSION} - Unreleased'
+    newlines = lines[:ix] + [newline, '', ''] + lines[ix:]
+    new_text = chr(10).join(newlines)
+    changelog_fpath.write_text(new_text)
 
-        ub.cmd(f'git co -b "dev/{NEXT_VERSION}"')
-        ub.cmd(f'git commit -am "Start branch for {NEXT_VERSION}"')
-        ub.cmd(f'git push "{DEPLOY_REMOTE}"')
+    init_fpath = ub.Path('src/xdoctest/__init__.py')  # hack, hard code
+    init_text = init_fpath.read_text()
+    init_text = init_text.replace(f'__version__ = {VERSION!r}', f'__version__ = {NEXT_VERSION!r}', )
+    init_fpath.write_text(init_text)
 
-        ub.cmd(f'gh pr create --title "Start branch for {NEXT_VERSION}" --body "auto created PR" --base main --assignee @me', verbose=2)
-        # Github create PR
+    ub.cmd(f'git co -b "dev/{NEXT_VERSION}"')
+    ub.cmd(f'git commit -am "Start branch for {NEXT_VERSION}"')
+    ub.cmd(f'git push "{DEPLOY_REMOTE}"')
+
+    ub.cmd(f'gh pr create --title "Start branch for {NEXT_VERSION}" --body "auto created PR" --base main --assignee @me', verbose=2)
+    # Github create PR
 
 
 def _parse_changelog(fpath):
