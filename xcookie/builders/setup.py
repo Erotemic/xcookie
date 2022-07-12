@@ -156,6 +156,8 @@ if __name__ == '__main__':
 
     # hack
     pyproject_settings = self.config._load_pyproject_settings()
+    if pyproject_settings is None:
+        pyproject_settings = {}
     if 'entry_points' in pyproject_settings:
         setupkw_parts['entry_points'] = ub.repr2(pyproject_settings['entry_points'])
 

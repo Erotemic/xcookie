@@ -151,10 +151,10 @@ jobs:
       uses: actions/checkout@v3
     - name: Enable MSVC 64bit
       uses: ilammy/msvc-dev-cmd@v1
-      if: matrix.os == 'windows-latest' && matrix.cibw_build != 'cp3*-win32'
+      if: matrix.os == 'windows-latest' && matrix.cibw_build == 'cp3*-win32'
     - name: Enable MSVC 32bit
       uses: ilammy/msvc-dev-cmd@v1
-      if: matrix.os == 'windows-latest' && matrix.cibw_build == 'cp3*-win32'
+      if: matrix.os == 'windows-latest' && matrix.cibw_build != 'cp3*-win32'
       with:
         arch: x86
     - name: Set up QEMU
@@ -247,16 +247,16 @@ jobs:
         TWINE_REPOSITORY_URL: https://test.pypi.org/legacy/
         TWINE_USERNAME: ${{ secrets.TEST_TWINE_USERNAME }}
         TWINE_PASSWORD: ${{ secrets.TEST_TWINE_PASSWORD }}
-        CI_SECRET: ${{ secrets.EROTEMIC_CI_SECRET }}
+        CI_SECRET: ${{ secrets.CI_SECRET }}
       run: |-
         GPG_EXECUTABLE=gpg
         $GPG_EXECUTABLE --version
         openssl version
         $GPG_EXECUTABLE --list-keys
         echo "Decrypting Keys"
-        CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
-        CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
-        CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
         echo "Finish Decrypt Keys"
         $GPG_EXECUTABLE --list-keys || true
         $GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"
@@ -291,16 +291,16 @@ jobs:
         TWINE_REPOSITORY_URL: https://upload.pypi.org/legacy/
         TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
         TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
-        CI_SECRET: ${{ secrets.EROTEMIC_CI_SECRET }}
+        CI_SECRET: ${{ secrets.CI_SECRET }}
       run: |-
         GPG_EXECUTABLE=gpg
         $GPG_EXECUTABLE --version
         openssl version
         $GPG_EXECUTABLE --list-keys
         echo "Decrypting Keys"
-        CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
-        CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
-        CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
         echo "Finish Decrypt Keys"
         $GPG_EXECUTABLE --list-keys || true
         $GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"
