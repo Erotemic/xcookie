@@ -450,9 +450,11 @@ class TemplateApplier:
                 self.remote_info['host'] = 'https://gitlab.kitware.com'
                 self.remote_info['group'] = 'computer-vision'  # hack
         if self.remote_info['type'] == 'github':
+            self.remote_info['host'] = 'https://github.com'
             if 'erotemic' in tags:
-                self.remote_info['host'] = 'https://github.com'
                 self.remote_info['group'] = 'Erotemic'  # hack
+            if 'pyutils' in tags:
+                self.remote_info['group'] = 'pyutils'  # hack
         print(f'tags={tags}')
         print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
         assert self.remote_info['type'] != 'unknown'

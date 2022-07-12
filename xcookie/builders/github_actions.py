@@ -57,9 +57,9 @@ class Actions:
         if osvar is not None:
             # hack, just keep it this way for now
             if bits == 32:
-                kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_build == 'cp3*-win32'"
-            else:
                 kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_build != 'cp3*-win32'"
+            else:
+                kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_build == 'cp3*-win32'"
         if bits is None:
             name = 'Enable MSVC'
         else:
@@ -117,8 +117,8 @@ class Actions:
                 },
                 'env': {
                     'CIBW_BUILD_VERBOSITY': 1,
-                    #CIBW_SKIP: ${{ matrix.cibw_skip }}
-                    #CIBW_BUILD: ${{ matrix.cibw_build }}
+                    'CIBW_SKIP': '${{ matrix.cibw_skip }}',
+                    'CIBW_BUILD': '${{ matrix.cibw_build }}',
                     'CIBW_TEST_REQUIRES': '-r requirements/tests.txt',
                     'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
                     # configure cibuildwheel to build native archs ('auto'), or emulated ones
@@ -157,7 +157,8 @@ def build_github_actions(self):
     if 'binpy' in self.tags:
         name = 'BinPy Build and Test'
         binpy_jobs = {}
-        binpy_jobs['build_binary_wheels'] = build_binary_wheels(self)
+        binpy_jobs['build_and_test_sdist'] = build_and_test_sdist(self)
+        binpy_jobs['build_and_test_binpy_wheels'] = build_and_test_binpy_wheels(self)
         needs = list(binpy_jobs.keys())
         jobs.update(binpy_jobs)
 
@@ -366,7 +367,7 @@ def build_and_test_sdist(self):
     return job
 
 
-def build_binary_wheels(self):
+def build_and_test_binpy_wheels(self):
     """
     cat ~/code/xcookie/xcookie/rc/test_binaries.yml.in | yq  .jobs.build_and_test_wheels
     """
@@ -377,14 +378,22 @@ def build_binary_wheels(self):
     # min_python_version = supported_platform_info['min_python_version']
     # max_python_version = supported_platform_info['max_python_version']
 
+    included_runs = [
+        {'os': 'windows-latest', 'cibw_build': 'cp3*-win32', 'arch': 'auto', 'cibw_skip': ''},
+    ]
+    # [
+    #     {'os': osname, 'arch': 'auto'} for osname in os_list
+    # ]
     job = {
         'name': '${{ matrix.os }}, arch=${{ matrix.arch }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
             'matrix': {
-                'include': [
-                    {'os': osname, 'arch': 'auto'} for osname in os_list
-                ]
+                'os': os_list,
+                'cibw_skip': ["cp3*-win32"],
+                'cibw_build': ['cp3*-*'],
+                'arch': ['auto'],
+                'include': included_runs,
             }
         },
         'steps': None,
@@ -624,7 +633,7 @@ def build_deploy(self, mode='live', needs=None):
             'TWINE_USERNAME': '${{ secrets.TWINE_USERNAME }}',
             'TWINE_PASSWORD': '${{ secrets.TWINE_PASSWORD }}',
             # TODO: make this not me-specific
-            'CI_SECRET': '${{ secrets.EROTEMIC_CI_SECRET }}'
+            'CI_SECRET': '${{ secrets.CI_SECRET }}'
         }
         condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
     elif mode == 'test':
@@ -633,7 +642,7 @@ def build_deploy(self, mode='live', needs=None):
             'TWINE_USERNAME': '${{ secrets.TEST_TWINE_USERNAME }}',
             'TWINE_PASSWORD': '${{ secrets.TEST_TWINE_PASSWORD }}',
             # TODO: make this not me-specific
-            'CI_SECRET': '${{ secrets.EROTEMIC_CI_SECRET }}'
+            'CI_SECRET': '${{ secrets.CI_SECRET }}'
         }
         condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
     else:
@@ -662,9 +671,9 @@ def build_deploy(self, mode='live', needs=None):
                     'openssl version',
                     '$GPG_EXECUTABLE --list-keys',
                     'echo "Decrypting Keys"',
-                    'CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import',
-                    'CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust',
-                    'CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import',
+                    'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import',
+                    'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust',
+                    'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import',
                     'echo "Finish Decrypt Keys"',
                     '$GPG_EXECUTABLE --list-keys || true',
                     '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',

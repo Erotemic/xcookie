@@ -18,6 +18,7 @@ if exists('CMakeLists.txt'):
         use_setuptools = val in {'true', 'on', 'yes', '1'}
 
         if '--universal' in sys.argv:
+            sys.argv.remove('--universal')
             use_setuptools = True
 
         if '--disable-c-extensions' in sys.argv:
