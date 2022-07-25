@@ -19,4 +19,6 @@ scriptconfig>=0.5.0     ; python_version < '3.6' and python_version >= '2.7'    
 rich>=12.4.4    ;                            python_version >= '3.8'    # Python 3.8+
 rich>=11.2.0    ; python_version < '3.8' and python_version >= '3.6'    # Python 3.6 
 
-git-python
+git-python>=1.0.0     ;                            python_version >= '2.7'    # Python 2.7+
+
+black>=22.1.0    ;                            python_version >= '3.6.2'    # Python 3.6.2+
