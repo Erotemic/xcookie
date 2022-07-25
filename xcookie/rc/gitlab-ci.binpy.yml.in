@@ -154,19 +154,21 @@ stages:
 
 # Define anchors to be used in "before_script" parts
 ._setup_virtualenv_template: &_setup_virtualenv_template |-
-    # Setup the correct version of python on this manylinux instance
+    # Setup the correct version of python (which should be the same as this instance)
     python --version  # Print out python version for debugging
+    export PYVER=$(python -c "import sys; print('{}{}'.format(*sys.version_info[0:2]))")
     python -m pip install virtualenv
-    python -m virtualenv venv
-    source venv/bin/activate
+    python -m virtualenv venv$PYVER
+    source venv$PYVER/bin/activate
     pip install pip -U
-    pip install setuptools -U
+    pip install pip setuptools -U
     pip install pygments
+    python --version  # Print out python version for debugging
 
 
 ._run_tests_in_sandboxed_dir: &_run_tests_in_sandboxed_dir |-
     # Hack to test the installed wheel. TODO: make run_tests work better in this case.
-    MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml'), 'rb')['tool']['xcookie']['mod_name'])")
+    MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
     mkdir -p sandbox && cd sandbox && pytest --xdoctest-verbose=3 -s --cov-config ../pyproject.toml --cov-report html --cov-report term --cov="$MOD_NAME" --xdoc $(python -c "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))") ../tests
 
     
@@ -253,9 +255,9 @@ gpgsign/wheels:
         - openssl version
         - $GPG_EXECUTABLE --list-keys
         # note CI_KITWARE_SECRET is a protected variables only available on master and release branch
-        - GLKWS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:GLKWS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import 
-        - GLKWS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:GLKWS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
-        - GLKWS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:GLKWS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import 
+        - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import 
+        - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
+        - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import 
         - GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
 
         - |

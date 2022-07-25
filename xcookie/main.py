@@ -352,7 +352,8 @@ class TemplateApplier:
              # 'input_fname': rc.resource_fpath('tests.yml.in')
              },
 
-            {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,purepy'},
+            {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,purepy',
+             'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')},
 
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,binpy',
              'input_fname': rc.resource_fpath('gitlab-ci.binpy.yml.in')},
@@ -474,8 +475,8 @@ class TemplateApplier:
         task_summary = ub.map_vals(len, tasks)
         if any(task_summary.values()):
             print('task_summary = {}'.format(ub.repr2(task_summary, nl=1)))
-            ans = self.config.prompt('What parts of the patch to apply?', ['all', 'some', 'none'])
-            if ans == 'all':
+            ans = self.config.prompt('What parts of the patch to apply?', ['yes', 'all', 'some', 'none'])
+            if ans in {'all', 'yes'}:
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
                     d.ensuredir()

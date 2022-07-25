@@ -57,9 +57,9 @@ class Actions:
         if osvar is not None:
             # hack, just keep it this way for now
             if bits == 32:
-                kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_build != 'cp3*-win32'"
+                kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_skip == '*-win_amd64'"
             else:
-                kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_build == 'cp3*-win32'"
+                kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_skip == '*-win32'"
         if bits is None:
             name = 'Enable MSVC'
         else:
@@ -116,11 +116,11 @@ class Actions:
                     'config-file': 'pyproject.toml',
                 },
                 'env': {
-                    'CIBW_BUILD_VERBOSITY': 1,
+                    # 'CIBW_BUILD_VERBOSITY': 1,
                     'CIBW_SKIP': '${{ matrix.cibw_skip }}',
-                    'CIBW_BUILD': '${{ matrix.cibw_build }}',
-                    'CIBW_TEST_REQUIRES': '-r requirements/tests.txt',
-                    'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
+                    # 'CIBW_BUILD': '${{ matrix.cibw_build }}',
+                    # 'CIBW_TEST_REQUIRES': '-r requirements/tests.txt',
+                    # 'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
                     # configure cibuildwheel to build native archs ('auto'), or emulated ones
                     'CIBW_ARCHS_LINUX': '${{ matrix.arch }}'
                 }
@@ -129,7 +129,7 @@ class Actions:
         # Emulate aarch64 ppc64le s390x under linux
         return cls._generic_action({
             'name': 'Build binary wheels',
-            'uses': 'pypa/cibuildwheel@v2.8.0',
+            'uses': 'pypa/cibuildwheel@v2.8.1',
         }, *args, **kwargs)
 
 
@@ -326,9 +326,18 @@ def build_and_test_sdist(self):
                     'ls -al',
                     # "# Run the tests",
                     # "# Get path to installed package",
+                    '# Run in a sandboxed directory',
+                    'WORKSPACE_DNAME="testsrcdir_minimal_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
+                    'mkdir -p $WORKSPACE_DNAME',
+                    'cd $WORKSPACE_DNAME',
+                    '# Run the tests',
+                    '# Get path to installed package',
                     f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
                     'echo "MOD_DPATH = $MOD_DPATH"',
-                    f'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ./tests',
+                    # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
+                    # TODO: change to test command
+                    'python -m pytest --cov={self.mod_name} $MOD_DPATH ../tests',
+                    'cd ..',
                 ]
             },
             {
@@ -336,19 +345,20 @@ def build_and_test_sdist(self):
                 'run': [
                     'pwd',
                     'ls -al',
-                    'python -m pip install -r requirements/optional.txt',
+                    # 'python -m pip install -r requirements/optional.txt',  # todo: use the extra-spec
+                    'python -m pip install -r requirements/ipython.txt',  # hack for line-profiler
                     'python -m pip install -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
-                    f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
-                    'echo "MOD_DPATH = $MOD_DPATH"',
                     '# Run in a sandboxed directory',
-                    'WORKSPACE_DNAME="testsrcdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
+                    'WORKSPACE_DNAME="testsrcdir_full_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
                     'mkdir -p $WORKSPACE_DNAME',
                     'cd $WORKSPACE_DNAME',
                     '# Run the tests',
                     '# Get path to installed package',
                     f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
                     'echo "MOD_DPATH = $MOD_DPATH"',
-                    'python -m pytest -p pytester -p no:doctest --xdoctest $MOD_DPATH ../tests',
+                    # TODO: change to test command
+                    'python -m pytest --cov={self.mod_name} $MOD_DPATH ../tests',
+                    # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
                     # Move coverage file to a new name
                     # 'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
                     'cd ..',
@@ -379,7 +389,7 @@ def build_and_test_binpy_wheels(self):
     # max_python_version = supported_platform_info['max_python_version']
 
     included_runs = [
-        {'os': 'windows-latest', 'cibw_build': 'cp3*-win32', 'arch': 'auto', 'cibw_skip': ''},
+        {'os': 'windows-latest', 'arch': 'auto', 'cibw_skip': "*-win_amd64"},
     ]
     # [
     #     {'os': osname, 'arch': 'auto'} for osname in os_list
@@ -390,8 +400,7 @@ def build_and_test_binpy_wheels(self):
         'strategy': {
             'matrix': {
                 'os': os_list,
-                'cibw_skip': ["cp3*-win32"],
-                'cibw_build': ['cp3*-*'],
+                'cibw_skip': ['*-win32'],
                 'arch': ['auto'],
                 'include': included_runs,
             }
