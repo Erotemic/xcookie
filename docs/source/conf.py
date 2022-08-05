@@ -1,5 +1,7 @@
 """
 Notes:
+    Based on template code in: ~/code/xcookie/docs/source/conf.py
+
     http://docs.readthedocs.io/en/latest/getting_started.html
 
     pip install sphinx sphinx-autobuild sphinx_rtd_theme sphinxcontrib-napoleon
@@ -299,89 +301,323 @@ class PatchedPythonDomain(PythonDomain):
         return return_value
 
 
-def process(app, what_: str, name: str, obj: Any, options: Any, lines:
-            List[str]) -> None:
+class GoogleStyleDocstringProcessor:
     """
-    Custom process to transform docstring lines Remove "Ignore" blocks
-
-    Args:
-        app (sphinx.application.Sphinx): the Sphinx application object
-
-        what (str):
-            the type of the object which the docstring belongs to (one of
-            "module", "class", "exception", "function", "method", "attribute")
-
-        name (str): the fully qualified name of the object
-
-        obj: the object itself
-
-        options: the options given to the directive: an object with
-            attributes inherited_members, undoc_members, show_inheritance
-            and noindex that are true if the flag option of same name was
-            given to the auto directive
-
-        lines (List[str]): the lines of the docstring, see above
-
-    References:
-        https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
-        https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
+    A small extension that runs after napoleon and reformats erotemic-flavored
+    google-style docstrings for sphinx.
     """
-    # if what and what_ not in what:
-    #     return
-    orig_lines = lines[:]
 
-    # text = '\n'.join(lines)
-    # if 'Example' in text and 'CommandLine' in text:
+    def __init__(self, autobuild=1):
+        self.registry = {}
+        if autobuild:
+            self._register_builtins()
+
+    def register_section(self, tag, alias=None):
+        """
+        Decorator that adds a custom processing function for a non-standard
+        google style tag. The decorated function should accept a list of
+        docstring lines, where the first one will be the google-style tag that
+        likely needs to be replaced, and then return the appropriate sphinx
+        format (TODO what is the name? Is it just RST?).
+        """
+        alias = [] if alias is None else alias
+        alias = [alias] if not isinstance(alias, (list, tuple, set)) else alias
+        alias.append(tag)
+        alias = tuple(alias)
+        # TODO: better tag patterns
+        def _wrap(func):
+            self.registry[tag] = {
+                'tag': tag,
+                'alias': alias,
+                'func': func,
+            }
+            return func
+        return _wrap
+
+    def _register_builtins(self):
+        """
+        Adds definitions I like of CommandLine, TextArt, and Ignore
+        """
+
+        @self.register_section(tag='CommandLine')
+        def commandline(lines):
+            new_lines = []
+            new_lines.append('.. rubric:: CommandLine')
+            new_lines.append('')
+            new_lines.append('.. code-block:: bash')
+            new_lines.append('')
+            new_lines.extend(lines[1:])
+            return new_lines
+
+        @self.register_section(tag='TextArt', alias=['Ascii'])
+        def text_art(lines):
+            new_lines = []
+            new_lines.append('.. rubric:: TextArt')
+            new_lines.append('')
+            new_lines.append('.. code-block:: bash')
+            new_lines.append('')
+            new_lines.extend(lines[1:])
+            return new_lines
+
+        @self.register_section(tag='Ignore')
+        def ignore(lines):
+            return []
+
+    def process(self, lines):
+        """
+        Example:
+            >>> self = GoogleStyleDocstringProcessor()
+            >>> lines = ub.codeblock(
+            ...     '''
+            ...     Hello world
+            ...
+            ...     CommandLine:
+            ...         hi
+            ...
+            ...     CommandLine:
+            ...
+            ...         bye
+            ...
+            ...     TextArt:
+            ...
+            ...         1
+            ...         2
+            ...
+            ...         345
+            ...
+            ...     Foobar:
+            ...
+            ...     TextArt:
+            ...     ''').split(chr(10))
+            >>> new_lines = self.process(lines[:])
+            >>> print(chr(10).join(new_lines))
+        """
+        orig_lines = lines[:]
+        new_lines = []
+        curr_mode = '__doc__'
+        accum = []
+
+        def accept():
+            """ called when we finish reading a section """
+            if curr_mode == '__doc__':
+                # Keep the lines as-is
+                new_lines.extend(accum)
+            else:
+                # Process this section with the given function
+                regitem = self.registry[curr_mode]
+                new_lines.extend(regitem['func'](accum))
+            # Reset the accumulator for the next section
+            accum[:] = []
+
+        for line in orig_lines:
+
+            found = None
+            for regitem in self.registry.values():
+                if line.startswith(regitem['alias']):
+                    found = regitem['tag']
+                    break
+            if not found and line and not line.startswith(' '):
+                # if the line startswith anything but a space, we are no longer
+                # in the previous nested scope. NOTE: This assumption may not
+                # be general, but it works for my code.
+                found = '__doc__'
+
+            if found:
+                # New section is found, accept the previous one and start
+                # accumulating the new one.
+                accept()
+                curr_mode = found
+
+            accum.append(line)
+
+        # Finialize the last section
+        accept()
+
+        lines[:] = new_lines
+        # make sure there is a blank line at the end
+        if lines and lines[-1]:
+            lines.append('')
+        return lines
+
+    def process_docstring_callback(self, app, what_: str, name: str, obj: Any,
+                                   options: Any, lines: List[str]) -> None:
+        """
+        Callback to be registered to autodoc-process-docstring
+
+        Custom process to transform docstring lines Remove "Ignore" blocks
+
+        Args:
+            app (sphinx.application.Sphinx): the Sphinx application object
+
+            what (str):
+                the type of the object which the docstring belongs to (one of
+                "module", "class", "exception", "function", "method", "attribute")
+
+            name (str): the fully qualified name of the object
+
+            obj: the object itself
+
+            options: the options given to the directive: an object with
+                attributes inherited_members, undoc_members, show_inheritance
+                and noindex that are true if the flag option of same name was
+                given to the auto directive
+
+            lines (List[str]): the lines of the docstring, see above
+
+        References:
+            https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
+            https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
+        """
+        self.process(lines)
+        if 0:
+            # DEVELOPING
+            if any('REQUIRES(--show)' in line for line in lines):
+                # import xdev
+                # xdev.embed()
+                create_doctest_figure(app, obj, name, lines)
+
+
+def create_doctest_figure(app, obj, name, lines):
+    """
+    The idea is that each doctest that produces a figure should generate that
+    and then that figure should be part of the docs.
+    """
+    import xdoctest
+    import sys
+    import types
+    if isinstance(obj, types.ModuleType):
+        module = obj
+    else:
+        module = sys.modules[obj.__module__]
+    if '--show' not in sys.argv:
+        sys.argv.append('--show')
+    if '--nointeract' not in sys.argv:
+        sys.argv.append('--nointeract')
+    modpath = module.__file__
+
+    # print(doctest.format_src())
+    import ubelt as ub
+    doc_outdir = ub.Path(app.outdir)
+    # fig_dpath = (doc_outdir / 'autofigs' / name).ensuredir()
+    fig_dpath = (doc_outdir / 'autofigs').ensuredir()
+
+    fig_num = 1
+
+    import kwplot
+    kwplot.autompl(force='agg')
+
+    docstr = '\n'.join(lines)
+
+    # TODO: The freeform parser does not work correctly here.
+    # We need to parse out the sphinx (epdoc)? individual examples
+    # so we can get different figures. But we can hack it for now.
+
+    import re
+    split_parts = re.split('({}\\s*\n)'.format(re.escape('.. rubric:: Example')), docstr)
+    # split_parts = docstr.split('.. rubric:: Example')
+
+    # import xdev
+    # xdev.embed()
+
+    to_insert_fpaths = []
+
+    def doctest_line_offsets(doctest):
+        # Where the doctests starts and ends relative to the file
+        start_line_offset = doctest.lineno - 1
+        last_part = doctest._parts[-1]
+        last_line_offset = start_line_offset + last_part.line_offset + last_part.n_lines - 1
+        offsets = {
+            'start': start_line_offset,
+            'end': last_line_offset,
+            'stop': last_line_offset + 1,
+        }
+        return offsets
+
+    # from xdoctest import utils
+    # part_lines = utils.add_line_numbers(docstr.split('\n'), n_digits=3, start=0)
+    # print('\n'.join(part_lines))
+
+    curr_line_offset = 0
+    for part in split_parts:
+        num_lines = part.count('\n')
+
+        doctests = list(xdoctest.core.parse_docstr_examples(
+            part, modpath=modpath, callname=name))
+        # print(doctests)
+
+        # doctests = list(xdoctest.core.parse_docstr_examples(
+        #     docstr, modpath=modpath, callname=name))
+
+        for doctest in doctests:
+            if '--show' in part:
+                ...
+                # print('-- SHOW TEST---')
+                # print(doctest.format_src())
+                # kwplot.close_figures()
+                from _pytest.outcomes import Skipped
+                try:
+                    doctest.run(on_error='return')
+                    ...
+                except Skipped:
+                    print('skip doctest = {}'.format(ub.repr2(doctest, nl=1)))
+                    pass
+
+                offsets = doctest_line_offsets(doctest)
+                doctest_line_end = curr_line_offset + offsets['stop']
+                insert_line_index = doctest_line_end
+
+                figures = kwplot.all_figures()
+                for fig in figures:
+                    fig_num += 1
+                    # path_name = path_sanatize(name)
+                    path_name = (name).replace('.', '_')
+                    fig_fpath = fig_dpath / f'fig_{path_name}_{fig_num:03d}.jpg'
+                    fig.savefig(fig_fpath)
+                    print(f'Wrote figure: {fig_fpath}')
+                    to_insert_fpaths.append({
+                        'insert_line_index': insert_line_index,
+                        'fpath': fig_fpath,
+                    })
+                kwplot.close_figures(figures)
+
+        curr_line_offset += (num_lines)
+
+    # if len(doctests) > 1:
+    #     doctests
     #     import xdev
     #     xdev.embed()
 
-    ignore_tags = tuple(['Ignore'])
+    INSERT_AT = 'end'
+    INSERT_AT = 'inline'
 
-    mode = None
-    # buffer = None
-    new_lines = []
-    for i, line in enumerate(orig_lines):
+    end_index = len(lines)
+    # Reverse order for inserts
+    for info in to_insert_fpaths[::-1]:
+        rel_fpath = info['fpath'].relative_to(doc_outdir)
 
-        # See if the line triggers a mode change
-        if line.startswith(ignore_tags):
-            mode = 'ignore'
-        elif line.startswith('CommandLine'):
-            mode = 'cmdline'
-        elif line and not line.startswith(' '):
-            # if the line startswith anything but a space, we are no
-            # longer in the previous nested scope
-            mode = None
-
-        if mode is None:
-            new_lines.append(line)
-        elif mode == 'ignore':
-            # print('IGNORE line = {!r}'.format(line))
-            pass
-        elif mode == 'cmdline':
-            if line.startswith('CommandLine'):
-                new_lines.append('.. rubric:: CommandLine')
-                new_lines.append('')
-                new_lines.append('.. code-block:: bash')
-                new_lines.append('')
-                # new_lines.append('    # CommandLine')
-            else:
-                # new_lines.append(line.strip())
-                new_lines.append(line)
+        if INSERT_AT == 'inline':
+            # Try to insert after test
+            insert_index = info['insert_line_index']
+        elif INSERT_AT == 'end':
+            insert_index = end_index
         else:
-            raise KeyError(mode)
+            raise KeyError(INSERT_AT)
+        lines.insert(insert_index, '.. image:: {}'.format(rel_fpath))
+        lines.insert(insert_index, '')
 
-    lines[:] = new_lines
-    # make sure there is a blank line at the end
-    if lines and lines[-1]:
-        lines.append('')
+    print('final lines = {}'.format(ub.repr2(lines, nl=1)))
 
 
 def setup(app):
+    import sphinx
+    app : sphinx.application.Sphinx = app
+    # sphinx.application.Sphinx
     app.add_domain(PatchedPythonDomain, override=True)
+    docstring_processor = GoogleStyleDocstringProcessor()
     if 1:
         # New Way
         # what = None
-        app.connect('autodoc-process-docstring', process)
+        app.connect('autodoc-process-docstring', docstring_processor.process_docstring_callback)
     else:
         # OLD WAY
         # https://stackoverflow.com/questions/26534184/can-sphinx-ignore-certain-tags-in-python-docstrings
