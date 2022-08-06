@@ -112,11 +112,11 @@ version = '.'.join(release.split('.')[0:2])
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
-    'sphinx.ext.viewcode',
-    'sphinx.ext.napoleon',
-    'sphinx.ext.intersphinx',
-    'sphinx.ext.todo',
     'sphinx.ext.autosummary',
+    'sphinx.ext.intersphinx',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.todo',
+    'sphinx.ext.viewcode',
     # 'myst_parser',  # TODO
 ]
 
@@ -349,6 +349,23 @@ class GoogleStyleDocstringProcessor:
             new_lines.extend(lines[1:])
             return new_lines
 
+        @self.register_section(tag='SpecialExample', alias=['Benchmark', 'Sympy', 'Doctest'])
+        def benchmark(lines):
+            import textwrap
+            new_lines = []
+            tag = lines[0].replace(':', '').strip()
+            # new_lines.append(lines[0])  # TODO: it would be nice to change the tagline.
+            # new_lines.append('')
+            new_lines.append('.. rubric:: {}'.format(tag))
+            new_lines.append('')
+            new_text = textwrap.dedent('\n'.join(lines[1:]))
+            redone = new_text.split('\n')
+            new_lines.extend(redone)
+            # import ubelt as ub
+            # print('new_lines = {}'.format(ub.repr2(new_lines, nl=1)))
+            # new_lines.append('')
+            return new_lines
+
         @self.register_section(tag='TextArt', alias=['Ascii'])
         def text_art(lines):
             new_lines = []
@@ -405,7 +422,9 @@ class GoogleStyleDocstringProcessor:
             else:
                 # Process this section with the given function
                 regitem = self.registry[curr_mode]
-                new_lines.extend(regitem['func'](accum))
+                func = regitem['func']
+                fixed = func(accum)
+                new_lines.extend(fixed)
             # Reset the accumulator for the next section
             accum[:] = []
 
@@ -437,6 +456,7 @@ class GoogleStyleDocstringProcessor:
         # make sure there is a blank line at the end
         if lines and lines[-1]:
             lines.append('')
+
         return lines
 
     def process_docstring_callback(self, app, what_: str, name: str, obj: Any,
@@ -468,13 +488,97 @@ class GoogleStyleDocstringProcessor:
             https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
             https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
         """
+        print(f'name={name}')
+        # print('BEFORE:')
+        # import ubelt as ub
+        # print('lines = {}'.format(ub.repr2(lines, nl=1)))
+
         self.process(lines)
+
+        # docstr = '\n'.join(lines)
+        # if 'Convert the Mask' in docstr:
+        #     import xdev
+        #     xdev.embed()
+
+        # if 'keys in this dictionary ' in docstr:
+        #     import xdev
+        #     xdev.embed()
+
         if 0:
             # DEVELOPING
             if any('REQUIRES(--show)' in line for line in lines):
                 # import xdev
                 # xdev.embed()
                 create_doctest_figure(app, obj, name, lines)
+
+        REFORMAT_RETURNS = 0
+        if REFORMAT_RETURNS:
+            # FORMAT THE RETURNS SECTION A BIT NICER
+            # Split by sphinx types
+            import re
+            tag_pat = re.compile(r'^:(\w*):')
+            directive_pat = re.compile(r'^.. (\w*)::\s*(\w*)')
+            sphinx_parts = []
+            for idx, line in enumerate(lines):
+                tag_match = tag_pat.search(line)
+                directive_match = directive_pat.search(line)
+                if tag_match:
+                    tag = tag_match.groups()[0]
+                    sphinx_parts.append({
+                        'tag': tag, 'start_offset': idx,
+                        'type': 'tag',
+                    })
+                elif directive_match:
+                    tag = directive_match.groups()[0]
+                    sphinx_parts.append({
+                        'tag': tag, 'start_offset': idx,
+                        'type': 'directive',
+                    })
+
+            prev_offset = len(lines)
+            for part in sphinx_parts[::-1]:
+                part['end_offset'] = prev_offset
+                prev_offset = part['start_offset']
+
+            for part in sphinx_parts[::-1]:
+                if part['tag'] == 'returns':
+                    edit_slice = slice(part['start_offset'] + 2, part['end_offset'])
+                    return_section = lines[edit_slice]
+                    text = '\n'.join(return_section)
+
+                    new_lines = []
+                    for para in text.split('\n\n'):
+                        indent = para[:len(para) - len(para.lstrip())]
+                        new_paragraph = indent + paragraph(para)
+                        new_lines.append(new_paragraph)
+                        new_lines.append('')
+                    new_lines = new_lines[:-1]
+                    lines[edit_slice] = new_lines
+
+        # print('AFTER:')
+        # print('lines = {}'.format(ub.repr2(lines, nl=1)))
+
+        # if name == 'kwimage.Affine.translate':
+        #     import sys
+        #     sys.exit(1)
+
+
+def paragraph(text):
+    r"""
+    Wraps multi-line strings and restructures the text to remove all newlines,
+    heading, trailing, and double spaces.
+
+    Useful for writing log messages
+
+    Args:
+        text (str): typically a multiline string
+
+    Returns:
+        str: the reduced text block
+    """
+    import re
+    out = re.sub(r'\s\s*', ' ', text).strip()
+    return out
 
 
 def create_doctest_figure(app, obj, name, lines):
@@ -496,15 +600,24 @@ def create_doctest_figure(app, obj, name, lines):
     modpath = module.__file__
 
     # print(doctest.format_src())
-    import ubelt as ub
-    doc_outdir = ub.Path(app.outdir)
-    # fig_dpath = (doc_outdir / 'autofigs' / name).ensuredir()
-    fig_dpath = (doc_outdir / 'autofigs').ensuredir()
+    import pathlib
+    # HACK: write to the srcdir
+    doc_outdir = pathlib.Path(app.outdir)
+    doc_srcdir = pathlib.Path(app.srcdir)
+    doc_static_outdir = doc_outdir / '_static'
+    doc_static_srcdir = doc_srcdir / '_static'
+    src_fig_dpath = (doc_static_srcdir / 'images')
+    src_fig_dpath.mkdir(exist_ok=True, parents=True)
+    out_fig_dpath = (doc_static_outdir / 'images')
+    out_fig_dpath.mkdir(exist_ok=True, parents=True)
+
+    # fig_dpath = (doc_outdir / 'autofigs' / name).mkdir(exist_ok=True)
 
     fig_num = 1
 
     import kwplot
     kwplot.autompl(force='agg')
+    plt = kwplot.autoplt()
 
     docstr = '\n'.join(lines)
 
@@ -518,8 +631,6 @@ def create_doctest_figure(app, obj, name, lines):
 
     # import xdev
     # xdev.embed()
-
-    to_insert_fpaths = []
 
     def doctest_line_offsets(doctest):
         # Where the doctests starts and ends relative to the file
@@ -537,6 +648,7 @@ def create_doctest_figure(app, obj, name, lines):
     # part_lines = utils.add_line_numbers(docstr.split('\n'), n_digits=3, start=0)
     # print('\n'.join(part_lines))
 
+    to_insert_fpaths = []
     curr_line_offset = 0
     for part in split_parts:
         num_lines = part.count('\n')
@@ -551,16 +663,27 @@ def create_doctest_figure(app, obj, name, lines):
         for doctest in doctests:
             if '--show' in part:
                 ...
-                # print('-- SHOW TEST---')
-                # print(doctest.format_src())
+                # print('-- SHOW TEST---')/)
                 # kwplot.close_figures()
-                from _pytest.outcomes import Skipped
                 try:
-                    doctest.run(on_error='return')
+                    import pytest  # NOQA
+                except ImportError:
+                    pass
+                try:
+                    from xdoctest.exceptions import Skipped
+                except ImportError:  # nocover
+                    # Define dummy skipped exception if pytest is not available
+                    class Skipped(Exception):
+                        pass
+                try:
+                    doctest.mode = 'native'
+                    doctest.run(verbose=0, on_error='raise')
                     ...
                 except Skipped:
-                    print('skip doctest = {}'.format(ub.repr2(doctest, nl=1)))
-                    pass
+                    print(f'Skip doctest={doctest}')
+                except Exception as ex:
+                    print(f'ex={ex}')
+                    print(f'Error in doctest={doctest}')
 
                 offsets = doctest_line_offsets(doctest)
                 doctest_line_end = curr_line_offset + offsets['stop']
@@ -571,14 +694,17 @@ def create_doctest_figure(app, obj, name, lines):
                     fig_num += 1
                     # path_name = path_sanatize(name)
                     path_name = (name).replace('.', '_')
-                    fig_fpath = fig_dpath / f'fig_{path_name}_{fig_num:03d}.jpg'
+                    fig_fpath = src_fig_dpath / f'fig_{path_name}_{fig_num:03d}.jpeg'
                     fig.savefig(fig_fpath)
                     print(f'Wrote figure: {fig_fpath}')
                     to_insert_fpaths.append({
                         'insert_line_index': insert_line_index,
                         'fpath': fig_fpath,
                     })
-                kwplot.close_figures(figures)
+
+                for fig in figures:
+                    plt.close(fig)
+                # kwplot.close_figures(figures)
 
         curr_line_offset += (num_lines)
 
@@ -592,8 +718,27 @@ def create_doctest_figure(app, obj, name, lines):
 
     end_index = len(lines)
     # Reverse order for inserts
+    import shutil
     for info in to_insert_fpaths[::-1]:
-        rel_fpath = info['fpath'].relative_to(doc_outdir)
+        src_abs_fpath = info['fpath']
+
+        rel_to_static_fpath = src_abs_fpath.relative_to(doc_static_srcdir)
+        # dst_abs_fpath = doc_static_outdir / rel_to_static_fpath
+        # dst_abs_fpath.parent.mkdir(parents=True, exist_ok=True)
+
+        rel_to_root_fpath = src_abs_fpath.relative_to(doc_srcdir)
+
+        dst_abs_fpath1 = doc_outdir / rel_to_root_fpath
+        dst_abs_fpath1.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src_abs_fpath, dst_abs_fpath1)
+
+        dst_abs_fpath2 = doc_outdir / rel_to_static_fpath
+        dst_abs_fpath2.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src_abs_fpath, dst_abs_fpath2)
+
+        dst_abs_fpath3 = doc_srcdir / rel_to_static_fpath
+        dst_abs_fpath3.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src_abs_fpath, dst_abs_fpath3)
 
         if INSERT_AT == 'inline':
             # Try to insert after test
@@ -602,28 +747,16 @@ def create_doctest_figure(app, obj, name, lines):
             insert_index = end_index
         else:
             raise KeyError(INSERT_AT)
-        lines.insert(insert_index, '.. image:: {}'.format(rel_fpath))
+        lines.insert(insert_index, '.. image:: {}'.format(rel_to_root_fpath))
+        # lines.insert(insert_index, '.. image:: {}'.format(rel_to_static_fpath))
         lines.insert(insert_index, '')
-
-    print('final lines = {}'.format(ub.repr2(lines, nl=1)))
 
 
 def setup(app):
     import sphinx
     app : sphinx.application.Sphinx = app
-    # sphinx.application.Sphinx
     app.add_domain(PatchedPythonDomain, override=True)
     docstring_processor = GoogleStyleDocstringProcessor()
-    if 1:
-        # New Way
-        # what = None
-        app.connect('autodoc-process-docstring', docstring_processor.process_docstring_callback)
-    else:
-        # OLD WAY
-        # https://stackoverflow.com/questions/26534184/can-sphinx-ignore-certain-tags-in-python-docstrings
-        # Register a sphinx.ext.autodoc.between listener to ignore everything
-        # between lines that contain the word IGNORE
-        # from sphinx.ext.autodoc import between
-        # app.connect('autodoc-process-docstring', between('^ *Ignore:$', exclude=True))
-        pass
+    app.connect('autodoc-process-docstring', docstring_processor.process_docstring_callback)
+    # https://stackoverflow.com/questions/26534184/can-sphinx-ignore-certain-tags-in-python-docstrings
     return app
