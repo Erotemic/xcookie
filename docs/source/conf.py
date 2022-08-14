@@ -383,6 +383,7 @@ class GoogleStyleDocstringProcessor:
     def process(self, lines):
         """
         Example:
+            >>> import ubelt as ub
             >>> self = GoogleStyleDocstringProcessor()
             >>> lines = ub.codeblock(
             ...     '''
@@ -593,6 +594,7 @@ def create_doctest_figure(app, obj, name, lines):
         module = obj
     else:
         module = sys.modules[obj.__module__]
+    # TODO: read settings from pyproject.toml?
     if '--show' not in sys.argv:
         sys.argv.append('--show')
     if '--nointeract' not in sys.argv:
@@ -654,7 +656,9 @@ def create_doctest_figure(app, obj, name, lines):
         num_lines = part.count('\n')
 
         doctests = list(xdoctest.core.parse_docstr_examples(
-            part, modpath=modpath, callname=name))
+            part, modpath=modpath, callname=name,
+            # style='google'
+        ))
         # print(doctests)
 
         # doctests = list(xdoctest.core.parse_docstr_examples(
