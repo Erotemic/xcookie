@@ -383,18 +383,10 @@ def build_and_test_binpy_wheels(self):
     cat ~/code/xcookie/xcookie/rc/test_binaries.yml.in | yq  .jobs.build_and_test_wheels
     """
     supported_platform_info = get_supported_platform_info(self)
-
     os_list = supported_platform_info['os_list']
-    # python_versions = supported_platform_info['python_versions']
-    # min_python_version = supported_platform_info['min_python_version']
-    # max_python_version = supported_platform_info['max_python_version']
-
     included_runs = [
         {'os': 'windows-latest', 'arch': 'auto', 'cibw_skip': "*-win_amd64"},
     ]
-    # [
-    #     {'os': osname, 'arch': 'auto'} for osname in os_list
-    # ]
     job = {
         'name': '${{ matrix.os }}, arch=${{ matrix.arch }}',
         'runs-on': '${{ matrix.os }}',
@@ -473,22 +465,25 @@ def build_and_test_binpy_wheels(self):
 
 def get_supported_platform_info(self):
     os_list = []
-    if 'win' in self.config['os']:
-        os_list.append('windows-latest')
     if 'linux' in self.config['os']:
         os_list.append('ubuntu-latest')
     if 'osx' in self.config['os']:
         os_list.append('macOS-latest')
+    if 'win' in self.config['os']:
+        os_list.append('windows-latest')
 
-    python_versions = self.config['ci_cpython_versions']
-    python_versions += [
+    cpython_versions = self.config['ci_cpython_versions']
+    pypy_versions = [
         f'pypy-{v}'
         for v in self.config['ci_pypy_versions']
     ]
+    # 3.4 is broken on github actions it seems
+    cpython_versions_non34 = [v for v in cpython_versions if v != '3.4']
 
     supported_platform_info = {
         'os_list': os_list,
-        'python_versions': python_versions,
+        'cpython_versions': cpython_versions_non34,
+        'pypy_versions': pypy_versions,
         'min_python_version': self.config['supported_python_versions'][0],
         'max_python_version': self.config['supported_python_versions'][-1],
     }
@@ -499,35 +494,59 @@ def build_and_test_purepy_wheels(self):
     supported_platform_info = get_supported_platform_info(self)
 
     os_list = supported_platform_info['os_list']
-    python_versions = supported_platform_info['python_versions']
+    cpython_versions = supported_platform_info['cpython_versions']
+    pypy_versions = supported_platform_info['pypy_versions']
     min_python_version = supported_platform_info['min_python_version']
     max_python_version = supported_platform_info['max_python_version']
-    install_extras = [
-        'tests',
-        'tests,optional',
-        'tests-strict,runtime-strict',
-        'tests-strict,runtime-strict,optional-strict',
-    ]
-    # latest_python = supported_python_versions[-1]
+
+    # Map the min/full loose/strict terminology to specific extra packages
+    import ubelt as ub
+    install_extras = ub.udict({
+        'minimal-loose'  : 'tests',
+        'full-loose'     : 'tests,optional',
+        'minimal-strict' : 'tests-strict,runtime-strict',
+        'full-strict'    : 'tests-strict,runtime-strict,optional-strict',
+    })
+
+    # Reduce the CI load, don't specify the entire product space
+    include = []
+    for osname in os_list:
+        for extra in install_extras.take(['minimal-strict']):
+            for pyver in [min_python_version]:
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
+
+    for osname in os_list:
+        for extra in install_extras.take(['full-strict']):
+            for pyver in [max_python_version]:
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
+
+    for osname in os_list[1:]:
+        for extra in install_extras.take(['minimal-loose']):
+            for pyver in [max_python_version]:
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
+
+    for osname in os_list:
+        for extra in install_extras.take(['full-loose']):
+            for pyver in cpython_versions:
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
+
+    for osname in os_list:
+        for extra in install_extras.take(['full-loose']):
+            for pyver in pypy_versions:
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
 
     job = {
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
             'matrix': {
-                'os': os_list,
-                # 3.4 is broken on github actions it seems
-                'python-version': [v for v in python_versions if v != '3.4'],
-                'install-extras': install_extras[0:2],
+                # 'os': os_list,
+                # 'python-version': python_versions_non34,
+                # 'install-extras': list(install_extras.take(['minimal-loose', 'full-loose'])),
                 'arch': [
                     'auto'
                 ],
-                'include': [
-                    {'python-version': pyver, 'os': osname, 'install-extras': extra}
-                    for osname in os_list
-                    for extra in install_extras[2:]
-                    for pyver in [min_python_version, max_python_version]
-                ]
+                'include': include,
             }
         },
         'steps': None,
