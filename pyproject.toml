@@ -41,3 +41,9 @@ omit = [
     "xcookie/__main__.py",
     "*/setup.py",
 ]
+
+#[tool.mypy-gitlab.*]
+#ignore_missing_imports = True
+
+#[tool.mypy]
+#ignore_missing_imports = True
