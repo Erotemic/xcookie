@@ -1,4 +1,5 @@
 import ubelt as ub
+from packaging.version import parse as Version
 
 
 class Actions:
@@ -479,28 +480,17 @@ def get_supported_platform_info(self):
     if 'osx' in self.config['os']:
         os_list.append('macOS-latest')
 
-    # TODO: use min ersions
-    min_python = str(self.config['min_python'])
-    from packaging.version import parse as Version
-
-    # python_versions = ["3.7", "3.8", "3.9", "3.10"]
-    supported_python_versions = [
-        '2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10'
-    ]
-
-    python_versions = [v for v in supported_python_versions if Version(v) >= Version(min_python)]
-
-    # TODO:
+    python_versions = self.config['ci_cpython_versions']
     python_versions += [
-        # '3.11-dev',
-        'pypy-3.7',
+        f'pypy-{v}'
+        for v in self.config['ci_pypy_versions']
     ]
 
     supported_platform_info = {
         'os_list': os_list,
         'python_versions': python_versions,
-        'min_python_version': python_versions[0],
-        'max_python_version': supported_python_versions[-1],
+        'min_python_version': self.config['supported_python_versions'][0],
+        'max_python_version': self.config['supported_python_versions'][-1],
     }
     return supported_platform_info
 

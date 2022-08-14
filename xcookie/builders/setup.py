@@ -55,11 +55,8 @@ def build_setup(self):
         '''))
 
     version_classifiers = []
-    min_py_version = LooseVersion(min_py_version)
-    known_pythons_versions = ['2.7', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10']
-    for ver in known_pythons_versions:
-        if LooseVersion(ver) >= min_py_version:
-            version_classifiers.append(f'Programming Language :: Python :: {ver}')
+    for ver in self.config['supported_python_versions']:
+        version_classifiers.append(f'Programming Language :: Python :: {ver}')
 
     # List of classifiers available at:
     if dev_status == 'planning':

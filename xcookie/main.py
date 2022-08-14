@@ -41,6 +41,7 @@ import tempfile
 import scriptconfig as scfg
 import xdev
 import os
+from packaging.version import parse as Version
 
 
 class SkipFile(Exception):
@@ -78,6 +79,23 @@ class XCookieConfig(scfg.Config):
         )),
 
         'min_python': scfg.Value('3.7'),
+        'supported_python_versions': scfg.Value('auto', help=ub.paragraph(
+            '''
+            can specify as a list of explicit major.minor versions. Auto will
+            use everything above the min_python version
+            ''')),
+
+        'ci_cpython_versions': scfg.Value('auto', help=ub.paragraph(
+            '''
+            Specify the major.minor CPython versions to use on the CI.
+            Will default to the supported_python_versions.
+            ''')),
+
+        'ci_pypy_versions': scfg.Value('auto', help=ub.paragraph(
+            '''
+            Specify the major.minor PyPy versions to use on the CI.
+            Defaults will depend on purepy vs binpy tags.
+            ''')),
 
         'autostage': scfg.Value(False, help='if true, automatically add changes to version control'),
 
@@ -158,6 +176,22 @@ class XCookieConfig(scfg.Config):
             self['version'] = '0.0.1'
         if self['description'] is None:
             self['description'] = 'A module cut from xcookie'
+
+        if self['supported_python_versions'] == 'auto':
+            from xcookie.constants import KNOWN_PYTHON_VERSIONS
+            min_python = str(self['min_python'])
+            python_versions = [v for v in KNOWN_PYTHON_VERSIONS
+                               if Version(v) >= Version(min_python)]
+            self['supported_python_versions'] = python_versions
+
+        if self['ci_cpython_versions'] == 'auto':
+            self['ci_cpython_versions'] = self['supported_python_versions']
+
+        if self['ci_pypy_versions'] == 'auto':
+            if 'purepy' in self['tags']:
+                self['ci_pypy_versions'] = ['3.7']
+            else:
+                self['ci_pypy_versions'] = []
 
     def _load_pyproject_settings(self):
         pyproject_fpath = self['repodir'] / 'pyproject.toml'
