@@ -46,8 +46,11 @@ omit = [
     "*/setup.py",
 ]
 
-#[tool.mypy-gitlab.*]
-#ignore_missing_imports = True
+[tool.mypy]
 
-#[tool.mypy]
-#ignore_missing_imports = True
+[[tool.mypy.overrides]]
+# This shoulnt be the case that we need to ignore ubelt. 
+module = [
+    "ubelt",
+]
+ignore_missing_imports = true
