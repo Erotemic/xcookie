@@ -5,8 +5,7 @@
 # python ~/local/tools/supported_python_versions_pip.py toml
 # python ~/local/tools/supported_python_versions_pip.py rich
 
-xdev>=0.3.0     ;                            python_version >= '3.6'    # Python 3.6+
-xdev>=0.2.0     ; python_version < '3.6' and python_version >= '2.7'    # Python 2.7
+xdev>=0.3.1     ;                            python_version >= '3.6'    # Python 3.6+
 
 ubelt>=1.2.1     ;                            python_version >= '3.6'    # Python 3.6+
 ubelt>=0.8.1     ; python_version < '3.6' and python_version >= '2.7'    # Python 2.7

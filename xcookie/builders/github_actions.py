@@ -1,5 +1,4 @@
 import ubelt as ub
-from packaging.version import parse as Version
 
 
 class Actions:
@@ -347,7 +346,7 @@ def build_and_test_sdist(self):
                     'pwd',
                     'ls -al',
                     # 'python -m pip install -r requirements/optional.txt',  # todo: use the extra-spec
-                    'python -m pip install -r requirements/ipython.txt',  # hack for line-profiler
+                    # 'python -m pip install -r requirements/ipython.txt',  # hack for line-profiler
                     'python -m pip install -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
                     '# Run in a sandboxed directory',
                     'WORKSPACE_DNAME="testsrcdir_full_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
