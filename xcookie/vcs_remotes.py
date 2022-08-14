@@ -1,9 +1,6 @@
 import os
 import ubelt as ub
-try:
-    from packaging.version import parse as LooseVersion
-except ImportError:
-    from distutils.version import LooseVersion
+from packaging.version import parse as LooseVersion
 
 
 class NotFound(Exception):
@@ -34,7 +31,7 @@ class GitlabRemote:
 
     """
     def __init__(self, proj_name, proj_group, url):
-        import gitlab
+        import gitlab  # type: ignore
         self.url = url
         self.proj_name = proj_name
         self.proj_path = proj_name
