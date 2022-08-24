@@ -30,15 +30,17 @@ class GitlabRemote:
         export PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
 
     """
-    def __init__(self, proj_name, proj_group, url):
+    def __init__(self, proj_name, proj_group, url, visibility='private',
+                 private_token='env:PRIVATE_GITLAB_TOKEN'):
         import gitlab  # type: ignore
         self.url = url
         self.proj_name = proj_name
         self.proj_path = proj_name
         self.proj_group = proj_group
-        self.visibility = 'public'
-        self.gitlab = gitlab.Gitlab(
-            url=self.url, private_token=os.environ['PRIVATE_GITLAB_TOKEN'])
+        self.visibility = visibility
+        if private_token.startswith('env:'):
+            private_token = os.environ[private_token[4:]]
+        self.gitlab = gitlab.Gitlab(url=self.url, private_token=private_token)
 
     def auth(self):
         self.gitlab.auth()
@@ -49,6 +51,9 @@ class GitlabRemote:
         gl = self.gitlab
         groups = gl.groups.list()
         found = [g for g in groups if g.name == self.proj_group]
+        if not found:
+            # allow case insensitivity
+            found = [g for g in groups if g.name.lower() == self.proj_group.lower()]
         return _return_one(found)
 
     @property
