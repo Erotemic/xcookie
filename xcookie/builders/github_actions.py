@@ -153,14 +153,15 @@ def build_github_actions(self):
         purepy_jobs['build_and_test_purepy_wheels'] = build_and_test_purepy_wheels(self)
         needs = list(purepy_jobs.keys())
         jobs.update(purepy_jobs)
-
-    if 'binpy' in self.tags:
+    elif 'binpy' in self.tags:
         name = 'BinPy Build and Test'
         binpy_jobs = {}
         binpy_jobs['build_and_test_sdist'] = build_and_test_sdist(self)
         binpy_jobs['build_and_test_binpy_wheels'] = build_and_test_binpy_wheels(self)
         needs = list(binpy_jobs.keys())
         jobs.update(binpy_jobs)
+    else:
+        raise Exception('Need to specify binpy or purepy in tags')
 
     jobs['test_deploy'] = build_deploy(self, mode='test', needs=needs)
     jobs['live_deploy'] = build_deploy(self, mode='live', needs=needs)
@@ -406,7 +407,7 @@ def build_and_test_binpy_wheels(self):
         Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
         # Configure compilers for Windows 32bit.
         Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
-        Actions.setup_xcode(sensible=True),
+        # Actions.setup_xcode(sensible=True),
         # Emulate aarch64 ppc64le s390x under linux
         Actions.setup_qemu(sensible=True),
         Actions.cibuildwheel(sensible=True),

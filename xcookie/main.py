@@ -492,7 +492,12 @@ class TemplateApplier:
                 self.remote_info['group'] = 'pyutils'  # hack
         print(f'tags={tags}')
         print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
-        assert self.remote_info['type'] != 'unknown'
+        if self.remote_info['type'] == 'unknown':
+            raise Exception('Specify github or gitlab in tags')
+
+        if 'group' not in self.remote_info:
+            raise Exception('Unknown user / group, specify a tag for a known user')
+
         self.remote_info['repo_name'] = self.config['repo_name']
         self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name']])
         self.remote_info['git_url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
@@ -565,6 +570,18 @@ class TemplateApplier:
             if not git_dpath.exists():
                 queue.submit('git init')
                 queue.sync().submit(f'git remote add origin {self.remote_info["url"]}')
+
+            if 'erotemic' in self.tags:
+                # TODO: ensure this works
+                # for erotemic repos, configure the local user and email
+                # TODO: make an xcookie user configuration where this
+                # information is pulled from.
+                queue.sync().submit('git config --local user.name "Jon Crall"')
+                queue.sync().submit('git config --local user.email "erotemic@gmail.com"')
+                # see also:
+                # ~/local/scripts/git-autoconf-gpgsign.sh Erotemic
+                queue.sync().submit('git config --local commit.gpgsign true')
+                queue.sync().submit('git config --local user.signingkey 4AC8B478335ED6ED667715F3622BE571405441B4')
 
             if queue.jobs:
                 queue.rprint()
