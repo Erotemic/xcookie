@@ -31,7 +31,7 @@ class Actions:
     def setup_python(cls, *args, **kwargs):
         return cls._generic_action({
             'name': 'Setup Python',
-            'uses': 'actions/setup-python@v4.1.0'
+            'uses': 'actions/setup-python@v4.2.0'
         }, *args, **kwargs)
 
     @classmethod
@@ -119,7 +119,7 @@ class Actions:
                     # 'CIBW_BUILD_VERBOSITY': 1,
                     'CIBW_SKIP': '${{ matrix.cibw_skip }}',
                     # 'CIBW_BUILD': '${{ matrix.cibw_build }}',
-                    # 'CIBW_TEST_REQUIRES': '-r requirements/tests.txt',
+                    # 'CIBW_TEST_REQUIRES': '-r requirements/tests.txt'0
                     # 'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
                     # configure cibuildwheel to build native archs ('auto'), or emulated ones
                     'CIBW_ARCHS_LINUX': '${{ matrix.arch }}'
@@ -129,7 +129,7 @@ class Actions:
         # Emulate aarch64 ppc64le s390x under linux
         return cls._generic_action({
             'name': 'Build binary wheels',
-            'uses': 'pypa/cibuildwheel@v2.8.1',
+            'uses': 'pypa/cibuildwheel@v2.9.0',
         }, *args, **kwargs)
 
 
@@ -166,6 +166,10 @@ def build_github_actions(self):
     jobs['test_deploy'] = build_deploy(self, mode='test', needs=needs)
     jobs['live_deploy'] = build_deploy(self, mode='live', needs=needs)
 
+    defaultbranch = self.config['defaultbranch']
+    run_on_branches = ub.oset([defaultbranch, 'main'])
+    run_on_branches_str = ', '.join(run_on_branches)
+
     # For some reason, it doesn't like the on block
     header = ub.codeblock(
         f'''
@@ -179,7 +183,7 @@ def build_github_actions(self):
         on:
           push:
           pull_request:
-            branches: [ main ]
+            branches: [ {run_on_branches_str} ]
 
         ''')
 
@@ -294,12 +298,13 @@ def build_and_test_sdist(self):
             Actions.setup_python({'name': 'Set up Python 3.8', 'with': {'python-version': 3.8}}),
             {
                 'name': 'Upgrade pip',
-                'run': [
+                'run': [_ for _ in [
                     'python -m pip install --upgrade pip',
                     'python -m pip install -r requirements/tests.txt',
                     'python -m pip install -r requirements/runtime.txt',
-                    'python -m pip install -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
-                ]
+                    'python -m pip install -r requirements/headless.txt' if 'cv2' in self.tags else None,
+                    'python -m pip install -r requirements/gdal.txt' if 'cv2' in self.tags else None,
+                ] if _ is not None]
             },
             {
                 'name': 'Build sdist',
@@ -644,30 +649,69 @@ def build_and_test_purepy_wheels(self):
 
 
 def build_deploy(self, mode='live', needs=None):
+
+    enable_gpg = self.config['enable_gpg']
+
     assert mode in {'live', 'test'}
     if mode == 'live':
         env = {
             'TWINE_REPOSITORY_URL': 'https://upload.pypi.org/legacy/',
-            'TWINE_USERNAME': '${{ secrets.TWINE_USERNAME }}',
+            # 'TWINE_USERNAME': '${{ secrets.TWINE_USERNAME }}',
             'TWINE_PASSWORD': '${{ secrets.TWINE_PASSWORD }}',
-            # TODO: make this not me-specific
-            'CI_SECRET': '${{ secrets.CI_SECRET }}'
         }
+        if enable_gpg:
+            # TODO: make this not me-specific
+            env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
         condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
     elif mode == 'test':
         env = {
             'TWINE_REPOSITORY_URL': 'https://test.pypi.org/legacy/',
-            'TWINE_USERNAME': '${{ secrets.TEST_TWINE_USERNAME }}',
+            # 'TWINE_USERNAME': '${{ secrets.TEST_TWINE_USERNAME }}',
             'TWINE_PASSWORD': '${{ secrets.TEST_TWINE_PASSWORD }}',
-            # TODO: make this not me-specific
-            'CI_SECRET': '${{ secrets.CI_SECRET }}'
         }
+        if enable_gpg:
+            # TODO: make this not me-specific
+            env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
+
         condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
     else:
         raise KeyError(mode)
 
     if needs is None:
         needs = []
+
+    if enable_gpg:
+        run = [
+            # 'ls -al',
+            'GPG_EXECUTABLE=gpg',
+            '$GPG_EXECUTABLE --version',
+            'openssl version',
+            '$GPG_EXECUTABLE --list-keys',
+            'echo "Decrypting Keys"',
+            'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import',
+            'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust',
+            'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import',
+            'echo "Finish Decrypt Keys"',
+            '$GPG_EXECUTABLE --list-keys || true',
+            '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',
+            '$GPG_EXECUTABLE --list-keys',
+            'VERSION=$(python -c "import setup; print(setup.VERSION)")',
+            'pip install twine',
+            'pip install six pyopenssl ndg-httpsclient pyasn1 -U --user',
+            'pip install requests[security] twine --user',
+            'GPG_KEYID=$(cat dev/public_gpg_key)',
+            '''echo "GPG_KEYID = '$GPG_KEYID'"''',
+            ('DO_GPG=True GPG_KEYID=$GPG_KEYID TWINE_REPOSITORY_URL=${TWINE_REPOSITORY_URL} '
+             'TWINE_PASSWORD=$TWINE_PASSWORD TWINE_USERNAME=$TWINE_USERNAME '
+             'GPG_EXECUTABLE=$GPG_EXECUTABLE DO_UPLOAD=True DO_TAG=False '
+             './publish.sh'),
+        ]
+    else:
+        run = [
+            # 'pip install requests[security] twine pyopenssl ndg-httpsclient pyasn1 -U',
+            'pip install requests[security] twine -U',
+            'twine upload --password=$TWINE_PASSWORD --repository-url "$TWINE_REPOSITORY_URL" wheelhouse/* --skip-existing --verbose || { echo "failed to twine upload" ; exit 1; }',
+        ]
 
     job = {
         'name': f"Uploading {mode.capitalize()} to PyPi",
@@ -682,31 +726,7 @@ def build_deploy(self, mode='live', needs=None):
             {
                 'name': 'Sign and Publish',
                 'env': env,
-                'run': [
-                    # 'ls -al',
-                    'GPG_EXECUTABLE=gpg',
-                    '$GPG_EXECUTABLE --version',
-                    'openssl version',
-                    '$GPG_EXECUTABLE --list-keys',
-                    'echo "Decrypting Keys"',
-                    'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import',
-                    'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust',
-                    'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import',
-                    'echo "Finish Decrypt Keys"',
-                    '$GPG_EXECUTABLE --list-keys || true',
-                    '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',
-                    '$GPG_EXECUTABLE --list-keys',
-                    'VERSION=$(python -c "import setup; print(setup.VERSION)")',
-                    'pip install twine',
-                    'pip install six pyopenssl ndg-httpsclient pyasn1 -U --user',
-                    'pip install requests[security] twine --user',
-                    'GPG_KEYID=$(cat dev/public_gpg_key)',
-                    '''echo "GPG_KEYID = '$GPG_KEYID'"''',
-                    ('DO_GPG=True GPG_KEYID=$GPG_KEYID TWINE_REPOSITORY_URL=${TWINE_REPOSITORY_URL} '
-                     'TWINE_PASSWORD=$TWINE_PASSWORD TWINE_USERNAME=$TWINE_USERNAME '
-                     'GPG_EXECUTABLE=$GPG_EXECUTABLE DO_UPLOAD=True DO_TAG=False '
-                     './publish.sh'),
-                ]
+                'run': run,
             }
         ]
     }

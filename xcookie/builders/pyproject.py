@@ -54,6 +54,7 @@ def build_pyproject(self):
             # setuptools_scm[toml]
             # "wheel>=0.37.1",
         ]
+        pyproj_config['build-system']['build-backend'] = 'setuptools.build_meta'
 
     WITH_PYTEST_INI = 1
     if WITH_PYTEST_INI:

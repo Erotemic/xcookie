@@ -7,7 +7,7 @@ Notes:
     pip install sphinx sphinx-autobuild sphinx_rtd_theme sphinxcontrib-napoleon
 
     cd ~/code/xcookie
-    mkdir docs
+    mkdir -p docs
     cd docs
 
     sphinx-quickstart

@@ -108,6 +108,8 @@ class XCookieConfig(scfg.Config):
         'description': scfg.Value(None, help='repo metadata'),
         'license': scfg.Value(None, help='repo metadata'),
         'dev_status': scfg.Value('planning'),
+        'enable_gpg': scfg.Value(True),
+        'defaultbranch': scfg.Value('main'),
 
         'regen': scfg.Value(None, help=ub.paragraph(
             '''
@@ -407,6 +409,8 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt'},
             {'template': 1, 'overwrite': 0, 'fname': 'docs/source/conf.py'},
+            {'template': 1, 'overwrite': 0, 'fname': 'docs/Makefile'},
+            {'template': 1, 'overwrite': 0, 'fname': 'docs/make.bat'},
 
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
@@ -475,9 +479,37 @@ class TemplateApplier:
         self.remote_info = {
             'type': 'unknown'
         }
+
+        def _parse_remote_url(url):
+            info = {}
+            if url.startswith('https://'):
+                parts = url.split('https://')[1].split('/')
+                info['host'] = 'https://' + parts[0]
+                info['group'] = parts[1]
+                info['repo_name'] = parts[2]
+            elif url.startswith('git@'):
+                url.split('git@')[1]
+                parts = url.split('git@')[1].split(':')
+                info['host'] = 'https://' + parts[0]
+                info['group'] = parts[1].split('/')[0]
+                info['repo_name'] = parts[1].split('/')[1]
+            else:
+                raise ValueError(url)
+            return info
+
+        url = self.config.get('url', None)
+        if url is not None:
+            info = _parse_remote_url(url)
+            self.remote_info['group'] = info['group']
+            self.remote_info['host'] = info['host']
+            self.remote_info['repo_name'] = info['repo_name']
+            if 'github' in self.remote_info['host']:
+                self.remote_info['type'] = 'github'
+            if 'gitlab' in self.remote_info['host']:
+                self.remote_info['type'] = 'gitlab'
+
         if 'gitlab' in tags:
             self.remote_info['type'] = 'gitlab'
-
         if 'github' in tags:
             self.remote_info['type'] = 'github'
         if self.remote_info['type'] == 'gitlab':
@@ -496,7 +528,7 @@ class TemplateApplier:
             raise Exception('Specify github or gitlab in tags')
 
         if 'group' not in self.remote_info:
-            raise Exception('Unknown user / group, specify a tag for a known user')
+            raise Exception('Unknown user / group, specify a tag for a known user. Or a URL in the pyproject.toml [tool.xcookie]')
 
         self.remote_info['repo_name'] = self.config['repo_name']
         self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name']])
@@ -666,6 +698,7 @@ class TemplateApplier:
 
                 if info['template']:
                     xdev.sedfile(stage_fpath, 'xcookie', self.repo_name, verbose=0)
+                    # FIXME: use configuration from pyproject.toml
                     author = ub.cmd('git config --global user.name')['out'].strip()
                     author_email = ub.cmd('git config --global user.email')['out'].strip()
                     xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
