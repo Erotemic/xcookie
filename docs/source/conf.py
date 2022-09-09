@@ -489,7 +489,7 @@ class GoogleStyleDocstringProcessor:
             https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
             https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
         """
-        print(f'name={name}')
+        # print(f'name={name}')
         # print('BEFORE:')
         # import ubelt as ub
         # print('lines = {}'.format(ub.repr2(lines, nl=1)))
