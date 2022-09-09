@@ -656,7 +656,7 @@ def build_deploy(self, mode='live', needs=None):
     if mode == 'live':
         env = {
             'TWINE_REPOSITORY_URL': 'https://upload.pypi.org/legacy/',
-            # 'TWINE_USERNAME': '${{ secrets.TWINE_USERNAME }}',
+            'TWINE_USERNAME': '${{ secrets.TWINE_USERNAME }}',
             'TWINE_PASSWORD': '${{ secrets.TWINE_PASSWORD }}',
         }
         if enable_gpg:
@@ -666,7 +666,7 @@ def build_deploy(self, mode='live', needs=None):
     elif mode == 'test':
         env = {
             'TWINE_REPOSITORY_URL': 'https://test.pypi.org/legacy/',
-            # 'TWINE_USERNAME': '${{ secrets.TEST_TWINE_USERNAME }}',
+            'TWINE_USERNAME': '${{ secrets.TEST_TWINE_USERNAME }}',
             'TWINE_PASSWORD': '${{ secrets.TEST_TWINE_PASSWORD }}',
         }
         if enable_gpg:
@@ -697,8 +697,9 @@ def build_deploy(self, mode='live', needs=None):
             '$GPG_EXECUTABLE --list-keys',
             'VERSION=$(python -c "import setup; print(setup.VERSION)")',
             'pip install twine',
-            'pip install six pyopenssl ndg-httpsclient pyasn1 -U --user',
-            'pip install requests[security] twine --user',
+            # 'pip install six pyopenssl ndg-httpsclient pyasn1 -U --user',
+            # 'pip install urllib3 requests[security] twine --user',
+            'pip install urllib3 requests[security] twine',
             'GPG_KEYID=$(cat dev/public_gpg_key)',
             '''echo "GPG_KEYID = '$GPG_KEYID'"''',
             ('DO_GPG=True GPG_KEYID=$GPG_KEYID TWINE_REPOSITORY_URL=${TWINE_REPOSITORY_URL} '
@@ -709,8 +710,8 @@ def build_deploy(self, mode='live', needs=None):
     else:
         run = [
             # 'pip install requests[security] twine pyopenssl ndg-httpsclient pyasn1 -U',
-            'pip install requests[security] twine -U',
-            'twine upload --password=$TWINE_PASSWORD --repository-url "$TWINE_REPOSITORY_URL" wheelhouse/* --skip-existing --verbose || { echo "failed to twine upload" ; exit 1; }',
+            'pip install urllib3 requests[security] twine -U',
+            'twine upload --username=__token__ --password=$TWINE_PASSWORD --repository-url "$TWINE_REPOSITORY_URL" wheelhouse/* --skip-existing --verbose || { echo "failed to twine upload" ; exit 1; }',
         ]
 
     job = {

@@ -2,13 +2,12 @@ def build_setup(self):
     from xcookie import rc
     import ubelt as ub
     import re
-    # from distutils.version import LooseVersion
-    from packaging.version import parse as LooseVersion
-
+    # from distutils.version import Version
+    # from packaging.version import parse as Version
 
     repo_name = self.config['repo_name']
     min_python = self.config['min_python']
-    min_py_version = str(self.config['min_python'])
+    # min_py_version = str(self.config['min_python'])
     dev_status = self.config['dev_status']
 
     fpath = rc.resource_fpath('setup.py.in')
@@ -163,7 +162,7 @@ if __name__ == '__main__':
     parts.append(ub.indent('setup(**setupkw)'))
 
     text = '\n'.join(parts)
-    print(text)
+    # print(text)
 
     # Its annoying, but other than that insufferable quote issue, black is very
     # good. I have a patch, but I need to find the best way to integrate it.
