@@ -66,6 +66,7 @@ class XCookieConfig(scfg.Config):
         )),
 
         'rotate_secrets': scfg.Value('auto', help='If True will execute secret rotation'),
+        'refresh_docs': scfg.Value('auto', help='If True will refresh the docs'),
 
         'os': scfg.Value('all', help='all or any of win,osx,linux'),
 
@@ -79,6 +80,7 @@ class XCookieConfig(scfg.Config):
         )),
 
         'min_python': scfg.Value('3.7'),
+        'typed': scfg.Value(None, help='Should be None, False, True, partial or full'),
         'supported_python_versions': scfg.Value('auto', help=ub.paragraph(
             '''
             can specify as a list of explicit major.minor versions. Auto will
@@ -110,6 +112,7 @@ class XCookieConfig(scfg.Config):
         'dev_status': scfg.Value('planning'),
         'enable_gpg': scfg.Value(True),
         'defaultbranch': scfg.Value('main'),
+        'xdoctest_style': scfg.Value('google', help='type of xdoctest style'),
 
         'regen': scfg.Value(None, help=ub.paragraph(
             '''
@@ -130,7 +133,7 @@ class XCookieConfig(scfg.Config):
                 "cv2" - enable the headless hack
             ''')),
 
-        'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything'))
+        'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
     }
 
     def normalize(self):
@@ -168,16 +171,24 @@ class XCookieConfig(scfg.Config):
         if self['rotate_secrets'] == 'auto':
             self['rotate_secrets'] = self['is_new']
         if self['author'] is None:
-            self['author'] = ub.cmd('git config --global user.name')['out'].strip()
+            if 'erotemic' in self['tags']:
+                self['author'] = 'Jon Crall'
+            else:
+                self['author'] = ub.cmd('git config user.name')['out'].strip()
+                if self['author'] == 'joncrall':
+                    self['author'] = 'Jon Crall'
         if self['license'] is None:
             self['license'] = 'Apache 2'
         if self['author_email'] is None:
-            self['author_email'] = ub.cmd('git config --global user.email')['out'].strip()
+            if 'erotemic' in self['tags']:
+                self['author_email'] = 'erotemic@gmail.com'
+            else:
+                self['author_email'] = ub.cmd('git config user.email')['out'].strip()
         if self['version'] is None:
             # TODO: read from __init__.py
-            self['version'] = '0.0.1'
+            self['version'] = '{mod_dpath}/__init__.py::__version__'
         if self['description'] is None:
-            self['description'] = 'A module cut from xcookie'
+            self['description'] = 'The {} module'.format(self['mod_name'])
 
         if self['supported_python_versions'] == 'auto':
             from xcookie.constants import KNOWN_PYTHON_VERSIONS
@@ -389,7 +400,9 @@ class TemplateApplier:
              },
 
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,purepy',
-             'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')},
+             # 'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')
+             'dynamic': 'build_gitlab_ci'
+             },
 
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,binpy',
              'input_fname': rc.resource_fpath('gitlab-ci.binpy.yml.in')},
@@ -417,8 +430,9 @@ class TemplateApplier:
 
             {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x'},
             {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh', 'perms': 'x', 'tags': 'binpy'},
-            {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x'},
+            {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x'},  # TODO: template with xdoctest-style
             {'template': 1, 'overwrite': 1, 'fname': 'run_linter.sh', 'perms': 'x'},
+            # TODO: template a clean script
             {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py',
              'perms': 'x', 'tags': 'binpy',
              'input_fname': rc.resource_fpath('run_tests.binpy.py.in')},
@@ -885,6 +899,13 @@ class TemplateApplier:
     # def build_requirements(self):
     #     pass
 
+    def refresh_docs(self):
+        docs_dpath = self.repodir / 'docs'
+        docs_source_dpath = docs_dpath / 'source'
+        command = f'sphinx-apidoc -f -o "{docs_source_dpath}" "{self.mod_dpath}" --separate'
+        ub.cmd(command, verbose=3, check=True, cwd=docs_dpath)
+        ub.cmd('make html', verbose=3, check=True, cwd=docs_dpath)
+
     def rotate_secrets(self):
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
         # dev/public_gpg_key
@@ -964,6 +985,10 @@ class TemplateApplier:
     def build_github_actions(self):
         from xcookie.builders import github_actions
         return github_actions.build_github_actions(self)
+
+    def build_gitlab_ci(self):
+        from xcookie.builders import gitlab_ci
+        return gitlab_ci.build_gitlab_ci(self)
 
     def build_readme(self):
         from xcookie.builders import readme

@@ -22,8 +22,17 @@ def build_pyproject(self):
             "cmake>=3.21.2",
             "cython>=0.29.24",
         ]
+
+        supported_cp_version = []
+        for pyver in self.config['supported_python_versions']:
+            supported_cp_version.append('cp' + pyver.replace('.', ''))
+
+        wheel_build_patterns = []
+        for cpver in supported_cp_version:
+            wheel_build_patterns.append(cpver + '-*')
+
         pyproj_config['tool']['cibuildwheel'].update({
-            'build': "cp36-* cp37-* cp38-* cp39-* cp310-*",
+            'build': " ".join(wheel_build_patterns),
             'build-frontend': "build",
             # 'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
             'skip': "pp* *-musllinux_*",
@@ -58,8 +67,9 @@ def build_pyproject(self):
 
     WITH_PYTEST_INI = 1
     if WITH_PYTEST_INI:
+        xdoctest_style = self.config['xdoctest_style']
         pytest_ini_opts = pyproj_config['tool']['pytest']['ini_options']
-        pytest_ini_opts['addopts'] = "-p no:doctest --xdoctest --xdoctest-style=google --ignore-glob=setup.py --ignore-glob=dev"
+        pytest_ini_opts['addopts'] = f"-p no:doctest --xdoctest --xdoctest-style={xdoctest_style} --ignore-glob=setup.py --ignore-glob=dev --ignore-glob=docs"
         pytest_ini_opts['norecursedirs'] = ".git ignore build __pycache__ dev _skbuild"
         pytest_ini_opts['filterwarnings'] = [
             "default",
@@ -118,6 +128,7 @@ def build_pyproject(self):
             'description',
             'license',
             'dev_status',
+            'typed',
         ]
         config_to_save = ub.dict_subset(self.config, options_to_save)
         pyproj_config['tool']['xcookie'].update(config_to_save)

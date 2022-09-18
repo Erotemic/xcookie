@@ -145,6 +145,11 @@ if __name__ == '__main__':
     setupkw_parts['python_requires'] = f"'>={min_python}'"
     setupkw_parts['classifiers'] = f'{classifier_text}'
 
+    if self.config['typed']:
+        setupkw_parts['package_data'] = {
+            self.mod_name: ['py.typed', '*.pyi'],
+        }
+
     if self.config['rel_mod_parent_dpath'] != '.':
         setupkw_parts['package_dir'] = ub.repr2(
             {'': self.config['rel_mod_parent_dpath']}
