@@ -164,7 +164,7 @@ def make_purepy_ci_jobs(self):
             'ls wheelhouse || echo "wheelhouse does not exist"',
             'pip install tomli ubelt',
             f'MOD_NAME=$({get_modname_bash})',
-            'echo "MOD_NAME=$MOD_NAME',
+            'echo "MOD_NAME=$MOD_NAME"',
         ]
         if 'gdal' in self.tags:
             test_steps += [
