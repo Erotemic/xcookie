@@ -28,3 +28,21 @@ def yaml_loads(text):
     data = yaml.load(file)
     # Loader=yaml.SafeLoader)
     return data
+
+
+def _dev():
+    # import yaml
+    # yaml
+    # https://stackoverflow.com/questions/18065427/generating-anchors-with-pyyaml-dump/36295979#36295979
+    from xcookie import rc
+    import ubelt as ub
+    import yaml
+    fpath = rc.resource_fpath('gitlab-ci.purepy.yml.in')
+    data = yaml.load(open(fpath, 'r'))
+    print('data = {}'.format(ub.repr2(data, nl=-1)))
+    from xcookie import util_yaml
+    print(util_yaml.yaml_dumps(data))
+
+    import ruamel.yaml
+    data = ruamel.yaml.load(open(fpath, 'r'), Loader=ruamel.yaml.RoundTripLoader, preserve_quotes=True)
+    print(ruamel.yaml.round_trip_dump(data, Dumper=ruamel.yaml.RoundTripDumper))

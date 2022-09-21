@@ -33,6 +33,8 @@ ExampleUsage:
     python -m xcookie.main --repodir=$HOME/code/googledoc --tags="github,erotemic,purepy"
 
     python -m xcookie.main --repodir=$HOME/code/networkx_algo_common_subtree_cython --tags="github,erotemic,binpy"
+
+    python -m xcookie.main --repo_name=delayed_image --repodir=$HOME/code/delayed_image --tags="kitware,gitlab,purepy,cv2,gdal"
 """
 import toml
 import shutil
@@ -65,8 +67,8 @@ class XCookieConfig(scfg.Config):
             '''
         )),
 
-        'rotate_secrets': scfg.Value('auto', help='If True will execute secret rotation'),
-        'refresh_docs': scfg.Value('auto', help='If True will refresh the docs'),
+        'rotate_secrets': scfg.Value('auto', help='If True will execute secret rotation', isflag=True),
+        'refresh_docs': scfg.Value('auto', help='If True will refresh the docs', isflag=True),
 
         'os': scfg.Value('all', help='all or any of win,osx,linux'),
 
@@ -100,6 +102,8 @@ class XCookieConfig(scfg.Config):
             ''')),
 
         'autostage': scfg.Value(False, help='if true, automatically add changes to version control'),
+
+        'visibility': scfg.Value('public', help='or private. Does limit what we can do'),
 
         'interactive': scfg.Value(True),
 
@@ -170,6 +174,8 @@ class XCookieConfig(scfg.Config):
             self['is_new'] = not (self['repodir'] / '.git').exists()
         if self['rotate_secrets'] == 'auto':
             self['rotate_secrets'] = self['is_new']
+        if self['refresh_docs'] == 'auto':
+            self['refresh_docs'] = self['is_new']
         if self['author'] is None:
             if 'erotemic' in self['tags']:
                 self['author'] = 'Jon Crall'
@@ -315,6 +321,8 @@ class TemplateApplier:
     def apply(self):
         self.vcs_checks()
         self.copy_staged_files()
+        if self.config['refresh_docs']:
+            self.refresh_docs()
         if self.config['rotate_secrets']:
             self.rotate_secrets()
         self.print_help_tips()
@@ -334,6 +342,10 @@ class TemplateApplier:
                 untracked.append(fpath)
 
         repo.git.add(untracked)
+
+    @property
+    def has_git(self):
+        return (self.config['repodir'] / '.git').exists()
 
     @property
     def rel_mod_dpath(self):
@@ -430,7 +442,9 @@ class TemplateApplier:
 
             {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x'},
             {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh', 'perms': 'x', 'tags': 'binpy'},
-            {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x'},  # TODO: template with xdoctest-style
+            {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x',
+             'dynamic': 'build_run_doctests',
+             },  # TODO: template with xdoctest-style
             {'template': 1, 'overwrite': 1, 'fname': 'run_linter.sh', 'perms': 'x'},
             # TODO: template a clean script
             {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py',
@@ -636,10 +650,19 @@ class TemplateApplier:
 
             if self.config.confirm('Do you want to create the repo on the remote?'):
                 if 'gitlab' in self.tags:
+                    """
+                    Requires user do something to load secrets:
+
+                    load_secrets
+                    HOST=https://gitlab.kitware.com
+                    export PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
+                    """
                     from xcookie.vcs_remotes import GitlabRemote
-                    vcs_remote = GitlabRemote(self.remote_info['repo_name'],
-                                              self.remote_info['host'],
-                                              self.remote_info['url'])
+                    vcs_remote = GitlabRemote(
+                        proj_name=self.remote_info['repo_name'],
+                        proj_group=self.remote_info['group'],
+                        url=self.remote_info['host'],
+                        visibility=self.config['visibility'])
                     vcs_remote.auth()
                     vcs_remote.new_project()
                 elif 'github' in self.tags:
@@ -901,10 +924,12 @@ class TemplateApplier:
 
     def refresh_docs(self):
         docs_dpath = self.repodir / 'docs'
-        docs_source_dpath = docs_dpath / 'source'
+        docs_source_dpath = (docs_dpath / 'source').ensuredir()
         command = f'sphinx-apidoc -f -o "{docs_source_dpath}" "{self.mod_dpath}" --separate'
         ub.cmd(command, verbose=3, check=True, cwd=docs_dpath)
-        ub.cmd('make html', verbose=3, check=True, cwd=docs_dpath)
+        if self.has_git:
+            ub.cmd(f'git add {docs_source_dpath}/*.rst', verbose=3, check=True, cwd=docs_dpath)
+            # ub.cmd('make html', verbose=3, check=True, cwd=docs_dpath)
 
     def rotate_secrets(self):
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
@@ -958,10 +983,7 @@ class TemplateApplier:
                 xdev doctypes {self.repo_name} && mypy {self.repo_name}
 
                 # Make sure you add the following to setup.py
-                package_data={{
-                    '{self.repo_name}': ['py.typed', '*.pyi'],
-                }},
-
+                # Then make sure you have typing=True in xcookie config
 
             ''')
         print(text)
@@ -997,6 +1019,13 @@ class TemplateApplier:
     def build_docs_index(self):
         from xcookie.builders import docs
         return docs.build_docs_index(self)
+
+    def build_run_doctests(self):
+        return ub.codeblock(
+            f'''
+            #!/usr/bin/env bash
+            xdoctest {self.rel_mod_dpath} --style={self.config['xdoctest_style']} all "$@"
+            ''')
 
     def lut(self, info):
         """

@@ -129,7 +129,7 @@ class Actions:
         # Emulate aarch64 ppc64le s390x under linux
         return cls._generic_action({
             'name': 'Build binary wheels',
-            'uses': 'pypa/cibuildwheel@v2.9.0',
+            'uses': 'pypa/cibuildwheel@v2.10.0',
         }, *args, **kwargs)
 
 

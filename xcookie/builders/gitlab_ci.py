@@ -1,23 +1,6 @@
 import ubelt as ub
 
 
-def _dev():
-    # import yaml
-    # yaml
-    # https://stackoverflow.com/questions/18065427/generating-anchors-with-pyyaml-dump/36295979#36295979
-    from xcookie import rc
-    import yaml
-    fpath = rc.resource_fpath('gitlab-ci.purepy.yml.in')
-    data = yaml.load(open(fpath, 'r'))
-    print('data = {}'.format(ub.repr2(data, nl=-1)))
-    from xcookie import util_yaml
-    print(util_yaml.yaml_dumps(data))
-
-    import ruamel.yaml
-    data = ruamel.yaml.load(open(fpath, 'r'), Loader=ruamel.yaml.RoundTripLoader, preserve_quotes=True)
-    print(ruamel.yaml.round_trip_dump(data, Dumper=ruamel.yaml.RoundTripDumper))
-
-
 def build_gitlab_ci(self):
     if 'purepy' in self.tags:
         return make_purepy_ci_jobs(self)
@@ -52,8 +35,8 @@ def make_purepy_ci_jobs(self):
     ]
     if enable_gpg:
         stages.append('gpgsign')
-
     stages.append('deploy')
+
     body = {
         'stages': stages,
     }
@@ -154,12 +137,12 @@ def make_purepy_ci_jobs(self):
 
     test_templates = {}
     install_extras = ub.udict({
-        'test-minimal-loose'  : 'tests',
-        'test-full-loose'     : 'tests,optional',
-        'test-minimal-strict' : 'tests-strict,runtime-strict',
-        'test-full-strict'    : 'tests-strict,runtime-strict,optional-strict',
+        'minimal-loose'  : 'tests',
+        'full-loose'     : 'tests,optional',
+        'minimal-strict' : 'tests-strict,runtime-strict',
+        'full-strict'    : 'tests-strict,runtime-strict,optional-strict',
     })
-    for key, extra in install_extras.items():
+    for extra_key, extra in install_extras.items():
         test_steps = [
             'ls wheelhouse || echo "wheelhouse does not exist"',
             'pip install tomli ubelt',
@@ -175,20 +158,26 @@ def make_purepy_ci_jobs(self):
             f'pip install "$MOD_NAME"[{extra}] -f wheelhouse'
         ]
         test_steps += [
-            CodeBlock(f'mkdir -p sandbox && cd sandbox && pytest --xdoctest-verbose=3 -s --cov-config ../pyproject.toml --cov-report html --cov-report term --cov="$MOD_NAME" --xdoc "$({get_modpath_bash})" ../tests && cd ..'),
+            CodeBlock(' && '.join([
+                'mkdir -p sandbox',
+                'cd sandbox',
+                f'pytest -s --xdoc --xdoctest-verbose=3 --cov-config ../pyproject.toml --cov-report html --cov-report term --cov="$MOD_NAME" "$({get_modpath_bash})" ../tests',
+                'cd ..',
+            ])),
         ]
         test = {
             'before_script': [setup_venv_template],
             'script': test_steps,
         }
         if RUAMEL:
+            anchor = f'test_{extra_key}_template'
             test = CommentedMap(test)
-            test.yaml_set_anchor(key)
+            test.yaml_set_anchor(anchor)
             test.add_yaml_merge([(0, test_template)])
-            body['.' + key] = test
+            body['.' + anchor] = test
         else:
             test = test_template | test
-        test_templates[key] = test
+        test_templates[extra_key] = test
 
     python_images = {
         'cp311': 'python:3.11.0rc2',
@@ -201,10 +190,11 @@ def make_purepy_ci_jobs(self):
 
     jobs = {}
     opsys = 'linux'
+    arch = 'x86_64'
     for pyver in self.config['ci_cpython_versions']:
         cpver = 'cp' + pyver.replace('.', '')
         if cpver in python_images:
-            swenv_key = f'{cpver}_{opsys}'  # software environment key
+            swenv_key = f'{cpver}-{opsys}-{arch}'  # software environment key
             build_name = f'build/{swenv_key}'
 
             build_job = {
@@ -217,8 +207,8 @@ def make_purepy_ci_jobs(self):
                 build_job = build_template | build_job
             jobs[build_name] = build_job
 
-            for test_key, test_template in test_templates.items():
-                test_name = f'test/{test_key}/{swenv_key}'
+            for extra_key, test_template in test_templates.items():
+                test_name = f'test/{extra_key}/{swenv_key}'
                 test_job = {
                     'image': python_images[cpver],
                     'needs': [
@@ -234,12 +224,16 @@ def make_purepy_ci_jobs(self):
 
     body.update(jobs)
 
+    assert enable_gpg
+
+    deploy_image = python_images['cp38']
+
     if enable_gpg:
         gpgsign_job = {}
         gpgsign_job.update(ub.udict(util_yaml.yaml_loads(ub.codeblock(
-            '''
+            f'''
             image:
-                python:3.8
+                {deploy_image}
 
             stage:
                 gpgsign
@@ -308,13 +302,16 @@ def make_purepy_ci_jobs(self):
     if deploy:
         deploy_job = {}
         deploy_job.update(ub.udict(util_yaml.yaml_loads(ub.codeblock(
-            '''
+            f'''
             image:
-                python:3.8
+                {deploy_image}
 
             stage:
                 deploy
 
+            only:
+                refs:
+                    - release
             '''))))
         deploy_script = [
             'pip install pyopenssl ndg-httpsclient pyasn1 requests[security] twine -U',

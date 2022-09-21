@@ -30,7 +30,7 @@ class GitlabRemote:
         export PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
 
     """
-    def __init__(self, proj_name, proj_group, url, visibility='private',
+    def __init__(self, proj_name, proj_group, url, visibility='public',
                  private_token='env:PRIVATE_GITLAB_TOKEN'):
         import gitlab  # type: ignore
         self.url = url
