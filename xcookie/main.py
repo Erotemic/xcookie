@@ -429,6 +429,7 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt'},  # 'dynamic': 'build_requirements'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/graphics.txt', 'tags': 'cv2'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/headless.txt', 'tags': 'cv2'},
+            {'template': 0, 'overwrite': 0, 'fname': 'requirements/gdal.txt', 'tags': 'gdal'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},

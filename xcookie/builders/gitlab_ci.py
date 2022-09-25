@@ -136,11 +136,16 @@ def make_purepy_ci_jobs(self):
     get_modpath_bash = f'python -c "{get_modpath_python}"'
 
     test_templates = {}
+    loose_cv2 = ''
+    strict_cv2 = ''
+    if 'cv2' in self.tags:
+        loose_cv2 = 'headless'
+        strict_cv2 = ',headless-strict'
     install_extras = ub.udict({
-        'minimal-loose'  : 'tests',
-        'full-loose'     : 'tests,optional',
-        'minimal-strict' : 'tests-strict,runtime-strict',
-        'full-strict'    : 'tests-strict,runtime-strict,optional-strict',
+        'minimal-loose'  : 'tests' + loose_cv2,
+        'full-loose'     : 'tests,optional' + loose_cv2,
+        'minimal-strict' : 'tests-strict,runtime-strict' + strict_cv2,
+        'full-strict'    : 'tests-strict,runtime-strict,optional-strict' + strict_cv2,
     })
     for extra_key, extra in install_extras.items():
         test_steps = [
