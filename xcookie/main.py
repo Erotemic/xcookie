@@ -92,7 +92,7 @@ class XCookieConfig(scfg.Config):
         'ci_cpython_versions': scfg.Value('auto', help=ub.paragraph(
             '''
             Specify the major.minor CPython versions to use on the CI.
-            Will default to the supported_python_versions.
+            Will default to the supported_python_versions. E.g. ["3.7", "3.10"]
             ''')),
 
         'ci_pypy_versions': scfg.Value('auto', help=ub.paragraph(
@@ -954,7 +954,7 @@ class TemplateApplier:
         script.sync().submit(f'{environ_export}')
         script.sync().submit('source $(secret_loader.sh)')
         script.sync().submit('export_encrypted_code_signing_keys')
-        script.sync().submit('git commit -am "Updated secrets"')
+        # script.sync().submit('git commit -am "Updated secrets"')
         script.sync().submit(f'{upload_secret_cmd}')
         # script.submit(ub.codeblock(
         #     f'''

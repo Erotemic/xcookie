@@ -25,8 +25,9 @@ def yaml_dumps(data):
 
 def yaml_loads(text):
     file = io.StringIO(text)
-    data = yaml.load(file)
-    # Loader=yaml.SafeLoader)
+    # data = yaml.load(file, Loader=yaml.SafeLoader)
+    import ruamel.yaml
+    data = ruamel.yaml.load(file, Loader=ruamel.yaml.RoundTripLoader, preserve_quotes=True)
     return data
 
 

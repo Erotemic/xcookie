@@ -139,7 +139,7 @@ def make_purepy_ci_jobs(self):
     loose_cv2 = ''
     strict_cv2 = ''
     if 'cv2' in self.tags:
-        loose_cv2 = 'headless'
+        loose_cv2 = ',headless'
         strict_cv2 = ',headless-strict'
     install_extras = ub.udict({
         'minimal-loose'  : 'tests' + loose_cv2,
