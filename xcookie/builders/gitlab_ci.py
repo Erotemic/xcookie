@@ -193,6 +193,8 @@ def make_purepy_ci_jobs(self):
         'cp36': 'python:3.6',
     }
 
+    build_names = []
+
     jobs = {}
     opsys = 'linux'
     arch = 'x86_64'
@@ -201,6 +203,7 @@ def make_purepy_ci_jobs(self):
         if cpver in python_images:
             swenv_key = f'{cpver}-{opsys}-{arch}'  # software environment key
             build_name = f'build/{swenv_key}'
+            build_names.append(build_name)
 
             build_job = {
                 'image': python_images[cpver],
@@ -256,6 +259,8 @@ def make_purepy_ci_jobs(self):
                     - main
                     - release
             '''))))
+
+        gpgsign_job['needs'] = [{'job': build_name, 'artifacts': True} for build_name in build_names]
 
         gpgsign_job.update(util_yaml.yaml_loads(ub.codeblock(
             '''
