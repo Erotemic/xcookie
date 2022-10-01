@@ -105,6 +105,9 @@ def parse_requirements(fname="requirements.txt", versions=False):
             if line.startswith("-e "):
                 info["package"] = line.split("#egg=")[1]
             else:
+                if "--find-links" in line:
+                    # setuptools doesnt seem to handle find links
+                    line = line.split("--find-links")[0]
                 if ";" in line:
                     pkgpart, platpart = line.split(";")
                     # Handle platform specific dependencies
@@ -162,6 +165,36 @@ def parse_requirements(fname="requirements.txt", versions=False):
     return packages
 
 
+# # Maybe use in the future? But has private deps
+# def parse_requirements_alt(fpath='requirements.txt', versions='loose'):
+#     """
+#     Args:
+#         versions (str): can be
+#             False or "free" - remove all constraints
+#             True or "loose" - use the greater or equal (>=) in the req file
+#             strict - replace all greater equal with equals
+#     """
+#     # Note: different versions of pip might have different internals.
+#     # This may need to be fixed.
+#     from pip._internal.req import parse_requirements
+#     from pip._internal.network.session import PipSession
+#     requirements = []
+#     for req in parse_requirements(fpath, session=PipSession()):
+#         if not versions or versions == 'free':
+#             req_name = req.requirement.split(' ')[0]
+#             requirements.append(req_name)
+#         elif versions == 'loose' or versions is True:
+#             requirements.append(req.requirement)
+#         elif versions == 'strict':
+#             part1, *rest = req.requirement.split(';')
+#             strict_req = ';'.join([part1.replace('>=', '==')] + rest)
+#             requirements.append(strict_req)
+#         else:
+#             raise KeyError(versions)
+#     requirements = [r.replace(' ', '') for r in requirements]
+#     return requirements
+
+
 NAME = "xcookie"
 INIT_PATH = "xcookie/__init__.py"
 VERSION = parse_version("xcookie/__init__.py")
@@ -169,11 +202,6 @@ VERSION = parse_version("xcookie/__init__.py")
 if __name__ == "__main__":
     setupkw = {}
 
-    if 1:
-        setupkw["entry_points"] = {
-            # the console_scripts entry point creates the package CLI
-            "console_scripts": ["xcookie = xcookie.__main__:main"]
-        }
     setupkw["install_requires"] = parse_requirements("requirements/runtime.txt")
     setupkw["extras_require"] = {
         "all": parse_requirements("requirements.txt"),
@@ -189,32 +217,33 @@ if __name__ == "__main__":
         ),
     }
 
-    setup(
-        name=NAME,
-        version=VERSION,
-        author="Jon Crall",
-        author_email="erotemic@gmail.com",
-        url="https://github.com/Erotemic/xcookie",
-        description="The xcookie cookie-cutter Module",
-        long_description=parse_description(),
-        long_description_content_type="text/x-rst",
-        license="Apache 2",
-        packages=find_packages("."),
-        package_data={
-            'xcookie': ['py.typed', '*.pyi'],
-            'xcookie.rc': ['*.in'],
-        },
-        python_requires=">=3.7",
-        classifiers=[
-            "Development Status :: 1 - Planning",
-            "Intended Audience :: Developers",
-            "Topic :: Software Development :: Libraries :: Python Modules",
-            "Topic :: Utilities",
-            "License :: OSI Approved :: Apache Software License",
-            "Programming Language :: Python :: 3.7",
-            "Programming Language :: Python :: 3.8",
-            "Programming Language :: Python :: 3.9",
-            "Programming Language :: Python :: 3.10",
+    setupkw["name"] = NAME
+    setupkw["version"] = VERSION
+    setupkw["author"] = "Jon Crall"
+    setupkw["author_email"] = "erotemic@gmail.com"
+    setupkw["url"] = "https://github.com/Erotemic/xcookie"
+    setupkw["description"] = "The xcookie cookie-cutter Module"
+    setupkw["long_description"] = parse_description()
+    setupkw["long_description_content_type"] = "text/x-rst"
+    setupkw["license"] = "Apache 2"
+    setupkw["packages"] = find_packages(".")
+    setupkw["python_requires"] = ">=3.7"
+    setupkw["classifiers"] = [
+        "Development Status :: 1 - Planning",
+        "Intended Audience :: Developers",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        "Topic :: Utilities",
+        "License :: OSI Approved :: Apache Software License",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+    ]
+    setupkw["package_data"] = {"xcookie": ["py.typed", "*.pyi"], "xcookie.rc": ["*.in"]}
+    setupkw["entry_points"] = {
+        "console_scripts": [
+            "xcookie=xcookie.__main__:main",
         ],
-        **setupkw,
-    )
+    }
+    setup(**setupkw)

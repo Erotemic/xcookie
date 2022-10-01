@@ -11,6 +11,16 @@ min_python = '3.7'
 ci_cpython_versions = ['3.7', '3.10']
 #ci_pypy_versions = 'auto'
 ci_pypy_versions = []
+typed=true
+
+
+[tool.xcookie.entry_points]
+console_scripts = [
+    "xcookie=xcookie.__main__:main",
+]
+[tool.xcookie.package_data]
+xcookie = ['py.typed', '*.pyi']
+"xcookie.rc" = ['*.in']
 
 [tool.pytest.ini_options]
 addopts = "-p no:doctest --xdoctest --xdoctest-style=google --ignore-glob=setup.py"

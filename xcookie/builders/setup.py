@@ -161,6 +161,9 @@ if __name__ == '__main__':
         pyproject_settings = {}
     if 'entry_points' in pyproject_settings:
         setupkw_parts['entry_points'] = ub.repr2(pyproject_settings['entry_points'])
+    if 'package_data' in pyproject_settings:
+        setupkw_parts.setdefault('package_data', {})
+        setupkw_parts['package_data'].update(pyproject_settings['package_data'])
 
     for k, v in setupkw_parts.items():
         parts.append(ub.indent(f"setupkw[{k!r}] = {v}"))
