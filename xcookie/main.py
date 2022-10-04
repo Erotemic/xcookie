@@ -970,7 +970,8 @@ class TemplateApplier:
         # print('FIXME: for now, you need to manually execute this')
         # print('Note: need to load_secrets before running this')
         if self.config.confirm('Ready to rotate secrets?'):
-            script.run(system=True)
+            script.run()
+            # script.run(system=True)
 
     def print_help_tips(self):
         text = ub.codeblock(
