@@ -35,6 +35,8 @@ ExampleUsage:
     python -m xcookie.main --repodir=$HOME/code/networkx_algo_common_subtree_cython --tags="github,erotemic,binpy"
 
     python -m xcookie.main --repo_name=delayed_image --repodir=$HOME/code/delayed_image --tags="kitware,gitlab,purepy,cv2,gdal"
+
+    python -m xcookie.main --repo_name=stdx --repodir=$HOME/code/stdx --tags="github,purepy,erotemic"
 """
 import toml
 import shutil
