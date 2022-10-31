@@ -185,7 +185,7 @@ def make_purepy_ci_jobs(self):
         test_templates[extra_key] = test
 
     python_images = {
-        'cp311': 'python:3.11.0rc2',
+        'cp311': 'python:3.11',
         'cp310': 'python:3.10',
         'cp39': 'python:3.9',
         'cp38': 'python:3.8',
