@@ -31,7 +31,7 @@ class Actions:
     def setup_python(cls, *args, **kwargs):
         return cls._generic_action({
             'name': 'Setup Python',
-            'uses': 'actions/setup-python@v4.2.0'
+            'uses': 'actions/setup-python@v4.3.0'
         }, *args, **kwargs)
 
     @classmethod
@@ -364,6 +364,10 @@ def build_and_test_sdist(self):
 def build_and_test_binpy_wheels(self):
     """
     cat ~/code/xcookie/xcookie/rc/test_binaries.yml.in | yq  .jobs.build_and_test_wheels
+
+    Notes:
+        Supported Action platforms:
+            https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
     """
     supported_platform_info = get_supported_platform_info(self)
     os_list = supported_platform_info['os_list']

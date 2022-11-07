@@ -740,6 +740,8 @@ class TemplateApplier:
 
                 if info['template']:
                     xdev.sedfile(stage_fpath, 'xcookie', self.repo_name, verbose=0)
+                    xdev.sedfile(stage_fpath, '<mod_name>', self.mod_name, verbose=0)
+                    xdev.sedfile(stage_fpath, '<rel_mod_dpath>', str(self.rel_mod_dpath), verbose=0)
                     # FIXME: use configuration from pyproject.toml
                     author = ub.cmd('git config --global user.name')['out'].strip()
                     author_email = ub.cmd('git config --global user.email')['out'].strip()

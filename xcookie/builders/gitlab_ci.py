@@ -73,6 +73,8 @@ def make_purepy_ci_jobs(self):
         common_template.yaml_set_anchor('common_template')
         body['.common_template'] = common_template
 
+    wheelhouse_dpath = 'wheelhouse'
+
     build_template = {
         'stage': 'build',
 
@@ -83,12 +85,12 @@ def make_purepy_ci_jobs(self):
         'script': [
             'python -m pip install pip -U',
             'python -m pip install setuptools>=0.8 wheel build',
-            'python -m build --wheel --outdir wheelhouse',
+            f'python -m build --wheel --outdir {wheelhouse_dpath}',
         ],
 
         'artifacts': {
             'paths': [
-                'wheelhouse/*.whl'
+                f'{wheelhouse_dpath}/*.whl'
             ]
         },
     }
@@ -129,8 +131,16 @@ def make_purepy_ci_jobs(self):
         python --version  # Print out python version for debugging
         ''')
 
+    # https://stackoverflow.com/questions/42019184/python-how-can-i-get-the-version-number-from-a-whl-file
+
     get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
     get_modname_bash = f'python -c "{get_modname_python}"'
+
+    get_wheel_fpath_python = f"import pathlib; print(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1])"
+    get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
+
+    get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
+    get_mod_version_bash = f'python -c "{get_mod_version_python}"'
 
     get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
     get_modpath_bash = f'python -c "{get_modpath_python}"'
@@ -149,10 +159,14 @@ def make_purepy_ci_jobs(self):
     })
     for extra_key, extra in install_extras.items():
         test_steps = [
-            'ls wheelhouse || echo "wheelhouse does not exist"',
-            'pip install tomli ubelt',
+            f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',
+            'pip install tomli ubelt pkginfo',
             f'MOD_NAME=$({get_modname_bash})',
+            f'WHEEL_FPATH=$({get_wheel_fpath_bash})',
+            f'MOD_VERSION=$({get_mod_version_bash})',
             'echo "MOD_NAME=$MOD_NAME"',
+            'echo "WHEEL_FPATH=$WHEEL_FPATH"',
+            'echo "MOD_VERSION=$MOD_VERSION"',
         ]
         if 'gdal' in self.tags:
             test_steps += [
@@ -160,7 +174,7 @@ def make_purepy_ci_jobs(self):
                 'pip install -r requirements/gdal.txt',
             ]
         test_steps += [
-            f'pip install "$MOD_NAME"[{extra}] -f wheelhouse'
+            f'pip install "$MOD_NAME"[{extra}]=="$MOD_VERSION" -f {wheelhouse_dpath}'
         ]
         test_steps += [
             CodeBlock(' && '.join([
