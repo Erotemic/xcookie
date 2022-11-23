@@ -539,6 +539,21 @@ def build_and_test_purepy_wheels(self):
         'steps': None,
     }
 
+    if 1:
+        wheelhouse_dpath = 'wheelhouse'
+        # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
+        # get_modname_bash = f'python -c "{get_modname_python}"'
+
+        get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
+        get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
+
+        get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
+        get_mod_version_bash = f'python -c "{get_mod_version_python}"'
+
+        # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
+        get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
+        get_modpath_bash = f'python -c "{get_modpath_python}"'
+
     job['steps'] = [
         Actions.checkout(),
         Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
@@ -553,7 +568,7 @@ def build_and_test_purepy_wheels(self):
             'run': [
                 'python -m pip install pip -U',
                 'python -m pip install setuptools>=0.8 build',
-                'python -m build --wheel --outdir wheelhouse',
+                f'python -m build --wheel --outdir {wheelhouse_dpath}',
             ]
         },
         {
@@ -565,17 +580,30 @@ def build_and_test_purepy_wheels(self):
             },
             'run': [
                 '# Find the path to the wheel',
-                f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
-                '# Install the wheel',
-                'python -m pip install ${WHEEL_FPATH}[${INSTALL_EXTRAS}]',
+                # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
+
+                f'ls {wheelhouse_dpath}',
+
+                'pip install tomli pkginfo',
+                f'MOD_NAME={self.mod_name}',
+                'echo "MOD_NAME=$MOD_NAME"',
+                f'WHEEL_FPATH=$({get_wheel_fpath_bash})',
+                'echo "WHEEL_FPATH=$WHEEL_FPATH"',
+                f'MOD_VERSION=$({get_mod_version_bash})',
+                'echo "MOD_VERSION=$MOD_VERSION"',
+
+                '# Install the wheel (ensure we are using the version we just built)',
+                # 'python -m pip install ${WHEEL_FPATH}[${INSTALL_EXTRAS}]',
+                f'pip install "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+
                 '# Create a sandboxed directory',
                 'WORKSPACE_DNAME="testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
                 'mkdir -p $WORKSPACE_DNAME',
                 'cd $WORKSPACE_DNAME',
                 '# Get the path to the installed package and run the tests',
-                f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
+                f'MOD_DPATH=$({get_modpath_bash})',
                 'echo "MOD_DPATH = $MOD_DPATH"',
-                f'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov={self.mod_name} $MOD_DPATH ../tests',
+                'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests',
                 '# Move coverage file to a new name',
                 'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
                 'cd ..',

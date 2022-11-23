@@ -136,7 +136,7 @@ def make_purepy_ci_jobs(self):
     get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
     get_modname_bash = f'python -c "{get_modname_python}"'
 
-    get_wheel_fpath_python = f"import pathlib; print(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1])"
+    get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
     get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
 
     get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
@@ -164,6 +164,7 @@ def make_purepy_ci_jobs(self):
             f'MOD_NAME=$({get_modname_bash})',
             f'WHEEL_FPATH=$({get_wheel_fpath_bash})',
             f'MOD_VERSION=$({get_mod_version_bash})',
+            f'INSTALL_EXTRAS={extra}',
             'echo "MOD_NAME=$MOD_NAME"',
             'echo "WHEEL_FPATH=$WHEEL_FPATH"',
             'echo "MOD_VERSION=$MOD_VERSION"',
@@ -174,13 +175,13 @@ def make_purepy_ci_jobs(self):
                 'pip install -r requirements/gdal.txt',
             ]
         test_steps += [
-            f'pip install "$MOD_NAME"[{extra}]=="$MOD_VERSION" -f {wheelhouse_dpath}'
+            f'pip install "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}'
         ]
         test_steps += [
             CodeBlock(' && '.join([
                 'mkdir -p sandbox',
                 'cd sandbox',
-                f'pytest -s --xdoc --xdoctest-verbose=3 --cov-config ../pyproject.toml --cov-report html --cov-report term --cov="$MOD_NAME" "$({get_modpath_bash})" ../tests',
+                f'pytest -s --xdoctest --xdoctest-verbose=3 --cov-config ../pyproject.toml --cov-report html --cov-report term --cov="$MOD_NAME" "$({get_modpath_bash})" ../tests',
                 'cd ..',
             ])),
         ]
