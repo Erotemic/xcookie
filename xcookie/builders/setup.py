@@ -58,6 +58,7 @@ def build_setup(self):
         version_classifiers.append(f'Programming Language :: Python :: {ver}')
 
     # List of classifiers available at:
+    dev_status = dev_status.lower()
     if dev_status == 'planning':
         dev_status = 'Development Status :: 1 - Planning'
     elif dev_status == 'pre-alpha':
@@ -66,7 +67,7 @@ def build_setup(self):
         dev_status = 'Development Status :: 3 - Alpha'
     elif dev_status == 'beta':
         dev_status = 'Development Status :: 4 - Beta'
-    elif dev_status == 'stable':
+    elif dev_status in {'stable', 'production'}:
         dev_status = 'Development Status :: 5 - Production/Stable'
     elif dev_status == 'mature':
         dev_status = 'Development Status :: 6 - Mature'
