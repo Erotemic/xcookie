@@ -598,6 +598,8 @@ def build_and_test_purepy_wheels(self):
                 'echo "MOD_VERSION=$MOD_VERSION"',
 
                 '# Install the wheel (ensure we are using the version we just built)',
+                # FIXME: remove all ambiguity in getting the wheel to have the right version
+                '# NOTE: THE VERSION MUST BE NEWER THAN AN EXISTING PYPI VERSION OR THIS MAY FAIL',
                 # 'python -m pip install ${WHEEL_FPATH}[${INSTALL_EXTRAS}]',
                 f'pip install "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
 
