@@ -496,31 +496,36 @@ def build_and_test_purepy_wheels(self):
     })
 
     # Reduce the CI load, don't specify the entire product space
+    arch = 'auto'
     include = []
     for osname in os_list:
         for extra in install_extras.take(['minimal-strict']):
             for pyver in [min_python_version]:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
 
     for osname in os_list:
         for extra in install_extras.take(['full-strict']):
             for pyver in [max_python_version]:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
 
     for osname in os_list[1:]:
         for extra in install_extras.take(['minimal-loose']):
             for pyver in [max_python_version]:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
 
     for osname in os_list:
         for extra in install_extras.take(['full-loose']):
             for pyver in cpython_versions:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
 
     for osname in os_list:
         for extra in install_extras.take(['full-loose']):
             for pyver in pypy_versions:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
+
+    for item in include:
+        if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
+            item['os'] = 'ubuntu-20.04'
 
     job = {
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
@@ -530,9 +535,9 @@ def build_and_test_purepy_wheels(self):
                 # 'os': os_list,
                 # 'python-version': python_versions_non34,
                 # 'install-extras': list(install_extras.take(['minimal-loose', 'full-loose'])),
-                'arch': [
-                    'auto'
-                ],
+                # 'arch': [
+                #     'auto'
+                # ],
                 'include': include,
             }
         },
