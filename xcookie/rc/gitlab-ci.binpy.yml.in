@@ -32,7 +32,7 @@ stages:
 
     tags:
         # Tags define which runners will accept which jobs
-        - linux
+        - linux-x86_64
         - docker
         - privileged
         #- kitware-python-stack

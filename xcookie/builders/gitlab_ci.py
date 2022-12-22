@@ -50,7 +50,7 @@ def make_purepy_ci_jobs(self):
         tags:
             # Tags define which runners will accept which jobs
             - docker
-            - linux
+            - linux-x86_64
             - build
 
         variables:
