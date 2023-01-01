@@ -8,6 +8,50 @@ def build_gitlab_ci(self):
         raise NotImplementedError
 
 
+def build_gitlab_rules(self):
+    group = self.remote_info['group']
+    repo_name = self.remote_info['repo_name']
+    text = ub.codeblock(
+        f'''
+        # Rules for where jobs can run
+        # Derived from: https://gitlab.kitware.com/cmake/cmake/-/blob/v3.25.1/.gitlab/rules.yml
+        # For an overview of gitlab rules see:
+        # https://docs.gitlab.com/ee/ci/yaml/#workflowrules
+
+        .run_manually:
+            rules:
+                - if: '$CI_MERGE_REQUEST_ID'
+                  when: manual
+                - if: '$CI_COMMIT_REF_PROTECTED == true'
+                  when: on_success
+                - if: '$CI_PROJECT_PATH == "{group}/{repo_name}" && $CI_PIPELINE_SOURCE == "schedule"'
+                  when: on_success
+                - if: '$CI_PROJECT_PATH == "{group}/{repo_name}"'
+                  when: manual
+                - when: never
+
+        .run_automatically:
+            rules:
+                - if: '$CI_MERGE_REQUEST_ID'
+                  when: on_success
+                - if: '$CI_PROJECT_PATH == "{group}/{repo_name}" && $CI_PIPELINE_SOURCE == "schedule"'
+                  when: on_success
+                - if: '$CI_PROJECT_PATH == "{group}/{repo_name}"'
+                  when: delayed
+                  start_in: 5 minutes
+                - when: never
+
+        .run_dependent:
+            rules:
+                - if: '$CI_MERGE_REQUEST_ID'
+                  when: on_success
+                - if: '$CI_PROJECT_PATH == "{group}/{repo_name}"'
+                  when: on_success
+                - when: never
+        ''')
+    return text
+
+
 # class YamlBuilder:
 #     def __init__(self, data):
 #         pass

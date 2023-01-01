@@ -420,6 +420,11 @@ class TemplateApplier:
              'dynamic': 'build_gitlab_ci'
              },
 
+            {'template': 0, 'overwrite': 1, 'fname': '.rules.yml', 'tags': 'gitlab',
+             # 'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')
+             'dynamic': 'build_gitlab_rules'
+             },
+
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,binpy',
              'input_fname': rc.resource_fpath('gitlab-ci.binpy.yml.in')},
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
@@ -1019,6 +1024,10 @@ class TemplateApplier:
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci
         return gitlab_ci.build_gitlab_ci(self)
+
+    def build_gitlab_rules(self):
+        from xcookie.builders import gitlab_ci
+        return gitlab_ci.build_gitlab_rules(self)
 
     def build_readme(self):
         from xcookie.builders import readme
