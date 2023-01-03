@@ -219,7 +219,7 @@ def make_purepy_ci_jobs(self):
                 'pip install -r requirements/gdal.txt',
             ]
         test_steps += [
-            f'pip install "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}'
+            f'pip install --prefer-binary "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}'
         ]
         test_steps += [
             CodeBlock(' && '.join([

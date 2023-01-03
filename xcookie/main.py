@@ -380,7 +380,8 @@ class TemplateApplier:
 
             {'template': 0, 'overwrite': 0, 'fname': '.gitignore'},
             # {'template': 1, 'overwrite': 1, 'fname': '.coveragerc'},
-            {'template': 1, 'overwrite': 1, 'fname': '.readthedocs.yml'},
+            {'template': 1, 'overwrite': 1, 'fname': '.readthedocs.yml',
+             'dynamic': 'build_readthedocs' },
             # {'template': 0, 'overwrite': 1, 'fname': 'pytest.ini'},
 
             {'template': 0, 'overwrite': 0, 'fname': 'pyproject.toml',
@@ -1000,6 +1001,14 @@ class TemplateApplier:
 
             ''')
         print(text)
+
+    def build_readthedocs(self):
+        """
+        Returns:
+            str: templated code
+        """
+        from xcookie.builders import readthedocs
+        return readthedocs.build_readthedocs(self)
 
     def build_setup(self):
         """
