@@ -444,7 +444,8 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt'},
-            {'template': 1, 'overwrite': 0, 'fname': 'docs/source/conf.py'},
+            {'template': 1, 'overwrite': 0, 'fname': 'docs/source/conf.py',
+             'dynamic': 'build_docs_conf'},
             {'template': 1, 'overwrite': 0, 'fname': 'docs/Makefile'},
             {'template': 1, 'overwrite': 0, 'fname': 'docs/make.bat'},
 
@@ -1045,6 +1046,10 @@ class TemplateApplier:
     def build_docs_index(self):
         from xcookie.builders import docs
         return docs.build_docs_index(self)
+
+    def build_docs_conf(self):
+        from xcookie.builders import docs_conf
+        return docs_conf.build_docs_conf(self)
 
     def build_run_doctests(self):
         return ub.codeblock(
