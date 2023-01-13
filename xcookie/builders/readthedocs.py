@@ -47,10 +47,10 @@ def build_readthedocs(self):
 
     data = default_data.copy()
 
-    if 'cv2' in self.tags or True:
+    if 'cv2' in self.tags:
         data['python']['install'].insert(0, {'requirements': 'requirements/headless.txt'})
 
-    if 'gdal' in self.tags or True:
+    if 'gdal' in self.tags:
         data['python']['install'].insert(0, {'requirements': 'requirements/gdal.txt'})
 
     import ruamel
