@@ -70,7 +70,7 @@ def build_pyproject(self):
         xdoctest_style = self.config['xdoctest_style']
         pytest_ini_opts = pyproj_config['tool']['pytest']['ini_options']
         pytest_ini_opts['addopts'] = f"-p no:doctest --xdoctest --xdoctest-style={xdoctest_style} --ignore-glob=setup.py --ignore-glob=dev --ignore-glob=docs"
-        pytest_ini_opts['norecursedirs'] = ".git ignore build __pycache__ dev _skbuild"
+        pytest_ini_opts['norecursedirs'] = ".git ignore build __pycache__ dev _skbuild docs"
         pytest_ini_opts['filterwarnings'] = [
             "default",
             "ignore:.*No cfgstr given in Cacher constructor or call.*:Warning",

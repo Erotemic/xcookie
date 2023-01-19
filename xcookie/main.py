@@ -169,6 +169,8 @@ class XCookieConfig(scfg.Config):
                 self['os'].add('win')
                 self['os'].add('osx')
                 self['os'].add('linux')
+                self['os'].remove('all')
+            self['os'] = sorted(self['os'])
 
         if self['repo_name'] is None:
             self['repo_name'] = self['repodir'].name
@@ -995,10 +997,10 @@ class TemplateApplier:
             * Add typing to the module
 
                 # Generate stubs and check them
-                xdev doctypes {self.repo_name} && mypy {self.repo_name}
+                xdev docstubs {self.repo_name} && mypy {self.repo_name}
 
-                # Make sure you add the following to setup.py
-                # Then make sure you have typing=True in xcookie config
+                # Then make sure you have typed = true in the [tool.xcookie]
+                # section of pyproject.toml and regenerate setup.py
 
             ''')
         print(text)
