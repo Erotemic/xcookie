@@ -136,8 +136,14 @@ if __name__ == '__main__':
     setupkw_parts = {}
     setupkw_parts['name'] = 'NAME'
     setupkw_parts['version'] = 'VERSION'
-    setupkw_parts['author'] = f'{self.config["author"]!r}'
-    setupkw_parts['author_email'] = f'{self.config["author_email"]!r}'
+    if isinstance(self.config["author"], list):
+        setupkw_parts['author'] = repr(', '.join(self.config["author"]))
+    else:
+        setupkw_parts['author'] = f'{self.config["author"]!r}'
+    if isinstance(self.config["author_email"], list):
+        setupkw_parts['author_email'] = repr(', '.join(self.config["author_email"]))
+    else:
+        setupkw_parts['author_email'] = f'{self.config["author_email"]!r}'
     setupkw_parts['url'] = f'{self.config["url"]!r}'
     setupkw_parts['description'] = f'{self.config["description"]!r}'
     setupkw_parts['long_description'] = 'parse_description()'
