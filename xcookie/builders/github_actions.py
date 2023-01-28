@@ -281,7 +281,7 @@ def build_and_test_sdist(self):
                     'python -m pip install -r requirements/tests.txt',
                     'python -m pip install -r requirements/runtime.txt',
                     'python -m pip install -r requirements/headless.txt' if 'cv2' in self.tags else None,
-                    'python -m pip install -r requirements/gdal.txt' if 'cv2' in self.tags else None,
+                    'python -m pip install -r requirements/gdal.txt' if 'gdal' in self.tags else None,
                 ] if _ is not None]
             },
             {
@@ -488,12 +488,32 @@ def build_and_test_purepy_wheels(self):
 
     # Map the min/full loose/strict terminology to specific extra packages
     import ubelt as ub
-    install_extras = ub.udict({
-        'minimal-loose'  : 'tests',
-        'full-loose'     : 'tests,optional',
-        'minimal-strict' : 'tests-strict,runtime-strict',
-        'full-strict'    : 'tests-strict,runtime-strict,optional-strict',
+    special_loose_tags = []
+    if 'cv2' in self.tags:
+        special_loose_tags.append('headless')
+    special_strict_tags = [t + '-strict' for t in special_loose_tags]
+    install_extra_tags = ub.udict({
+        'minimal-loose'  : ['tests'] + special_loose_tags,
+        'full-loose'     : ['tests', 'optional'] + special_loose_tags,
+        'minimal-strict' : ['tests-strict', 'runtime-strict'] + special_strict_tags,
+        'full-strict'    : ['tests-strict', 'runtime-strict', 'optional-strict'] + special_strict_tags,
     })
+    install_extras = ub.udict({k: ','.join(v) for k, v in install_extra_tags.items()})
+
+    test_env = {
+        'INSTALL_EXTRAS': '${{ matrix.install-extras }}',
+        'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
+    }
+    special_install_lines = []
+    special_strict_test_env = {}
+    special_loose_test_env = {}
+    if 'gdal' in self.tags:
+        test_env['GDAL_REQUIREMENT_TXT'] = 'py${{ matrix.gdal-requirement-txt }}'
+        special_install_lines.append('pip install -r $GDAL_REQUIREMENT_TXT')
+        special_loose_test_env['gdal-requirement-txt'] = 'requirements/gdal.txt'
+        # TODO: need to have logic for a gdal strict
+        # special_strict_test_env['gdal-requirement-txt'] = 'requirements-strict/gdal.txt'
+        special_strict_test_env['gdal-requirement-txt'] = 'requirements/gdal.txt'
 
     # Reduce the CI load, don't specify the entire product space
     arch = 'auto'
@@ -501,27 +521,27 @@ def build_and_test_purepy_wheels(self):
     for osname in os_list:
         for extra in install_extras.take(['minimal-strict']):
             for pyver in [min_python_version]:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_strict_test_env})
 
     for osname in os_list:
         for extra in install_extras.take(['full-strict']):
             for pyver in [max_python_version]:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_strict_test_env})
 
     for osname in os_list[1:]:
         for extra in install_extras.take(['minimal-loose']):
             for pyver in [max_python_version]:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_loose_test_env})
 
     for osname in os_list:
         for extra in install_extras.take(['full-loose']):
             for pyver in cpython_versions:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_loose_test_env})
 
     for osname in os_list:
         for extra in install_extras.take(['full-loose']):
             for pyver in pypy_versions:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch})
+                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_loose_test_env})
 
     for item in include:
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
@@ -543,6 +563,8 @@ def build_and_test_purepy_wheels(self):
         },
         'steps': None,
     }
+
+    special_install_lines = []
 
     if 1:
         wheelhouse_dpath = 'wheelhouse'
@@ -579,10 +601,7 @@ def build_and_test_purepy_wheels(self):
         {
             'name': 'Test wheel with ${{ matrix.install-extras }}',
             'shell': 'bash',
-            'env': {
-                'INSTALL_EXTRAS': '${{ matrix.install-extras }}',
-                'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
-            },
+            'env': test_env,
             'run': [
                 '# Find the path to the wheel',
                 # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
@@ -596,7 +615,8 @@ def build_and_test_purepy_wheels(self):
                 'echo "WHEEL_FPATH=$WHEEL_FPATH"',
                 f'MOD_VERSION=$({get_mod_version_bash})',
                 'echo "MOD_VERSION=$MOD_VERSION"',
-
+            ] + special_install_lines +
+            [
                 '# Install the wheel (ensure we are using the version we just built)',
                 # FIXME: remove all ambiguity in getting the wheel to have the right version
                 '# NOTE: THE VERSION MUST BE NEWER THAN AN EXISTING PYPI VERSION OR THIS MAY FAIL',
