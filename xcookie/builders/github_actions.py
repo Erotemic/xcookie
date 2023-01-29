@@ -136,28 +136,30 @@ class Actions:
 def build_github_actions(self):
     """
     cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.lint
-    cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.build_and_test_purepy_wheels
     cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.build_and_test_sdist
     cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.deploy
     cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .
-    build_and_test_purepy_wheels
     """
 
     jobs = {}
     jobs['lint_job'] = lint_job(self)
 
     if 'purepy' in self.tags:
-        name = 'PurePy Build and Test'
+        name = 'PurePyCI'
         purepy_jobs = {}
-        purepy_jobs['build_and_test_sdist'] = build_and_test_sdist(self)
-        purepy_jobs['build_and_test_purepy_wheels'] = build_and_test_purepy_wheels(self)
+        if 'nosrcdist' not in self.tags:
+            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist(self)
+        purepy_jobs['build_purepy_wheels'] = build_purewheel_job(self)
+        purepy_jobs['test_purepy_wheels'] = test_wheels_job(self, needs=['build_purepy_wheels'])
         needs = list(purepy_jobs.keys())
         jobs.update(purepy_jobs)
     elif 'binpy' in self.tags:
-        name = 'BinPy Build and Test'
+        name = 'BinPyCI'
         binpy_jobs = {}
-        binpy_jobs['build_and_test_sdist'] = build_and_test_sdist(self)
-        binpy_jobs['build_and_test_binpy_wheels'] = build_and_test_binpy_wheels(self)
+        if 'nosrcdist' not in self.tags:
+            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist(self)
+        binpy_jobs['build_binpy_wheels'] = build_and_test_binpy_wheels(self)
+        binpy_jobs['test_binpy_wheels'] = test_wheels_job(self, needs=['build_binpy_wheels'])
         needs = list(binpy_jobs.keys())
         jobs.update(binpy_jobs)
     else:
@@ -253,6 +255,11 @@ def lint_job(self):
                     flake8 ./{self.rel_mod_dpath} --count --select=E9,F63,F7,F82 --show-source --statistics
                     ''')
             },
+        ]
+    }
+
+    if 'notypes' not in self.tags:
+        job['steps'].append(
             {
                 'name': 'Typecheck with mypy',
                 'run': ub.codeblock(
@@ -262,8 +269,7 @@ def lint_job(self):
                     mypy ./{self.rel_mod_dpath}
                     ''')
             }
-        ]
-    }
+        )
     return job
 
 
@@ -331,7 +337,7 @@ def build_and_test_sdist(self):
                     'ls -al',
                     # 'python -m pip install -r requirements/optional.txt',  # todo: use the extra-spec
                     # 'python -m pip install -r requirements/ipython.txt',  # hack for line-profiler
-                    'python -m pip install -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
+                    'python -m pip install --prefer-binary -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
                     '# Run in a sandboxed directory',
                     'WORKSPACE_DNAME="testsrcdir_full_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
                     'mkdir -p $WORKSPACE_DNAME',
@@ -371,34 +377,55 @@ def build_and_test_binpy_wheels(self):
     """
     supported_platform_info = get_supported_platform_info(self)
     os_list = supported_platform_info['os_list']
-    included_runs = [
-        {'os': 'windows-latest', 'arch': 'auto', 'cibw_skip': "*-win_amd64"},
-    ]
+
+    pyproj_config = self.config._load_pyproject_config()
+    explicit_skips = ' ' + pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('skip', '')
+    print(f'explicit_skips={explicit_skips}')
+
+    if 'win' in self.config['os']:
+        included_runs = [
+            {'os': 'windows-latest', 'arch': 'auto', 'cibw_skip': ("*-win_amd64" + explicit_skips).strip()},
+        ]
+    else:
+        included_runs = []
+
+    matrix = {}
+    matrix['os'] = os_list
+
+    if 'win' in self.config['os']:
+        matrix['cibw_skip'] = [('*-win32' + explicit_skips).strip()]
+    else:
+        matrix['cibw_skip'] = [explicit_skips.strip()]
+    matrix['arch'] = ['auto']
+    if included_runs:
+        matrix['include'] = included_runs
+
+    os_specific_steps = []
+    if 'win' in self.config['os']:
+        os_specific_steps += [
+            Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
+            Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
+        ]
+
     job = {
         'name': '${{ matrix.os }}, arch=${{ matrix.arch }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
-            'matrix': {
-                'os': os_list,
-                'cibw_skip': ['*-win32'],
-                'arch': ['auto'],
-                'include': included_runs,
-            }
+            'matrix': matrix
         },
         'steps': None,
     }
 
-    job['steps'] = [
-        Actions.checkout(),
-        # Configure compilers for Windows 64bit.
-        Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
-        # Configure compilers for Windows 32bit.
-        Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
-        # Actions.setup_xcode(sensible=True),
-        # Emulate aarch64 ppc64le s390x under linux
+    job_steps = []
+    # Actions.setup_xcode(sensible=True),
+    # Emulate aarch64 ppc64le s390x under linux
+    job_steps += [Actions.checkout()]
+    job_steps += os_specific_steps
+    job_steps += [
         Actions.setup_qemu(sensible=True),
         Actions.cibuildwheel(sensible=True),
-
+    ]
+    job_steps += [
         {
             "name": "Show built files",
             "shell": "bash",
@@ -447,6 +474,7 @@ def build_and_test_binpy_wheels(self):
             }
         })
     ]
+    job['steps'] = job_steps
     return job
 
 
@@ -477,7 +505,61 @@ def get_supported_platform_info(self):
     return supported_platform_info
 
 
-def build_and_test_purepy_wheels(self):
+def build_purewheel_job(self):
+    wheelhouse_dpath = 'wheelhouse'
+    supported_platform_info = get_supported_platform_info(self)
+    # os_list = supported_platform_info['os_list']
+    cpython_versions = supported_platform_info['cpython_versions']
+    # pypy_versions = supported_platform_info['pypy_versions']
+    # min_python_version = supported_platform_info['min_python_version']
+    # max_python_version = supported_platform_info['max_python_version']
+    job = {
+        'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
+        'runs-on': '${{ matrix.os }}',
+        'strategy': {
+            'matrix': {
+                # Build on one of the platforms with the newest python version
+                # (it doesnt really matter)
+                'os': ['ubuntu-latest'],  # os_list[0:1],
+                'python-version': cpython_versions[-1:],
+                'arch': ['auto'],
+            }
+        },
+        'steps': None,
+    }
+    job['steps'] = [
+        Actions.checkout(),
+        Actions.setup_qemu(sensible=True),
+        Actions.setup_python({
+            'with': {'python-version': '${{ matrix.python-version }}'}
+        }),
+        {
+            'name': 'Build pure wheel',
+            'shell': 'bash',
+            'run': [
+                'python -m pip install pip -U',
+                'python -m pip install setuptools>=0.8 build',
+                f'python -m build --wheel --outdir {wheelhouse_dpath}',
+            ]
+        },
+        {
+            'name': 'Show built files',
+            'shell': 'bash',
+            'run': 'ls -la wheelhouse'
+        },
+        Actions.upload_artifact({
+            'name': 'Upload wheels artifact',
+            'with': {
+                'name': 'wheels',
+                'path': f"./wheelhouse/{self.mod_name}*.whl"
+            }
+        })
+    ]
+    return job
+
+
+def test_wheels_job(self, needs=None):
+    wheelhouse_dpath = 'wheelhouse'
     supported_platform_info = get_supported_platform_info(self)
 
     os_list = supported_platform_info['os_list']
@@ -500,16 +582,9 @@ def build_and_test_purepy_wheels(self):
     })
     install_extras = ub.udict({k: ','.join(v) for k, v in install_extra_tags.items()})
 
-    test_env = {
-        'INSTALL_EXTRAS': '${{ matrix.install-extras }}',
-        'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
-    }
-    special_install_lines = []
     special_strict_test_env = {}
     special_loose_test_env = {}
     if 'gdal' in self.tags:
-        test_env['GDAL_REQUIREMENT_TXT'] = 'py${{ matrix.gdal-requirement-txt }}'
-        special_install_lines.append('pip install -r $GDAL_REQUIREMENT_TXT')
         special_loose_test_env['gdal-requirement-txt'] = 'requirements/gdal.txt'
         # TODO: need to have logic for a gdal strict
         # special_strict_test_env['gdal-requirement-txt'] = 'requirements-strict/gdal.txt'
@@ -550,6 +625,7 @@ def build_and_test_purepy_wheels(self):
     job = {
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
         'runs-on': '${{ matrix.os }}',
+        'needs': list(needs),
         'strategy': {
             'matrix': {
                 # 'os': os_list,
@@ -564,10 +640,13 @@ def build_and_test_purepy_wheels(self):
         'steps': None,
     }
 
-    special_install_lines = []
-
+    os_specific_steps = []
+    if 'win' in self.config['os']:
+        os_specific_steps += [
+            Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
+            Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
+        ]
     if 1:
-        wheelhouse_dpath = 'wheelhouse'
         # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
         # get_modname_bash = f'python -c "{get_modname_python}"'
 
@@ -581,73 +660,62 @@ def build_and_test_purepy_wheels(self):
         get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
         get_modpath_bash = f'python -c "{get_modpath_python}"'
 
+    test_env = {
+        'INSTALL_EXTRAS': '${{ matrix.install-extras }}',
+        'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
+    }
+
+    special_install_lines = []
+    if 'gdal' in self.tags:
+        test_env['GDAL_REQUIREMENT_TXT'] = 'py${{ matrix.gdal-requirement-txt }}'
+        special_install_lines.append('pip install -r $GDAL_REQUIREMENT_TXT')
+
+    test_wheel_run_cmds = [
+        '# Find the path to the wheel',
+        # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
+
+        f'ls {wheelhouse_dpath}',
+
+        'pip install tomli pkginfo',
+        f'MOD_NAME={self.mod_name}',
+        'echo "MOD_NAME=$MOD_NAME"',
+        f'WHEEL_FPATH=$({get_wheel_fpath_bash})',
+        'echo "WHEEL_FPATH=$WHEEL_FPATH"',
+        f'MOD_VERSION=$({get_mod_version_bash})',
+        'echo "MOD_VERSION=$MOD_VERSION"',
+    ] + special_install_lines + [
+        '# Install the wheel (ensure we are using the version we just built)',
+        # FIXME: remove all ambiguity in getting the wheel to have the right version
+        '# NOTE: THE VERSION MUST BE NEWER THAN AN EXISTING PYPI VERSION OR THIS MAY FAIL',
+        # 'python -m pip install ${WHEEL_FPATH}[${INSTALL_EXTRAS}]',
+        f'pip install --prefer-binary "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+
+        '# Create a sandboxed directory',
+        'WORKSPACE_DNAME="testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
+        'mkdir -p $WORKSPACE_DNAME',
+        'cd $WORKSPACE_DNAME',
+        '# Get the path to the installed package and run the tests',
+        f'MOD_DPATH=$({get_modpath_bash})',
+        'echo "MOD_DPATH = $MOD_DPATH"',
+        'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests',
+        '# Move coverage file to a new name',
+        'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
+        'cd ..',
+    ]
+
     job['steps'] = [
         Actions.checkout(),
-        Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
-        Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
         Actions.setup_qemu(sensible=True),
         Actions.setup_python({
             'with': {'python-version': '${{ matrix.python-version }}'}
         }),
-        {
-            'name': 'Build pure wheel',
-            'shell': 'bash',
-            'run': [
-                'python -m pip install pip -U',
-                'python -m pip install setuptools>=0.8 build',
-                f'python -m build --wheel --outdir {wheelhouse_dpath}',
-            ]
-        },
+        Actions.download_artifact({'name': 'Download wheels and sdist', 'with': {'name': 'wheels', 'path': 'wheelhouse'}}),
         {
             'name': 'Test wheel with ${{ matrix.install-extras }}',
             'shell': 'bash',
             'env': test_env,
-            'run': [
-                '# Find the path to the wheel',
-                # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
-
-                f'ls {wheelhouse_dpath}',
-
-                'pip install tomli pkginfo',
-                f'MOD_NAME={self.mod_name}',
-                'echo "MOD_NAME=$MOD_NAME"',
-                f'WHEEL_FPATH=$({get_wheel_fpath_bash})',
-                'echo "WHEEL_FPATH=$WHEEL_FPATH"',
-                f'MOD_VERSION=$({get_mod_version_bash})',
-                'echo "MOD_VERSION=$MOD_VERSION"',
-            ] + special_install_lines +
-            [
-                '# Install the wheel (ensure we are using the version we just built)',
-                # FIXME: remove all ambiguity in getting the wheel to have the right version
-                '# NOTE: THE VERSION MUST BE NEWER THAN AN EXISTING PYPI VERSION OR THIS MAY FAIL',
-                # 'python -m pip install ${WHEEL_FPATH}[${INSTALL_EXTRAS}]',
-                f'pip install "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-
-                '# Create a sandboxed directory',
-                'WORKSPACE_DNAME="testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
-                'mkdir -p $WORKSPACE_DNAME',
-                'cd $WORKSPACE_DNAME',
-                '# Get the path to the installed package and run the tests',
-                f'MOD_DPATH=$({get_modpath_bash})',
-                'echo "MOD_DPATH = $MOD_DPATH"',
-                'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests',
-                '# Move coverage file to a new name',
-                'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
-                'cd ..',
-            ]
+            'run': test_wheel_run_cmds,
         },
-        {
-            'name': 'Show built files',
-            'shell': 'bash',
-            'run': 'ls -la wheelhouse'
-        },
-        Actions.setup_python({
-            'name': 'Set up Python 3.8 to combine coverage Linux',
-            'if': "runner.os == 'Linux'",
-            'with': {
-                'python-version': 3.8
-            }
-        }),
         {
             'name': 'Combine coverage Linux',
             'if': "runner.os == 'Linux'",
@@ -674,13 +742,6 @@ def build_and_test_purepy_wheels(self):
                 'file': './tests/coverage.xml'
             }
         }),
-        Actions.upload_artifact({
-            'name': 'Upload wheels artifact',
-            'with': {
-                'name': 'wheels',
-                'path': f"./wheelhouse/{self.mod_name}*.whl"
-            }
-        })
     ]
     return job
 

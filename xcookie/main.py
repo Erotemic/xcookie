@@ -218,17 +218,20 @@ class XCookieConfig(scfg.Config):
             else:
                 self['ci_pypy_versions'] = []
 
-    def _load_pyproject_settings(self):
+    def _load_pyproject_config(self):
         pyproject_fpath = self['repodir'] / 'pyproject.toml'
         if pyproject_fpath.exists():
             try:
                 disk_config = toml.loads(pyproject_fpath.read_text())
             except Exception:
                 raise
-                # print(f'ex={ex}')
-            else:
-                settings = disk_config.get('tool', {}).get('xcookie', {})
-                return settings
+            return disk_config
+
+    def _load_xcookie_pyproject_settings(self):
+        disk_config = self._load_pyproject_config()
+        if disk_config is not None:
+            settings = disk_config.get('tool', {}).get('xcookie', {})
+            return settings
 
     def confirm(self, msg, default=True):
         """
@@ -286,7 +289,7 @@ class XCookieConfig(scfg.Config):
         # We load the config multiple times to get the right defaults.
         config = XCookieConfig(cmdline=cmdline, data=kwargs)
         config.normalize()
-        settings = config._load_pyproject_settings()
+        settings = config._load_xcookie_pyproject_settings()
         if settings:
             print(f'settings={settings}')
             config = XCookieConfig(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
