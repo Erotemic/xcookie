@@ -57,9 +57,10 @@ class Actions:
         if osvar is not None:
             # hack, just keep it this way for now
             if bits == 32:
-                kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_skip == '*-win_amd64'"
+                # kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_skip == '*-win_amd64'"
+                kwargs['if'] = "matrix.os == 'windows-latest' && ${{ contains(matrix.cibw_skip, '*-win_amd64') }}"
             else:
-                kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_skip == '*-win32'"
+                kwargs['if'] = "matrix.os == 'windows-latest' && ${{ contains(matrix.cibw_skip, '*-win32') }}"
         if bits is None:
             name = 'Enable MSVC'
         else:
@@ -148,7 +149,7 @@ def build_github_actions(self):
         name = 'PurePyCI'
         purepy_jobs = {}
         if 'nosrcdist' not in self.tags:
-            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist(self)
+            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
         purepy_jobs['build_purepy_wheels'] = build_purewheel_job(self)
         purepy_jobs['test_purepy_wheels'] = test_wheels_job(self, needs=['build_purepy_wheels'])
         needs = list(purepy_jobs.keys())
@@ -157,8 +158,8 @@ def build_github_actions(self):
         name = 'BinPyCI'
         binpy_jobs = {}
         if 'nosrcdist' not in self.tags:
-            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist(self)
-        binpy_jobs['build_binpy_wheels'] = build_and_test_binpy_wheels(self)
+            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
+        binpy_jobs['build_binpy_wheels'] = build_binpy_wheels_job(self)
         binpy_jobs['test_binpy_wheels'] = test_wheels_job(self, needs=['build_binpy_wheels'])
         needs = list(binpy_jobs.keys())
         jobs.update(binpy_jobs)
@@ -229,14 +230,16 @@ def build_github_actions(self):
 
 
 def lint_job(self):
+    supported_platform_info = get_supported_platform_info(self)
+    main_python_version = supported_platform_info['main_python_version']
     job = {
         'runs-on': 'ubuntu-latest',
         'steps': [
             Actions.checkout(),
             Actions.setup_python({
-                'name': 'Set up Python 3.8',
+                'name': f'Set up Python {main_python_version} for linting',
                 'with': {
-                    'python-version': 3.8,
+                    'python-version': main_python_version,
                 }
             }),
             {
@@ -273,13 +276,17 @@ def lint_job(self):
     return job
 
 
-def build_and_test_sdist(self):
+def build_and_test_sdist_job(self):
+    supported_platform_info = get_supported_platform_info(self)
+    main_python_version = supported_platform_info['main_python_version']
     job = {
-        'name': 'Test sdist Python 3.8',
+        'name': 'Build sdist',
         'runs-on': 'ubuntu-latest',
         'steps': [
             Actions.checkout(),
-            Actions.setup_python({'name': 'Set up Python 3.8', 'with': {'python-version': 3.8}}),
+            Actions.setup_python({
+                'name': f'Set up Python {main_python_version}',
+                'with': {'python-version': main_python_version}}),
             {
                 'name': 'Upgrade pip',
                 'run': [_ for _ in [
@@ -306,7 +313,7 @@ def build_and_test_sdist(self):
                 'name': 'Install sdist',
                 'run': [
                     'ls -al ./wheelhouse',
-                    f'pip install wheelhouse/{self.mod_name}*.tar.gz -v',
+                    f'pip install --prefer-binary wheelhouse/{self.mod_name}*.tar.gz -v',
                 ]
             },
             {
@@ -367,7 +374,7 @@ def build_and_test_sdist(self):
     return job
 
 
-def build_and_test_binpy_wheels(self):
+def build_binpy_wheels_job(self):
     """
     cat ~/code/xcookie/xcookie/rc/test_binaries.yml.in | yq  .jobs.build_and_test_wheels
 
@@ -377,6 +384,7 @@ def build_and_test_binpy_wheels(self):
     """
     supported_platform_info = get_supported_platform_info(self)
     os_list = supported_platform_info['os_list']
+    main_python_version = supported_platform_info['main_python_version']
 
     pyproj_config = self.config._load_pyproject_config()
     explicit_skips = ' ' + pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('skip', '')
@@ -433,14 +441,14 @@ def build_and_test_binpy_wheels(self):
         },
 
         Actions.setup_python({
-            'name': 'Set up Python 3.8 to combine coverage Linux',
+            'name': f'Set up Python {main_python_version} to combine coverage',
             'if': "runner.os == 'Linux'",
             'with': {
-                'python-version': 3.8
+                'python-version': main_python_version
             }
         }),
         {
-            'name': 'Combine coverage Linux',
+            'name': 'Combine coverage',
             'if': "runner.os == 'Linux'",
             'run': ub.codeblock(
                 '''
@@ -494,13 +502,20 @@ def get_supported_platform_info(self):
     ]
     # 3.4 is broken on github actions it seems
     cpython_versions_non34 = [v for v in cpython_versions if v != '3.4']
+    supported_py_versions = self.config['supported_python_versions']
+    if len(supported_py_versions) == 0:
+        raise Exception('no supported python versions?')
 
     supported_platform_info = {
         'os_list': os_list,
         'cpython_versions': cpython_versions_non34,
         'pypy_versions': pypy_versions,
-        'min_python_version': self.config['supported_python_versions'][0],
-        'max_python_version': self.config['supported_python_versions'][-1],
+        'min_python_version': supported_py_versions[0],
+        'max_python_version': supported_py_versions[-1],
+        # Choose which Python version will be the "main" one we use for version
+        # agnostic jobs.
+        # 'main_python_version': supported_py_versions[-2:][0],
+        'main_python_version': supported_py_versions[-1],
     }
     return supported_platform_info
 
@@ -596,27 +611,37 @@ def test_wheels_job(self, needs=None):
     for osname in os_list:
         for extra in install_extras.take(['minimal-strict']):
             for pyver in [min_python_version]:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_strict_test_env})
+                include.append({'python-version': pyver, 'os': osname,
+                                'install-extras': extra, 'arch': arch,
+                                **special_strict_test_env})
 
     for osname in os_list:
         for extra in install_extras.take(['full-strict']):
             for pyver in [max_python_version]:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_strict_test_env})
+                include.append({'python-version': pyver, 'os': osname,
+                                'install-extras': extra, 'arch': arch,
+                                **special_strict_test_env})
 
     for osname in os_list[1:]:
         for extra in install_extras.take(['minimal-loose']):
             for pyver in [max_python_version]:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_loose_test_env})
+                include.append({'python-version': pyver, 'os': osname,
+                                'install-extras': extra, 'arch': arch,
+                                **special_loose_test_env})
 
     for osname in os_list:
         for extra in install_extras.take(['full-loose']):
             for pyver in cpython_versions:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_loose_test_env})
+                include.append({'python-version': pyver, 'os': osname,
+                                'install-extras': extra, 'arch': arch,
+                                **special_loose_test_env})
 
     for osname in os_list:
         for extra in install_extras.take(['full-loose']):
             for pyver in pypy_versions:
-                include.append({'python-version': pyver, 'os': osname, 'install-extras': extra, 'arch': arch, **special_loose_test_env})
+                include.append({'python-version': pyver, 'os': osname,
+                                'install-extras': extra, 'arch': arch,
+                                **special_loose_test_env})
 
     for item in include:
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
@@ -640,12 +665,6 @@ def test_wheels_job(self, needs=None):
         'steps': None,
     }
 
-    os_specific_steps = []
-    if 'win' in self.config['os']:
-        os_specific_steps += [
-            Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
-            Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
-        ]
     if 1:
         # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
         # get_modname_bash = f'python -c "{get_modname_python}"'
@@ -670,12 +689,20 @@ def test_wheels_job(self, needs=None):
         test_env['GDAL_REQUIREMENT_TXT'] = 'py${{ matrix.gdal-requirement-txt }}'
         special_install_lines.append('pip install -r $GDAL_REQUIREMENT_TXT')
 
+    if 'ibeis' == self.mod_name:
+        custom_before_test_lines = [
+            'mkdir -p "ci_ibeis_workdir"',
+            'python -m ibeis --set-workdir="$(readlink -f ci_ibeis_workdir)" --nogui',
+            'python -m ibeis --resetdbs',
+        ]
+    else:
+        custom_before_test_lines = []
+
     test_wheel_run_cmds = [
-        '# Find the path to the wheel',
+        'echo "Finding the path to the wheel"',
         # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
-
-        f'ls {wheelhouse_dpath}',
-
+        f'ls -al {wheelhouse_dpath}',
+        'echo "Installing helpers"',
         'pip install tomli pkginfo',
         f'MOD_NAME={self.mod_name}',
         'echo "MOD_NAME=$MOD_NAME"',
@@ -684,27 +711,43 @@ def test_wheels_job(self, needs=None):
         f'MOD_VERSION=$({get_mod_version_bash})',
         'echo "MOD_VERSION=$MOD_VERSION"',
     ] + special_install_lines + [
-        '# Install the wheel (ensure we are using the version we just built)',
+        'echo "Install the wheel (ensureing we are using the version we just built)"',
         # FIXME: remove all ambiguity in getting the wheel to have the right version
         '# NOTE: THE VERSION MUST BE NEWER THAN AN EXISTING PYPI VERSION OR THIS MAY FAIL',
         # 'python -m pip install ${WHEEL_FPATH}[${INSTALL_EXTRAS}]',
         f'pip install --prefer-binary "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-
-        '# Create a sandboxed directory',
+        'echo "Install finished. Creating a sandbox directory to test it"',
         'WORKSPACE_DNAME="testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
+        'echo "WORKSPACE_DNAME=$WORKSPACE_DNAME"',
         'mkdir -p $WORKSPACE_DNAME',
+        'echo "cd-ing into the workspace"',
         'cd $WORKSPACE_DNAME',
+        'pwd',
+        'ls -al',
+        'pip freeze',
         '# Get the path to the installed package and run the tests',
         f'MOD_DPATH=$({get_modpath_bash})',
         'echo "MOD_DPATH = $MOD_DPATH"',
+        'echo "running the pytest command inside the workspace"',
+    ] + custom_before_test_lines + [
         'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests',
+        'echo "pytest command finished, moving the coverage file to the repo root"',
+        'ls -al',
         '# Move coverage file to a new name',
         'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
+        'echo "changing directory back to th repo root"',
         'cd ..',
+        'ls -al',
     ]
 
+    os_specific_steps = []
+    if 'win' in self.config['os']:
+        os_specific_steps += [
+            Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
+            Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
+        ]
     job['steps'] = [
-        Actions.checkout(),
+        Actions.checkout()] + os_specific_steps + [
         Actions.setup_qemu(sensible=True),
         Actions.setup_python({
             'with': {'python-version': '${{ matrix.python-version }}'}

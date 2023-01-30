@@ -91,7 +91,9 @@ find_package(NumPy REQUIRED)
 
 function(cpu_cython_module cython_source module_name)
   # Translate Cython into C/C++
-  add_cython_target(${module_name} "${cython_source}" C OUTPUT_VAR sources)
+  # Note: the CXX may need to be C depending on the circumstance
+  # it would be nice if we could determine that at xcookie generation time.
+  add_cython_target(${module_name} "${cython_source}" CXX OUTPUT_VAR sources)
   # Create C++ library. Specify include dirs and link libs as normal
   add_library(${module_name} MODULE ${sources})
   target_include_directories(
