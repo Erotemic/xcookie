@@ -99,18 +99,18 @@ def build_setup(self):
 if __name__ == '__main__':
     setupkw = {}
 
-    setupkw['install_requires'] = parse_requirements('requirements/runtime.txt')
+    setupkw['install_requires'] = parse_requirements('requirements/runtime.txt', versions='loose')
     setupkw['extras_require'] = {
-        'all': parse_requirements('requirements.txt'),
-        'tests': parse_requirements('requirements/tests.txt'),
-        'optional': parse_requirements('requirements/optional.txt'),
+        'all': parse_requirements('requirements.txt', versions='loose'),
+        'tests': parse_requirements('requirements/tests.txt', versions='loose'),
+        'optional': parse_requirements('requirements/optional.txt', versions='loose'),
 
         '''))
 
     cv2_part = ub.identity(
         '''
-        'headless': parse_requirements('requirements/headless.txt'),
-        'graphics': parse_requirements('requirements/graphics.txt'),
+        'headless': parse_requirements('requirements/headless.txt', versions='loose'),
+        'graphics': parse_requirements('requirements/graphics.txt', versions='loose'),
         # Strict versions
         'headless-strict': parse_requirements('requirements/headless.txt', versions='strict'),
         'graphics-strict': parse_requirements('requirements/graphics.txt', versions='strict'),

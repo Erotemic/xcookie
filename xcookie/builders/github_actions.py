@@ -10,45 +10,48 @@ class Actions:
         'setup-python': 'actions/setup-python@v4',
     }
     @classmethod
-    def _generic_action(cls, *args, **kwargs):
-        action = kwargs.copy()
+    def action(cls, *args, **kwargs):
+        """
+        The generic action
+        """
+        action = ub.udict(kwargs.copy())
         for _ in args:
             if _ is not None:
                 action.update(_)
         if 'name' in action:
-            reordered = ub.dict_isect(action, ['name', 'uses'])
-            action = ub.dict_union(reordered, ub.dict_diff(action, reordered))
-        return action
+            reordered = action & ['name', 'uses']
+            action = reordered | (action - reordered)
+        return dict(action)
 
     @classmethod
     def checkout(cls, *args, **kwargs):
-        return cls._generic_action({
+        return cls.action({
             'name': 'Checkout source',
             'uses': 'actions/checkout@v3'
         }, *args, **kwargs)
 
     @classmethod
     def setup_python(cls, *args, **kwargs):
-        return cls._generic_action({
+        return cls.action({
             'name': 'Setup Python',
             'uses': 'actions/setup-python@v4.5.0'
         }, *args, **kwargs)
 
     @classmethod
     def codecov_action(cls, *args, **kwargs):
-        return cls._generic_action({
+        return cls.action({
             'uses': 'codecov/codecov-action@v3'
         }, *args, **kwargs)
 
     @classmethod
     def upload_artifact(cls, *args, **kwargs):
-        return cls._generic_action({
+        return cls.action({
             'uses': 'actions/upload-artifact@v3'
         }, *args, **kwargs)
 
     @classmethod
     def download_artifact(cls, *args, **kwargs):
-        return cls._generic_action({
+        return cls.action({
             'uses': 'actions/download-artifact@v3',
         }, *args, **kwargs)
 
@@ -73,7 +76,7 @@ class Actions:
                 }
             else:
                 raise NotImplementedError(str(bits))
-        return cls._generic_action({
+        return cls.action({
             'name': name,
             'uses': 'ilammy/msvc-dev-cmd@v1',
         }, *args, **kwargs)
@@ -89,7 +92,7 @@ class Actions:
             })
 
         # Emulate aarch64 ppc64le s390x under linux
-        return cls._generic_action({
+        return cls.action({
             'name': 'Set up QEMU',
             'uses': 'docker/setup-qemu-action@v2',
         }, *args, **kwargs)
@@ -103,9 +106,21 @@ class Actions:
             })
 
         # Emulate aarch64 ppc64le s390x under linux
-        return cls._generic_action({
+        return cls.action({
             'name': 'Install Xcode',
             'uses': 'maxim-lobanov/setup-xcode@v1',
+        }, *args, **kwargs)
+
+    @classmethod
+    def setup_ipfs(cls, *args, **kwargs):
+        # https://github.com/marketplace/actions/ipfs-setup-action
+        return cls.action({
+            'name': 'Set up IPFS',
+            'uses': 'ibnesayeed/setup-ipfs@master',
+            'with': {
+                'ipfs_version': '0.14.0',
+                'run_daemon': True,
+            },
         }, *args, **kwargs)
 
     @classmethod
@@ -128,7 +143,7 @@ class Actions:
             })
 
         # Emulate aarch64 ppc64le s390x under linux
-        return cls._generic_action({
+        return cls.action({
             'name': 'Build binary wheels',
             'uses': 'pypa/cibuildwheel@v2.11.2',
         }, *args, **kwargs)
@@ -408,9 +423,9 @@ def build_binpy_wheels_job(self):
     if included_runs:
         matrix['include'] = included_runs
 
-    os_specific_steps = []
+    conditional_actions = []
     if 'win' in self.config['os']:
-        os_specific_steps += [
+        conditional_actions += [
             Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
             Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
         ]
@@ -428,7 +443,7 @@ def build_binpy_wheels_job(self):
     # Actions.setup_xcode(sensible=True),
     # Emulate aarch64 ppc64le s390x under linux
     job_steps += [Actions.checkout()]
-    job_steps += os_specific_steps
+    job_steps += conditional_actions
     job_steps += [
         Actions.setup_qemu(sensible=True),
         Actions.cibuildwheel(sensible=True),
@@ -506,6 +521,26 @@ def get_supported_platform_info(self):
     if len(supported_py_versions) == 0:
         raise Exception('no supported python versions?')
 
+    extras_versions_templates = {
+        'full-loose': self.config['ci_versions_full_loose'],
+        'full-strict': self.config['ci_versions_full_strict'],
+        'minimal-loose': self.config['ci_versions_minimal_loose'],
+        'minimal-strict': self.config['ci_versions_minimal_strict'],
+    }
+    extras_versions = {}
+    for k, v in extras_versions_templates.items():
+        if v == '':
+            v = []
+        elif v == 'min':
+            v = [cpython_versions_non34[0]]
+        elif v == 'max':
+            v = [cpython_versions_non34[-1]]
+        elif v == '*':
+            v = cpython_versions_non34 + pypy_versions
+        else:
+            raise KeyError(v)
+        extras_versions[k] = v
+
     supported_platform_info = {
         'os_list': os_list,
         'cpython_versions': cpython_versions_non34,
@@ -516,6 +551,7 @@ def get_supported_platform_info(self):
         # agnostic jobs.
         # 'main_python_version': supported_py_versions[-2:][0],
         'main_python_version': supported_py_versions[-1],
+        'install_extra_versions': extras_versions,
     }
     return supported_platform_info
 
@@ -578,10 +614,8 @@ def test_wheels_job(self, needs=None):
     supported_platform_info = get_supported_platform_info(self)
 
     os_list = supported_platform_info['os_list']
-    cpython_versions = supported_platform_info['cpython_versions']
     pypy_versions = supported_platform_info['pypy_versions']
-    min_python_version = supported_platform_info['min_python_version']
-    max_python_version = supported_platform_info['max_python_version']
+    install_extra_versions = supported_platform_info['install_extra_versions']
 
     # Map the min/full loose/strict terminology to specific extra packages
     import ubelt as ub
@@ -610,28 +644,28 @@ def test_wheels_job(self, needs=None):
     include = []
     for osname in os_list:
         for extra in install_extras.take(['minimal-strict']):
-            for pyver in [min_python_version]:
+            for pyver in install_extra_versions['minimal-strict']:
                 include.append({'python-version': pyver, 'os': osname,
                                 'install-extras': extra, 'arch': arch,
                                 **special_strict_test_env})
 
     for osname in os_list:
         for extra in install_extras.take(['full-strict']):
-            for pyver in [max_python_version]:
+            for pyver in install_extra_versions['full-strict']:
                 include.append({'python-version': pyver, 'os': osname,
                                 'install-extras': extra, 'arch': arch,
                                 **special_strict_test_env})
 
     for osname in os_list[1:]:
         for extra in install_extras.take(['minimal-loose']):
-            for pyver in [max_python_version]:
+            for pyver in install_extra_versions['minimal-loose']:
                 include.append({'python-version': pyver, 'os': osname,
                                 'install-extras': extra, 'arch': arch,
                                 **special_loose_test_env})
 
     for osname in os_list:
         for extra in install_extras.take(['full-loose']):
-            for pyver in cpython_versions:
+            for pyver in install_extra_versions['full-loose']:
                 include.append({'python-version': pyver, 'os': osname,
                                 'install-extras': extra, 'arch': arch,
                                 **special_loose_test_env})
@@ -679,11 +713,7 @@ def test_wheels_job(self, needs=None):
         get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
         get_modpath_bash = f'python -c "{get_modpath_python}"'
 
-    test_env = {
-        'INSTALL_EXTRAS': '${{ matrix.install-extras }}',
-        'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
-    }
-
+    test_env = {}
     special_install_lines = []
     if 'gdal' in self.tags:
         test_env['GDAL_REQUIREMENT_TXT'] = 'py${{ matrix.gdal-requirement-txt }}'
@@ -692,100 +722,139 @@ def test_wheels_job(self, needs=None):
     if 'ibeis' == self.mod_name:
         custom_before_test_lines = [
             'mkdir -p "ci_ibeis_workdir"',
+            'echo "About to reset workdirs"',
             'python -m ibeis --set-workdir="$(readlink -f ci_ibeis_workdir)" --nogui',
             'python -m ibeis --resetdbs',
         ]
     else:
         custom_before_test_lines = []
 
-    test_wheel_run_cmds = [
-        'echo "Finding the path to the wheel"',
-        # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
-        f'ls -al {wheelhouse_dpath}',
-        'echo "Installing helpers"',
-        'pip install tomli pkginfo',
-        f'MOD_NAME={self.mod_name}',
-        'echo "MOD_NAME=$MOD_NAME"',
-        f'WHEEL_FPATH=$({get_wheel_fpath_bash})',
-        'echo "WHEEL_FPATH=$WHEEL_FPATH"',
-        f'MOD_VERSION=$({get_mod_version_bash})',
-        'echo "MOD_VERSION=$MOD_VERSION"',
-    ] + special_install_lines + [
-        'echo "Install the wheel (ensureing we are using the version we just built)"',
-        # FIXME: remove all ambiguity in getting the wheel to have the right version
-        '# NOTE: THE VERSION MUST BE NEWER THAN AN EXISTING PYPI VERSION OR THIS MAY FAIL',
-        # 'python -m pip install ${WHEEL_FPATH}[${INSTALL_EXTRAS}]',
-        f'pip install --prefer-binary "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-        'echo "Install finished. Creating a sandbox directory to test it"',
-        'WORKSPACE_DNAME="testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
-        'echo "WORKSPACE_DNAME=$WORKSPACE_DNAME"',
-        'mkdir -p $WORKSPACE_DNAME',
-        'echo "cd-ing into the workspace"',
-        'cd $WORKSPACE_DNAME',
-        'pwd',
-        'ls -al',
-        'pip freeze',
-        '# Get the path to the installed package and run the tests',
-        f'MOD_DPATH=$({get_modpath_bash})',
-        'echo "MOD_DPATH = $MOD_DPATH"',
-        'echo "running the pytest command inside the workspace"',
-    ] + custom_before_test_lines + [
-        'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests',
-        'echo "pytest command finished, moving the coverage file to the repo root"',
-        'ls -al',
-        '# Move coverage file to a new name',
-        'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
-        'echo "changing directory back to th repo root"',
-        'cd ..',
-        'ls -al',
-    ]
+    if 'ibeis' == self.mod_name:
+        test_command = [
+            'python -m xdoctest $MOD_DPATH --style=google all',
+            'echo "xdoctest command finished"'
+        ]
+    else:
+        test_command = [
+            'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests',
+            'echo "pytest command finished, moving the coverage file to the repo root"',
+        ]
 
-    os_specific_steps = []
+    action_steps = []
+    action_steps += [
+        Actions.checkout(),
+    ]
     if 'win' in self.config['os']:
-        os_specific_steps += [
+        action_steps += [
             Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
             Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
         ]
-    job['steps'] = [
-        Actions.checkout()] + os_specific_steps + [
-        Actions.setup_qemu(sensible=True),
-        Actions.setup_python({
-            'with': {'python-version': '${{ matrix.python-version }}'}
-        }),
-        Actions.download_artifact({'name': 'Download wheels and sdist', 'with': {'name': 'wheels', 'path': 'wheelhouse'}}),
-        {
-            'name': 'Test wheel with ${{ matrix.install-extras }}',
-            'shell': 'bash',
-            'env': test_env,
-            'run': test_wheel_run_cmds,
-        },
-        {
-            'name': 'Combine coverage Linux',
-            'if': "runner.os == 'Linux'",
-            'run': ub.codeblock(
-                '''
-                echo '############ PWD'
-                pwd
-                ls -al
-                python -m pip install coverage[toml]
-                echo '############ combine'
-                coverage combine .
-                echo '############ XML'
-                coverage xml -o ./tests/coverage.xml
-                echo '############ FIND'
-                find . -name .coverage.*
-                find . -name coverage.xml
-                '''
-            )
 
-        },
-        Actions.codecov_action({
-            'name': 'Codecov Upload',
-            'with': {
-                'file': './tests/coverage.xml'
-            }
-        }),
+    if 'ipfs' in self.config['tags']:
+        action_steps += [
+            Actions.setup_ipfs(),
+        ]
+    action_steps += [
+        Actions.setup_qemu(sensible=True),
+        Actions.setup_python({'with': {'python-version': '${{ matrix.python-version }}'}}),
+        Actions.download_artifact({'name': 'Download wheels', 'with': {'name': 'wheels', 'path': 'wheelhouse'}}),
     ]
+    action_steps.append(Actions.action({
+        'name': 'Install wheel ${{ matrix.install-extras }}',
+        'shell': 'bash',
+        'env': {
+            'INSTALL_EXTRAS': '${{ matrix.install-extras }}',
+        },
+        'run': special_install_lines + [
+            'echo "Finding the path to the wheel"',
+            # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
+            f'ls -al {wheelhouse_dpath}',
+            'echo "Installing helpers"',
+            'pip install pip setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+            'pip install tomli pkginfo',
+            # 'pip install delorean',
+            f'export MOD_NAME={self.mod_name}',
+            'echo "MOD_NAME=$MOD_NAME"',
+            f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
+            'echo "WHEEL_FPATH=$WHEEL_FPATH"',
+            f'export MOD_VERSION=$({get_mod_version_bash})',
+            'echo "MOD_VERSION=$MOD_VERSION"',
+            'echo "Install the wheel (ensureing we are using the version we just built)"',
+            # FIXME: remove all ambiguity in getting the wheel to have the right version
+            '# NOTE: THE VERSION MUST BE NEWER THAN AN EXISTING PYPI VERSION OR THIS MAY FAIL',
+            # 'python -m pip install ${WHEEL_FPATH}[${INSTALL_EXTRAS}]',
+            f'pip install --prefer-binary "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+            'echo "Install finished."',
+
+        ],
+    }))
+
+    WITH_COVERAGE = ('ibeis' != self.mod_name)
+    if WITH_COVERAGE:
+        after_test_commands = [
+            'ls -al',
+            '# Move coverage file to a new name',
+            'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
+            'echo "changing directory back to th repo root"',
+            'cd ..',
+            'ls -al',
+        ]
+    else:
+        after_test_commands = [
+        ]
+
+    action_steps.append(Actions.action({
+        'name': 'Test wheel ${{ matrix.install-extras }}',
+        'shell': 'bash',
+        'env': {
+            'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
+        },
+        'run': [
+            'echo "Creating test standing"',
+            'WORKSPACE_DNAME="testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
+            'echo "WORKSPACE_DNAME=$WORKSPACE_DNAME"',
+            'mkdir -p $WORKSPACE_DNAME',
+            'echo "cd-ing into the workspace"',
+            'cd $WORKSPACE_DNAME',
+            'pwd',
+            'ls -al',
+            'pip freeze',
+            '# Get the path to the installed package and run the tests',
+            f'MOD_DPATH=$({get_modpath_bash})',
+            'echo "MOD_DPATH = $MOD_DPATH"',
+            'echo "running the pytest command inside the workspace"',
+        ] + custom_before_test_lines + test_command + after_test_commands,
+    }))
+    if WITH_COVERAGE:
+        action_steps += [
+            Actions.action({
+                'name': 'Combine coverage Linux',
+                'if': "runner.os == 'Linux'",
+                'run': ub.codeblock(
+                    '''
+                    echo '############ PWD'
+                    pwd
+                    ls -al
+                    python -m pip install coverage[toml]
+                    echo '############ combine'
+                    coverage combine .
+                    echo '############ XML'
+                    coverage xml -o ./tests/coverage.xml
+                    echo '############ FIND'
+                    find . -name .coverage.*
+                    find . -name coverage.xml
+                    '''
+                )
+
+            }),
+            Actions.codecov_action({
+                'name': 'Codecov Upload',
+                'with': {
+                    'file': './tests/coverage.xml'
+                }
+            }),
+        ]
+    job['steps'] = action_steps
     return job
 
 

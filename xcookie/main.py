@@ -105,6 +105,11 @@ class XCookieConfig(scfg.Config):
             Defaults will depend on purepy vs binpy tags.
             ''')),
 
+        'ci_versions_minimal_strict': scfg.Value('min', help='todo: sus out'),
+        'ci_versions_full_strict': scfg.Value('max'),
+        'ci_versions_minimal_loose': scfg.Value('max'),
+        'ci_versions_full_loose': scfg.Value('*'),
+
         'autostage': scfg.Value(False, help='if true, automatically add changes to version control'),
 
         'visibility': scfg.Value('public', help='or private. Does limit what we can do'),
