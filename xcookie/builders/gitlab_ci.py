@@ -1,4 +1,5 @@
 import ubelt as ub
+from xcookie.builders import common_ci
 
 
 def build_gitlab_ci(self):
@@ -118,23 +119,16 @@ def make_purepy_ci_jobs(self):
         body['.common_template'] = common_template
 
     wheelhouse_dpath = 'wheelhouse'
-
+    build_wheel_parts = common_ci.make_build_wheel_parts(self, wheelhouse_dpath)
     build_template = {
         'stage': 'build',
-
         'before_script': [
             'python -V  # Print out python version for debugging',
         ],
-
-        'script': [
-            'python -m pip install pip -U',
-            'python -m pip install setuptools>=0.8 wheel build',
-            f'python -m build --wheel --outdir {wheelhouse_dpath}',
-        ],
-
+        'script': build_wheel_parts['commands'],
         'artifacts': {
             'paths': [
-                f'{wheelhouse_dpath}/*.whl'
+                build_wheel_parts['artifact'],
             ]
         },
     }
@@ -177,17 +171,17 @@ def make_purepy_ci_jobs(self):
 
     # https://stackoverflow.com/questions/42019184/python-how-can-i-get-the-version-number-from-a-whl-file
 
-    get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
-    get_modname_bash = f'python -c "{get_modname_python}"'
+    # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
+    # get_modname_bash = f'python -c "{get_modname_python}"'
 
-    get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
-    get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
+    # get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
+    # get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
 
-    get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
-    get_mod_version_bash = f'python -c "{get_mod_version_python}"'
+    # get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
+    # get_mod_version_bash = f'python -c "{get_mod_version_python}"'
 
-    get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
-    get_modpath_bash = f'python -c "{get_modpath_python}"'
+    # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
+    # get_modpath_bash = f'python -c "{get_modpath_python}"'
 
     test_templates = {}
     loose_cv2 = ''
@@ -202,33 +196,29 @@ def make_purepy_ci_jobs(self):
         'full-strict'    : 'tests-strict,runtime-strict,optional-strict' + strict_cv2,
     })
     for extra_key, extra in install_extras.items():
-        test_steps = [
-            f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',
-            'pip install tomli ubelt pkginfo',
-            f'MOD_NAME=$({get_modname_bash})',
-            f'WHEEL_FPATH=$({get_wheel_fpath_bash})',
-            f'MOD_VERSION=$({get_mod_version_bash})',
-            f'INSTALL_EXTRAS={extra}',
-            'echo "MOD_NAME=$MOD_NAME"',
-            'echo "WHEEL_FPATH=$WHEEL_FPATH"',
-            'echo "MOD_VERSION=$MOD_VERSION"',
-        ]
         if 'gdal' in self.tags:
-            test_steps += [
+            special_install_lines = [
                 # TODO: handle strict
                 'pip install -r requirements/gdal.txt',
             ]
-        test_steps += [
-            f'pip install --prefer-binary "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}'
+        else:
+            special_install_lines = []
+        workspace_dname = 'sandbox'
+        install_and_test_wheel_parts = common_ci.make_install_and_test_wheel_parts(
+            self, wheelhouse_dpath, special_install_lines, workspace_dname)
+        test_steps = [
+            f'export INSTALL_EXTRAS={extra}',
         ]
-        test_steps += [
-            CodeBlock(' && '.join([
-                'mkdir -p sandbox',
-                'cd sandbox',
-                f'pytest -s --xdoctest --xdoctest-verbose=3 --cov-config ../pyproject.toml --cov-report html --cov-report term --cov="$MOD_NAME" "$({get_modpath_bash})" ../tests',
-                'cd ..',
-            ])),
-        ]
+        test_steps += install_and_test_wheel_parts['install_wheel_commands']
+        test_steps += install_and_test_wheel_parts['test_wheel_commands']
+        # test_steps += [
+        #     CodeBlock(' && '.join([
+        #         'mkdir -p sandbox',
+        #         'cd sandbox',
+        #         f'pytest -s --xdoctest --xdoctest-verbose=3 --cov-config ../pyproject.toml --cov-report html --cov-report term --cov="$MOD_NAME" "$({get_modpath_bash})" ../tests',
+        #         'cd ..',
+        #     ])),
+        # ]
         test = {
             'before_script': [setup_venv_template],
             'script': test_steps,

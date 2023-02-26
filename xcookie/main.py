@@ -14,6 +14,12 @@ ExampleUsage:
     # Update my repos
     python -m xcookie.main --repodir=$HOME/code/pyflann_ibeis --tags="erotemic,github,binpy"
 
+    python -m xcookie.main --repodir=$HOME/code/whodat --tags="kitware,gitlab,purepy,cv2,gdal"
+    python -m xcookie.main --repodir=$HOME/code/whatdat --tags="kitware,gitlab,purepy,cv2,gdal"
+    python -m xcookie.main --repodir=$HOME/code/whendat --tags="kitware,gitlab,purepy,cv2,gdal"
+    python -m xcookie.main --repodir=$HOME/code/whydat --tags="kitware,gitlab,purepy,cv2,gdal"
+    python -m xcookie.main --repodir=$HOME/code/howdat --tags="kitware,gitlab,purepy,cv2,gdal"
+
     # Create this repo
     python -m xcookie.main --repo_name=xcookie --repodir=$HOME/code/xcookie --tags="erotemic,github,purepy"
 
@@ -972,13 +978,14 @@ class TemplateApplier:
             raise Exception
 
         import cmd_queue
-        script = cmd_queue.Queue.create(cwd=self.repodir, backend='serial')
-        script.submit(f'source {setup_secrets_fpath}')
-        script.sync().submit(f'{environ_export}')
-        script.sync().submit('source $(secret_loader.sh)')
-        script.sync().submit('export_encrypted_code_signing_keys')
+        script = cmd_queue.Queue.create(cwd=self.repodir, backend='serial',
+                                        log=False)
+        script.submit(f'source {setup_secrets_fpath}', log=False)
+        script.sync().submit(f'{environ_export}', log=False)
+        script.sync().submit('source $(secret_loader.sh)', log=False)
+        script.sync().submit('export_encrypted_code_signing_keys', log=False)
         # script.sync().submit('git commit -am "Updated secrets"')
-        script.sync().submit(f'{upload_secret_cmd}')
+        script.sync().submit(f'{upload_secret_cmd}', log=False)
         # script.submit(ub.codeblock(
         #     f'''
         #     cd {self.repodir}
@@ -993,7 +1000,7 @@ class TemplateApplier:
         # print('FIXME: for now, you need to manually execute this')
         # print('Note: need to load_secrets before running this')
         if self.config.confirm('Ready to rotate secrets?'):
-            script.run()
+            script.run(system=True, mode='bash')
             # script.run(system=True)
 
     def print_help_tips(self):

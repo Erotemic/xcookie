@@ -28,7 +28,6 @@ class GitlabRemote:
         load_secrets
         HOST=https://gitlab.kitware.com
         export PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
-
     """
     def __init__(self, proj_name, proj_group, url, visibility='public',
                  private_token='env:PRIVATE_GITLAB_TOKEN'):
@@ -49,17 +48,19 @@ class GitlabRemote:
     @property
     def group(self):
         gl = self.gitlab
-        groups = gl.groups.list()
-        found = [g for g in groups if g.name == self.proj_group]
-        if not found:
-            # allow case insensitivity
-            found = [g for g in groups if g.name.lower() == self.proj_group.lower()]
+        # Is there a better way to query?
+        groups = gl.groups.list(iterator=True)
+        found = [g for g in groups if g.name.lower() == self.proj_group.lower()]
+        # if not found:
+        #     # allow case insensitivity
+        #     found = [g for g in groups if g.name.lower() == self.proj_group.lower()]
         return _return_one(found)
 
     @property
     def project(self):
         group = self.group
-        found = [p for p in group.projects.list() if p.path == self.proj_path]
+        found = [p for p in group.projects.list(iterator=True)
+                 if p.path.lower() == self.proj_path.lower()]
         group_project = _return_one(found)
         project = self.gitlab.projects.get(group_project.id)
         return project

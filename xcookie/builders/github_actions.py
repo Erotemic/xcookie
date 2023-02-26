@@ -1,4 +1,5 @@
 import ubelt as ub
+from xcookie.builders import common_ci
 
 
 class Actions:
@@ -41,6 +42,30 @@ class Actions:
     def codecov_action(cls, *args, **kwargs):
         return cls.action({
             'uses': 'codecov/codecov-action@v3'
+        }, *args, **kwargs)
+
+    @classmethod
+    def combine_coverage(cls, *args, **kwargs):
+        return cls.action({
+            'name': 'Combine coverage Linux',
+            'if': "runner.os == 'Linux'",
+            'run': ub.codeblock(
+                '''
+                echo '############ PWD'
+                pwd
+                cp .wheelhouse/.coverage* . || true
+                ls -al
+                python -m pip install coverage[toml]
+                echo '############ combine'
+                coverage combine . || true
+                echo '############ XML'
+                coverage xml -o ./tests/coverage.xml || true
+                echo '############ FIND'
+                find . -name .coverage.* || true
+                find . -name coverage.xml  || true
+                '''
+            )
+
         }, *args, **kwargs)
 
     @classmethod
@@ -462,27 +487,7 @@ def build_binpy_wheels_job(self):
                 'python-version': main_python_version
             }
         }),
-        {
-            'name': 'Combine coverage',
-            'if': "runner.os == 'Linux'",
-            'run': ub.codeblock(
-                '''
-                echo '############ PWD'
-                pwd
-                cp .wheelhouse/.coverage* . || true
-                ls -al
-                python -m pip install coverage[toml]
-                echo '############ combine'
-                coverage combine . || true
-                echo '############ XML'
-                coverage xml -o ./tests/coverage.xml || true
-                echo '############ FIND'
-                find . -name .coverage.* || true
-                find . -name coverage.xml  || true
-                '''
-            )
-
-        },
+        Actions.combine_coverage(),
         Actions.codecov_action({
             'name': 'Codecov Upload',
             'with': {
@@ -578,6 +583,7 @@ def build_purewheel_job(self):
         },
         'steps': None,
     }
+    build_wheel_parts = common_ci.make_build_wheel_parts(self, wheelhouse_dpath)
     job['steps'] = [
         Actions.checkout(),
         Actions.setup_qemu(sensible=True),
@@ -587,22 +593,18 @@ def build_purewheel_job(self):
         {
             'name': 'Build pure wheel',
             'shell': 'bash',
-            'run': [
-                'python -m pip install pip -U',
-                'python -m pip install setuptools>=0.8 build',
-                f'python -m build --wheel --outdir {wheelhouse_dpath}',
-            ]
+            'run': build_wheel_parts['commands'],
         },
         {
             'name': 'Show built files',
             'shell': 'bash',
-            'run': 'ls -la wheelhouse'
+            'run': f'ls -la {wheelhouse_dpath}'
         },
         Actions.upload_artifact({
             'name': 'Upload wheels artifact',
             'with': {
                 'name': 'wheels',
-                'path': f"./wheelhouse/{self.mod_name}*.whl"
+                'path': build_wheel_parts['artifact'],
             }
         })
     ]
@@ -699,19 +701,19 @@ def test_wheels_job(self, needs=None):
         'steps': None,
     }
 
-    if 1:
-        # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
-        # get_modname_bash = f'python -c "{get_modname_python}"'
+    # if 1:
+    #     # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
+    #     # get_modname_bash = f'python -c "{get_modname_python}"'
 
-        get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
-        get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
+    #     # get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
+    #     # get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
 
-        get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
-        get_mod_version_bash = f'python -c "{get_mod_version_python}"'
+    #     # get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
+    #     # get_mod_version_bash = f'python -c "{get_mod_version_python}"'
 
-        # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
-        get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
-        get_modpath_bash = f'python -c "{get_modpath_python}"'
+    #     # # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
+    #     # get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
+    #     # get_modpath_bash = f'python -c "{get_modpath_python}"'
 
     test_env = {}
     special_install_lines = []
@@ -735,10 +737,7 @@ def test_wheels_job(self, needs=None):
             'echo "xdoctest command finished"'
         ]
     else:
-        test_command = [
-            'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests',
-            'echo "pytest command finished, moving the coverage file to the repo root"',
-        ]
+        test_command = 'auto'
 
     action_steps = []
     action_steps += [
@@ -759,39 +758,11 @@ def test_wheels_job(self, needs=None):
         Actions.setup_python({'with': {'python-version': '${{ matrix.python-version }}'}}),
         Actions.download_artifact({'name': 'Download wheels', 'with': {'name': 'wheels', 'path': 'wheelhouse'}}),
     ]
-    action_steps.append(Actions.action({
-        'name': 'Install wheel ${{ matrix.install-extras }}',
-        'shell': 'bash',
-        'env': {
-            'INSTALL_EXTRAS': '${{ matrix.install-extras }}',
-        },
-        'run': special_install_lines + [
-            'echo "Finding the path to the wheel"',
-            # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
-            f'ls -al {wheelhouse_dpath}',
-            'echo "Installing helpers"',
-            'pip install pip setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
-            'pip install tomli pkginfo',
-            # 'pip install delorean',
-            f'export MOD_NAME={self.mod_name}',
-            'echo "MOD_NAME=$MOD_NAME"',
-            f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
-            'echo "WHEEL_FPATH=$WHEEL_FPATH"',
-            f'export MOD_VERSION=$({get_mod_version_bash})',
-            'echo "MOD_VERSION=$MOD_VERSION"',
-            'echo "Install the wheel (ensureing we are using the version we just built)"',
-            # FIXME: remove all ambiguity in getting the wheel to have the right version
-            '# NOTE: THE VERSION MUST BE NEWER THAN AN EXISTING PYPI VERSION OR THIS MAY FAIL',
-            # 'python -m pip install ${WHEEL_FPATH}[${INSTALL_EXTRAS}]',
-            f'pip install --prefer-binary "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-            'echo "Install finished."',
 
-        ],
-    }))
-
+    workspace_dname = 'testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}'
     WITH_COVERAGE = ('ibeis' != self.mod_name)
     if WITH_COVERAGE:
-        after_test_commands = [
+        custom_after_test_commands = [
             'ls -al',
             '# Move coverage file to a new name',
             'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
@@ -800,8 +771,23 @@ def test_wheels_job(self, needs=None):
             'ls -al',
         ]
     else:
-        after_test_commands = [
+        custom_after_test_commands = [
         ]
+    install_and_test_wheel_parts = common_ci.make_install_and_test_wheel_parts(
+        self, wheelhouse_dpath, special_install_lines, workspace_dname,
+        test_command=test_command,
+        custom_before_test_lines=custom_before_test_lines,
+        custom_after_test_commands=custom_after_test_commands,
+    )
+
+    action_steps.append(Actions.action({
+        'name': 'Install wheel ${{ matrix.install-extras }}',
+        'shell': 'bash',
+        'env': {
+            'INSTALL_EXTRAS': '${{ matrix.install-extras }}',
+        },
+        'run': install_and_test_wheel_parts['install_wheel_commands'],
+    }))
 
     action_steps.append(Actions.action({
         'name': 'Test wheel ${{ matrix.install-extras }}',
@@ -809,44 +795,11 @@ def test_wheels_job(self, needs=None):
         'env': {
             'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
         },
-        'run': [
-            'echo "Creating test standing"',
-            'WORKSPACE_DNAME="testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
-            'echo "WORKSPACE_DNAME=$WORKSPACE_DNAME"',
-            'mkdir -p $WORKSPACE_DNAME',
-            'echo "cd-ing into the workspace"',
-            'cd $WORKSPACE_DNAME',
-            'pwd',
-            'ls -al',
-            'pip freeze',
-            '# Get the path to the installed package and run the tests',
-            f'MOD_DPATH=$({get_modpath_bash})',
-            'echo "MOD_DPATH = $MOD_DPATH"',
-            'echo "running the pytest command inside the workspace"',
-        ] + custom_before_test_lines + test_command + after_test_commands,
+        'run': install_and_test_wheel_parts['test_wheel_commands'],
     }))
     if WITH_COVERAGE:
         action_steps += [
-            Actions.action({
-                'name': 'Combine coverage Linux',
-                'if': "runner.os == 'Linux'",
-                'run': ub.codeblock(
-                    '''
-                    echo '############ PWD'
-                    pwd
-                    ls -al
-                    python -m pip install coverage[toml]
-                    echo '############ combine'
-                    coverage combine .
-                    echo '############ XML'
-                    coverage xml -o ./tests/coverage.xml
-                    echo '############ FIND'
-                    find . -name .coverage.*
-                    find . -name coverage.xml
-                    '''
-                )
-
-            }),
+            Actions.combine_coverage(),
             Actions.codecov_action({
                 'name': 'Codecov Upload',
                 'with': {
