@@ -116,6 +116,9 @@ class XCookieConfig(scfg.Config):
         'ci_versions_minimal_loose': scfg.Value('max'),
         'ci_versions_full_loose': scfg.Value('*'),
 
+        'remote_host': scfg.Value(None, help='if unspecified, attempt to infer from tags'),
+        'remote_group': scfg.Value(None, help='if unspecified, attempt to infer from tags'),
+
         'autostage': scfg.Value(False, help='if true, automatically add changes to version control'),
 
         'visibility': scfg.Value('public', help='or private. Does limit what we can do'),
@@ -536,6 +539,12 @@ class TemplateApplier:
             'type': 'unknown'
         }
 
+        if self.config['remote_host'] is not None:
+            self.remote_info['host'] = self.config['remote_host']
+
+        if self.config['remote_group'] is not None:
+            self.remote_info['group'] = self.config['remote_group']
+
         def _parse_remote_url(url):
             info = {}
             if url.startswith('https://'):
@@ -568,16 +577,22 @@ class TemplateApplier:
             self.remote_info['type'] = 'gitlab'
         if 'github' in tags:
             self.remote_info['type'] = 'github'
+
+        default_remote_info = {}
+
         if self.remote_info['type'] == 'gitlab':
             if 'kitware' in tags:
-                self.remote_info['host'] = 'https://gitlab.kitware.com'
-                self.remote_info['group'] = 'computer-vision'  # hack
+                default_remote_info['host'] = 'https://gitlab.kitware.com'
+                default_remote_info['group'] = 'computer-vision'  # hack
         if self.remote_info['type'] == 'github':
-            self.remote_info['host'] = 'https://github.com'
+            default_remote_info['host'] = 'https://github.com'
             if 'erotemic' in tags:
-                self.remote_info['group'] = 'Erotemic'  # hack
+                default_remote_info['group'] = 'Erotemic'  # hack
             if 'pyutils' in tags:
-                self.remote_info['group'] = 'pyutils'  # hack
+                default_remote_info['group'] = 'pyutils'  # hack
+
+        self.remote_info = ub.udict(default_remote_info) | ub.udict(self.remote_info)
+
         print(f'tags={tags}')
         print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
         if self.remote_info['type'] == 'unknown':
