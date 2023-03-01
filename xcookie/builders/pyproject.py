@@ -129,6 +129,8 @@ def build_pyproject(self):
             'license',
             'dev_status',
             'typed',
+            'remote_host',
+            'remote_group',
         ]
         config_to_save = ub.dict_subset(self.config, options_to_save)
         pyproj_config['tool']['xcookie'].update(config_to_save)

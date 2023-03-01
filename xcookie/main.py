@@ -593,6 +593,9 @@ class TemplateApplier:
 
         self.remote_info = ub.udict(default_remote_info) | ub.udict(self.remote_info)
 
+        self.config['remote_host'] = self.remote_info['host']
+        self.config['remote_group'] = self.remote_info['group']
+
         print(f'tags={tags}')
         print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
         if self.remote_info['type'] == 'unknown':
