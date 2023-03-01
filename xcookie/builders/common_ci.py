@@ -44,6 +44,7 @@ def make_install_and_test_wheel_parts(self,
             'echo "pytest command finished, moving the coverage file to the repo root"',
         ]
 
+    # Note: export does not expose the enviornment variable to subsequent jobs.
     install_wheel_commands = [
         'echo "Finding the path to the wheel"',
         # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
@@ -65,18 +66,23 @@ def make_install_and_test_wheel_parts(self,
 
     test_wheel_commands = [
         'echo "Creating test sandbox directory"',
-        f'WORKSPACE_DNAME="{workspace_dname}"',
+        f'export WORKSPACE_DNAME="{workspace_dname}"',
         'echo "WORKSPACE_DNAME=$WORKSPACE_DNAME"',
         'mkdir -p $WORKSPACE_DNAME',
         'echo "cd-ing into the workspace"',
         'cd $WORKSPACE_DNAME',
         'pwd',
-        'ls -al',
+        'ls -altr',
         # 'pip freeze',
         '# Get the path to the installed package and run the tests',
-        f'MOD_DPATH=$({get_modpath_bash})',
+        f'export MOD_DPATH=$({get_modpath_bash})',
+        f'export MOD_NAME={self.mod_name}',
+        'echo "---"',
         'echo "MOD_DPATH = $MOD_DPATH"',
+        'echo "MOD_NAME = $MOD_NAME"',
+        'echo "---"',
         'echo "running the pytest command inside the workspace"',
+        'echo "---"',
     ] + custom_before_test_lines + test_command + custom_after_test_commands
 
     install_and_test_wheel_parts = {

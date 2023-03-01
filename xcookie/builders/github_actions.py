@@ -59,10 +59,10 @@ class Actions:
                 echo '############ combine'
                 coverage combine . || true
                 echo '############ XML'
-                coverage xml -o ./tests/coverage.xml || true
-                echo '############ FIND'
-                find . -name .coverage.* || true
-                find . -name coverage.xml  || true
+                coverage xml -o ./coverage.xml || true
+                echo '### The cwd should now have a coverage.xml'
+                ls -altr
+                pwd
                 '''
             )
 
@@ -491,7 +491,7 @@ def build_binpy_wheels_job(self):
         Actions.codecov_action({
             'name': 'Codecov Upload',
             'with': {
-                'file': './tests/coverage.xml'
+                'file': './coverage.xml'
             }
         }),
         Actions.upload_artifact({
@@ -803,7 +803,7 @@ def test_wheels_job(self, needs=None):
             Actions.codecov_action({
                 'name': 'Codecov Upload',
                 'with': {
-                    'file': './tests/coverage.xml'
+                    'file': './coverage.xml'
                 }
             }),
         ]
