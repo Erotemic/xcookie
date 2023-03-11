@@ -81,14 +81,21 @@ class Actions:
         }, *args, **kwargs)
 
     @classmethod
-    def msvc_dev_cmd(cls, *args, osvar=None, bits=None, **kwargs):
+    def msvc_dev_cmd(cls, *args, osvar=None, bits=None, test_condition=None, **kwargs):
         if osvar is not None:
             # hack, just keep it this way for now
             if bits == 32:
+                # FIXME; we dont want to rely on the cibw_skip variable
                 # kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_skip == '*-win_amd64'"
-                kwargs['if'] = "matrix.os == 'windows-latest' && ${{ contains(matrix.cibw_skip, '*-win_amd64') }}"
+                if test_condition is not None:
+                    kwargs['if'] = "matrix.os == 'windows-latest' && " + test_condition
+                else:
+                    kwargs['if'] = "matrix.os == 'windows-latest'"
             else:
-                kwargs['if'] = "matrix.os == 'windows-latest' && ${{ contains(matrix.cibw_skip, '*-win32') }}"
+                if test_condition is not None:
+                    kwargs['if'] = "matrix.os == 'windows-latest' && " + test_condition
+                else:
+                    kwargs['if'] = "matrix.os == 'windows-latest'"
         if bits is None:
             name = 'Enable MSVC'
         else:
@@ -451,8 +458,8 @@ def build_binpy_wheels_job(self):
     conditional_actions = []
     if 'win' in self.config['os']:
         conditional_actions += [
-            Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
-            Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
+            Actions.msvc_dev_cmd(bits=64, osvar='matrix.os', test_condition="${{ contains(matrix.cibw_skip, '*-win32') }}"),
+            Actions.msvc_dev_cmd(bits=32, osvar='matrix.os', test_condition="${{ contains(matrix.cibw_skip, '*-win_amd64') }}"),
         ]
 
     job = {
@@ -641,43 +648,48 @@ def test_wheels_job(self, needs=None):
         # special_strict_test_env['gdal-requirement-txt'] = 'requirements-strict/gdal.txt'
         special_strict_test_env['gdal-requirement-txt'] = 'requirements/gdal.txt'
 
+    platform_basis = [
+        {'os': osname, 'arch': 'auto'}
+        for osname in os_list
+    ]
+
     # Reduce the CI load, don't specify the entire product space
-    arch = 'auto'
+    # arch = 'auto'
     include = []
-    for osname in os_list:
+    for platkw in platform_basis:
         for extra in install_extras.take(['minimal-strict']):
             for pyver in install_extra_versions['minimal-strict']:
-                include.append({'python-version': pyver, 'os': osname,
-                                'install-extras': extra, 'arch': arch,
-                                **special_strict_test_env})
+                include.append({
+                    'python-version': pyver, 'install-extras': extra,
+                    **platkw, **special_strict_test_env})
 
-    for osname in os_list:
+    for platkw in platform_basis:
         for extra in install_extras.take(['full-strict']):
             for pyver in install_extra_versions['full-strict']:
-                include.append({'python-version': pyver, 'os': osname,
-                                'install-extras': extra, 'arch': arch,
-                                **special_strict_test_env})
+                include.append({
+                    'python-version': pyver, 'install-extras': extra,
+                    **platkw, **special_strict_test_env})
 
-    for osname in os_list[1:]:
+    for osname in platform_basis[1:]:
         for extra in install_extras.take(['minimal-loose']):
             for pyver in install_extra_versions['minimal-loose']:
-                include.append({'python-version': pyver, 'os': osname,
-                                'install-extras': extra, 'arch': arch,
-                                **special_loose_test_env})
+                include.append({
+                    'python-version': pyver, 'install-extras': extra,
+                    **platkw, **special_loose_test_env})
 
-    for osname in os_list:
+    for osname in platform_basis:
         for extra in install_extras.take(['full-loose']):
             for pyver in install_extra_versions['full-loose']:
-                include.append({'python-version': pyver, 'os': osname,
-                                'install-extras': extra, 'arch': arch,
-                                **special_loose_test_env})
+                include.append({
+                    'python-version': pyver, 'install-extras': extra,
+                    **platkw, **special_loose_test_env})
 
-    for osname in os_list:
+    for osname in platform_basis:
         for extra in install_extras.take(['full-loose']):
             for pyver in pypy_versions:
-                include.append({'python-version': pyver, 'os': osname,
-                                'install-extras': extra, 'arch': arch,
-                                **special_loose_test_env})
+                include.append({
+                    'python-version': pyver, 'install-extras': extra,
+                    **platkw, **special_loose_test_env})
 
     for item in include:
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
@@ -746,7 +758,7 @@ def test_wheels_job(self, needs=None):
     if 'win' in self.config['os']:
         action_steps += [
             Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
-            Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),
+            # Actions.msvc_dev_cmd(bits=32, osvar='matrix.os'),  # need a test condition if we are going to have both.
         ]
 
     if 'ipfs' in self.config['tags']:
