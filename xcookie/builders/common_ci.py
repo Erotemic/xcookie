@@ -25,42 +25,49 @@ def make_install_and_test_wheel_parts(self,
                                       custom_before_test_lines=[],
                                       custom_after_test_commands=[],
                                       ):
+    """
+    Builds the YAML common between github actions and gitlab CI to install and
+    tests python packages.
+
+    References:
+        https://stackoverflow.com/questions/42019184/python-how-can-i-get-the-version-number-from-a-whl-file
+    """
+    from xcookie import util_yaml
+
     # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
     # get_modname_bash = f'python -c "{get_modname_python}"'
 
-    get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
+    get_wheel_fpath_python = util_yaml.CodeBlock(f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('{self.mod_name}*.whl'))[-1]).replace(chr(92), chr(47)))")
+    # get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('{self.mod_name}*.whl'))[-1]).replace(r'\\', '/'))"
     get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
 
     get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
     get_mod_version_bash = f'python -c "{get_mod_version_python}"'
 
-    # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
+    # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath(f'{self.mod_name}'))"
     get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
     get_modpath_bash = f'python -c "{get_modpath_python}"'
 
     if test_command == 'auto':
         test_command = [
-            CodeBlock('python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests'),
+            util_yaml.CodeBlock(f'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="{self.mod_name}" "$MOD_DPATH" ../tests'),
             'echo "pytest command finished, moving the coverage file to the repo root"',
         ]
 
     # Note: export does not expose the enviornment variable to subsequent jobs.
     install_wheel_commands = [
         'echo "Finding the path to the wheel"',
-        # f'WHEEL_FPATH=$(ls wheelhouse/{self.mod_name}*.whl)',
         f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',
         'echo "Installing helpers"',
         'pip install pip setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
         'pip install tomli pkginfo',
         # 'pip install delorean',
-        f'export MOD_NAME={self.mod_name}',
-        'echo "MOD_NAME=$MOD_NAME"',
         f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
-        'echo "WHEEL_FPATH=$WHEEL_FPATH"',
+        # 'echo "WHEEL_FPATH=$WHEEL_FPATH"',
         f'export MOD_VERSION=$({get_mod_version_bash})',
-        'echo "MOD_VERSION=$MOD_VERSION"',
+        # 'echo "MOD_VERSION=$MOD_VERSION"',
     ] + special_install_lines + [
-        f'pip install --prefer-binary "$MOD_NAME[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+        f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
         'echo "Install finished."',
     ]
 
@@ -76,13 +83,16 @@ def make_install_and_test_wheel_parts(self,
         # 'pip freeze',
         '# Get the path to the installed package and run the tests',
         f'export MOD_DPATH=$({get_modpath_bash})',
-        f'export MOD_NAME={self.mod_name}',
-        'echo "---"',
-        'echo "MOD_DPATH = $MOD_DPATH"',
-        'echo "MOD_NAME = $MOD_NAME"',
-        'echo "---"',
-        'echo "running the pytest command inside the workspace"',
-        'echo "---"',
+        util_yaml.CodeBlock(
+            '''
+            echo "
+            ---
+            MOD_DPATH = $MOD_DPATH
+            ---
+            running the pytest command inside the workspace
+            ---
+            "
+            '''),
     ] + custom_before_test_lines + test_command + custom_after_test_commands
 
     install_and_test_wheel_parts = {
@@ -90,15 +100,3 @@ def make_install_and_test_wheel_parts(self,
         'test_wheel_commands': test_wheel_commands,
     }
     return install_and_test_wheel_parts
-
-
-def CodeBlock(text):
-    import ubelt as ub
-    RUAMEL = 1
-    if RUAMEL:
-        import ruamel.yaml
-        # from ruamel.yaml.comments import CommentedMap, CommentedSeq
-    if RUAMEL:
-        return ruamel.yaml.scalarstring.LiteralScalarString(ub.codeblock(text))
-    else:
-        return ub.codeblock(text)

@@ -59,36 +59,18 @@ def build_gitlab_rules(self):
 
 
 def make_purepy_ci_jobs(self):
+    import ruamel.yaml
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
     from xcookie import util_yaml
 
     enable_gpg = self.config['enable_gpg']
 
-    RUAMEL = 1
-    if RUAMEL:
-        import ruamel.yaml
-        from ruamel.yaml.comments import CommentedMap, CommentedSeq
-
-    def CodeBlock(text):
-        if RUAMEL:
-            return ruamel.yaml.scalarstring.LiteralScalarString(ub.codeblock(text))
-        else:
-            return ub.codeblock(text)
-
-    stages = [
+    body = CommentedMap()
+    body['stages'] = CommentedSeq([
         'build',
         'test',
-    ]
-    if enable_gpg:
-        stages.append('gpgsign')
-    stages.append('deploy')
-
-    body = {
-        'stages': stages,
-    }
-    if RUAMEL:
-        body = CommentedMap(**body)
-        body['stages'] = CommentedSeq(body['stages'])
-        body.yaml_add_eol_comment('stages', 'TEMPLATE1,c 1')
+    ])
+    body.yaml_add_eol_comment('stages', 'TEMPLATE1,c 1')
 
     common_template = ub.udict(util_yaml.yaml_loads(ub.codeblock(
         '''
@@ -112,13 +94,14 @@ def make_purepy_ci_jobs(self):
                 - .cache/pip
         ''')))
 
-    RUAMEL = 1
-    if RUAMEL:
-        common_template = CommentedMap(common_template)
-        common_template.yaml_set_anchor('common_template')
-        body['.common_template'] = common_template
+    common_template = CommentedMap(common_template)
+    common_template.yaml_set_anchor('common_template')
+    body['.common_template'] = common_template
 
-    wheelhouse_dpath = 'wheelhouse'
+    if 'kitware' in self.tags:
+        body['.common_template']['tags'].append('kitware-python-stack')
+
+    wheelhouse_dpath = 'dist'
     build_wheel_parts = common_ci.make_build_wheel_parts(self, wheelhouse_dpath)
     build_template = {
         'stage': 'build',
@@ -132,30 +115,24 @@ def make_purepy_ci_jobs(self):
             ]
         },
     }
-    if RUAMEL:
-        build_template = CommentedMap(build_template)
-        build_template.yaml_set_anchor('build_template')
-        body['.build_template'] = build_template
-        build_template.add_yaml_merge([(0, common_template)])
-    else:
-        build_template = common_template | build_template
+    build_template = CommentedMap(build_template)
+    build_template.yaml_set_anchor('build_template')
+    body['.build_template'] = build_template
+    build_template.add_yaml_merge([(0, common_template)])
 
-    test_template = {
+    common_test_template = {
         'stage': 'test',
 
         # Coverage is a regex that will parse the coverage from the test stdout
         'coverage': '/TOTAL.+ ([0-9]{1,3}%)/',
     }
 
-    if RUAMEL:
-        test_template = CommentedMap(test_template)
-        test_template.yaml_set_anchor('test_template')
-        test_template.add_yaml_merge([(0, common_template)])
-        body['.test_template'] = test_template
-    else:
-        test_template = common_template | test_template
+    common_test_template = CommentedMap(common_test_template)
+    common_test_template.yaml_set_anchor('common_test_template')
+    common_test_template.add_yaml_merge([(0, common_template)])
+    body['.common_test_template'] = common_test_template
 
-    setup_venv_template = CodeBlock(
+    setup_venv_template = util_yaml.CodeBlock(
         '''
         # Setup the correct version of python (which should be the same as this instance)
         python --version  # Print out python version for debugging
@@ -168,20 +145,6 @@ def make_purepy_ci_jobs(self):
         pip install pygments
         python --version  # Print out python version for debugging
         ''')
-
-    # https://stackoverflow.com/questions/42019184/python-how-can-i-get-the-version-number-from-a-whl-file
-
-    # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
-    # get_modname_bash = f'python -c "{get_modname_python}"'
-
-    # get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
-    # get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
-
-    # get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
-    # get_mod_version_bash = f'python -c "{get_mod_version_python}"'
-
-    # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
-    # get_modpath_bash = f'python -c "{get_modpath_python}"'
 
     test_templates = {}
     loose_cv2 = ''
@@ -207,30 +170,19 @@ def make_purepy_ci_jobs(self):
         install_and_test_wheel_parts = common_ci.make_install_and_test_wheel_parts(
             self, wheelhouse_dpath, special_install_lines, workspace_dname)
         test_steps = [
-            f'export INSTALL_EXTRAS={extra}',
+            f'export INSTALL_EXTRAS="{extra}"',
         ]
         test_steps += install_and_test_wheel_parts['install_wheel_commands']
         test_steps += install_and_test_wheel_parts['test_wheel_commands']
-        # test_steps += [
-        #     CodeBlock(' && '.join([
-        #         'mkdir -p sandbox',
-        #         'cd sandbox',
-        #         f'pytest -s --xdoctest --xdoctest-verbose=3 --cov-config ../pyproject.toml --cov-report html --cov-report term --cov="$MOD_NAME" "$({get_modpath_bash})" ../tests',
-        #         'cd ..',
-        #     ])),
-        # ]
         test = {
             'before_script': [setup_venv_template],
             'script': test_steps,
         }
-        if RUAMEL:
-            anchor = f'test_{extra_key}_template'
-            test = CommentedMap(test)
-            test.yaml_set_anchor(anchor)
-            test.add_yaml_merge([(0, test_template)])
-            body['.' + anchor] = test
-        else:
-            test = test_template | test
+        anchor = f'test_{extra_key}_template'
+        test = CommentedMap(test)
+        test.yaml_set_anchor(anchor)
+        test.add_yaml_merge([(0, common_test_template)])
+        body['.' + anchor] = test
         test_templates[extra_key] = test
 
     python_images = {
@@ -257,14 +209,11 @@ def make_purepy_ci_jobs(self):
             build_job = {
                 'image': python_images[cpver],
             }
-            if RUAMEL:
-                build_job = CommentedMap(build_job)
-                build_job.add_yaml_merge([(0, build_template)])
-            else:
-                build_job = build_template | build_job
+            build_job = CommentedMap(build_job)
+            build_job.add_yaml_merge([(0, build_template)])
             jobs[build_name] = build_job
 
-            for extra_key, test_template in test_templates.items():
+            for extra_key, common_test_template in test_templates.items():
                 test_name = f'test/{extra_key}/{swenv_key}'
                 test_job = {
                     'image': python_images[cpver],
@@ -272,16 +221,11 @@ def make_purepy_ci_jobs(self):
                         build_name,
                     ]
                 }
-                if RUAMEL:
-                    test_job = CommentedMap(test_job)
-                    test_job.add_yaml_merge([(0, test_template)])
-                else:
-                    test_job = test_template | test_job
+                test_job = CommentedMap(test_job)
+                test_job.add_yaml_merge([(0, common_test_template)])
                 jobs[test_name] = test_job
 
     body.update(jobs)
-
-    assert enable_gpg
 
     deploy_image = python_images['cp38']
 
@@ -297,7 +241,7 @@ def make_purepy_ci_jobs(self):
 
             artifacts:
                 paths:
-                    - wheelhouse/*.asc
+                    - {wheelhouse_dpath}/*.asc
 
             only:
                 refs:
@@ -314,7 +258,7 @@ def make_purepy_ci_jobs(self):
         gpgsign_job.update(util_yaml.yaml_loads(ub.codeblock(
             '''
             script:
-                - ls wheelhouse
+                - ls ''' + wheelhouse_dpath + '''
                 - export GPG_EXECUTABLE=gpg
                 - export GPG_KEYID=$(cat dev/public_gpg_key)
                 - echo "GPG_KEYID = $GPG_KEYID"
@@ -332,9 +276,9 @@ def make_purepy_ci_jobs(self):
                 - GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
             ''')))
         gpgsign_job['script'].append(
-            CodeBlock(
+            util_yaml.CodeBlock(
                 '''
-                WHEEL_PATHS=(wheelhouse/*.whl)
+                WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
                 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
                 echo "$WHEEL_PATHS_STR"
                 for WHEEL_PATH in "${WHEEL_PATHS[@]}"
@@ -348,13 +292,11 @@ def make_purepy_ci_jobs(self):
                 '''
             )
         )
-        gpgsign_job['script'].append('ls wheelhouse')
+        gpgsign_job['script'].append(f'ls {wheelhouse_dpath}')
 
-        if RUAMEL:
-            gpgsign_job = CommentedMap(gpgsign_job)
-            gpgsign_job.add_yaml_merge([(0, common_template)])
-        else:
-            gpgsign_job = common_template | gpgsign_job
+        gpgsign_job = CommentedMap(gpgsign_job)
+        gpgsign_job.add_yaml_merge([(0, common_template)])
+        body['stages'].append('gpgsign')
         body['gpgsign/wheels'] = gpgsign_job
 
     deploy = True
@@ -374,12 +316,12 @@ def make_purepy_ci_jobs(self):
             '''))))
         deploy_script = [
             'pip install pyopenssl ndg-httpsclient pyasn1 requests[security] twine -U',
-            'ls wheelhouse',
+            f'ls {wheelhouse_dpath}',
         ]
         deploy_script += [
-            CodeBlock(
+            util_yaml.CodeBlock(
                 '''
-                WHEEL_PATHS=(wheelhouse/*.whl)
+                WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
                 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
                 source dev/secrets_configuration.sh
                 TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}
@@ -393,7 +335,7 @@ def make_purepy_ci_jobs(self):
                 ''')
         ]
         deploy_script += [
-            CodeBlock(
+            util_yaml.CodeBlock(
                 r'''
                 # Have the server git-tag the release and push the tags
                 export VERSION=$(python -c "import setup; print(setup.VERSION)")
@@ -422,25 +364,18 @@ def make_purepy_ci_jobs(self):
                 ''')
         ]
         deploy_job['script'] = deploy_script
-        if RUAMEL:
-            deploy_job = CommentedMap(deploy_job)
-            deploy_job.add_yaml_merge([(0, common_template)])
-        else:
-            deploy_job = common_template | deploy_job
+        deploy_job = CommentedMap(deploy_job)
+        deploy_job.add_yaml_merge([(0, common_template)])
+        body['stages'].append('deploy')
         body['deploy/wheels'] = deploy_job
 
-    if RUAMEL:
-        body_text = ruamel.yaml.round_trip_dump(body, Dumper=ruamel.yaml.RoundTripDumper)
+    body_text = ruamel.yaml.round_trip_dump(body, Dumper=ruamel.yaml.RoundTripDumper)
 
-        # if RUAMEL:
-        body = ruamel.yaml.round_trip_load(body_text)
-        body['stages'].yaml_set_start_comment('TEMPLATES')
-        # body.yaml_set_comment_before_after_key('stages', 'before test1 (top level)', after='before test2\n\n')
-        # body.yaml_add_eol_comment('STAGE COMMENT', key='stages')
-        body_text = ruamel.yaml.round_trip_dump(body, Dumper=ruamel.yaml.RoundTripDumper)
-    else:
-        from xcookie import util_yaml
-        body_text = util_yaml.yaml_dumps(body)
+    body = ruamel.yaml.round_trip_load(body_text)
+    body['stages'].yaml_set_start_comment('TEMPLATES')
+    # body.yaml_set_comment_before_after_key('stages', 'before test1 (top level)', after='before test2\n\n')
+    # body.yaml_add_eol_comment('STAGE COMMENT', key='stages')
+    body_text = ruamel.yaml.round_trip_dump(body, Dumper=ruamel.yaml.RoundTripDumper)
 
     header = ub.codeblock(
         '''
