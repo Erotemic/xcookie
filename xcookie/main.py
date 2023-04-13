@@ -42,6 +42,10 @@ ExampleUsage:
 
     python -m xcookie.main --repo_name=delayed_image --repodir=$HOME/code/delayed_image --tags="kitware,gitlab,purepy,cv2,gdal"
 
+    HOST=https://gitlab.kitware.com
+    export PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
+    python -m xcookie.main --repo_name=geowatch --repodir=$HOME/code/geowatch --tags="kitware,gitlab,purepy,cv2,gdal"
+
     python -m xcookie.main --repo_name=stdx --repodir=$HOME/code/stdx --tags="github,purepy,erotemic"
 
     python -m xcookie.main --repo_name=ustd --repodir=$HOME/code/ustd --tags="github,purepy,erotemic"
@@ -62,8 +66,8 @@ class SkipFile(Exception):
 
 # TODO: split up into a configuration that is saved to pyproject.toml and one
 # that is on only used when executing
-class XCookieConfig(scfg.Config):
-    default = {
+class XCookieConfig(scfg.DataConfig):
+    __default__ = {
         'repodir': scfg.Value('.', help='path to the new or existing repo', position=1),
 
         'repo_name': scfg.Value(None, help='defaults to ``repodir.name``'),
@@ -158,7 +162,7 @@ class XCookieConfig(scfg.Config):
         'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
     }
 
-    def normalize(self):
+    def __post_init__(self):
         if self['repodir'] is None:
             self['repodir'] = ub.Path.cwd()
         else:
@@ -301,12 +305,12 @@ class XCookieConfig(scfg.Config):
             cmdline = 0
         """
         # We load the config multiple times to get the right defaults.
-        config = XCookieConfig(cmdline=cmdline, data=kwargs)
+        config = XCookieConfig.cli(cmdline=cmdline, data=kwargs)
         config.normalize()
         settings = config._load_xcookie_pyproject_settings()
         if settings:
             print(f'settings={settings}')
-            config = XCookieConfig(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
+            config = XCookieConfig.cli(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
         config.normalize()
 
         # import xdev
@@ -730,7 +734,7 @@ class TemplateApplier:
             >>>     'is_new': False,
             >>>     'interactive': False,
             >>> }
-            >>> config = XCookieConfig(cmdline=0, data=kwargs)
+            >>> config = XCookieConfig.cli(cmdline=0, data=kwargs)
             >>> config.normalize()
             >>> print('config = {}'.format(ub.repr2(dict(config), nl=1)))
             >>> self = TemplateApplier(config)
