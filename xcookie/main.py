@@ -160,6 +160,8 @@ class XCookieConfig(scfg.DataConfig):
             ''')),
 
         'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
+
+        'linter': scfg.Value(True, help=ub.paragraph('if true enables lint checks in CI')),
     }
 
     def __post_init__(self):

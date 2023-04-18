@@ -5,7 +5,7 @@ Common subroutines for consitency between gitlab-ci / github actions / etc...
 
 def make_build_wheel_parts(self, wheelhouse_dpath='wheelhouse'):
     commands = [
-        'python -m pip install pip -U',
+        # 'python -m pip install pip -U',
         'python -m pip install setuptools>=0.8 wheel build',
         f'python -m build --wheel --outdir {wheelhouse_dpath}',
     ]
@@ -59,7 +59,8 @@ def make_install_and_test_wheel_parts(self,
         'echo "Finding the path to the wheel"',
         f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',
         'echo "Installing helpers"',
-        'pip install pip setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+        # 'pip install pip setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+        'pip install setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
         'pip install tomli pkginfo',
         # 'pip install delorean',
         f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',

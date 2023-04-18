@@ -190,7 +190,8 @@ def build_github_actions(self):
     """
 
     jobs = {}
-    jobs['lint_job'] = lint_job(self)
+    if self.config.linter:
+        jobs['lint_job'] = lint_job(self)
 
     if 'purepy' in self.tags:
         name = 'PurePyCI'
