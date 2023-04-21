@@ -438,10 +438,16 @@ def build_binpy_wheels_job(self):
     explicit_skips = ' ' + pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('skip', '')
     print(f'explicit_skips={explicit_skips}')
 
+    # Fixme: how to get this working again?
+    WITH_WIN_32BIT = False
+
     if 'win' in self.config['os']:
-        included_runs = [
-            {'os': 'windows-latest', 'arch': 'auto', 'cibw_skip': ("*-win_amd64" + explicit_skips).strip()},
-        ]
+        if WITH_WIN_32BIT:
+            included_runs = [
+                {'os': 'windows-latest', 'arch': 'auto', 'cibw_skip': ("*-win_amd64" + explicit_skips).strip()},
+            ]
+        else:
+            included_runs = []
     else:
         included_runs = []
 
@@ -460,8 +466,12 @@ def build_binpy_wheels_job(self):
     if 'win' in self.config['os']:
         conditional_actions += [
             Actions.msvc_dev_cmd(bits=64, osvar='matrix.os', test_condition="${{ contains(matrix.cibw_skip, '*-win32') }}"),
-            Actions.msvc_dev_cmd(bits=32, osvar='matrix.os', test_condition="${{ contains(matrix.cibw_skip, '*-win_amd64') }}"),
         ]
+
+        if WITH_WIN_32BIT:
+            conditional_actions += [
+                Actions.msvc_dev_cmd(bits=32, osvar='matrix.os', test_condition="${{ contains(matrix.cibw_skip, '*-win_amd64') }}"),
+            ]
 
     job = {
         'name': '${{ matrix.os }}, arch=${{ matrix.arch }}',
