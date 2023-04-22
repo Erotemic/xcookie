@@ -1,5 +1,5 @@
 #!/bin/bash
-__doc__='''
+__doc__='
 Script to publish a new version of this library on PyPI.
 
 If your script has binary dependencies then we assume that you have built a
@@ -85,7 +85,7 @@ Usage:
     export TWINE_USERNAME=<pypi-username>
     export TWINE_PASSWORD=<pypi-password>
     TWINE_REPOSITORY_URL="https://test.pypi.org/legacy/"
-'''
+'
 
 DEBUG=${DEBUG:=''}
 if [[ "${DEBUG}" != "" ]]; then
