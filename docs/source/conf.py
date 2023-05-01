@@ -1,6 +1,8 @@
 """
 Notes:
-    Based on template code in: ~/code/xcookie/docs/source/conf.py
+    Based on template code in:
+        ~/code/xcookie/docs/source/conf.py
+        ~/code/xcookie/xcookie/rc/conf_ext.py
 
     http://docs.readthedocs.io/en/latest/getting_started.html
 

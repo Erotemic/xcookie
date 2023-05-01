@@ -15,7 +15,9 @@ def build_docs_conf(self):
         r'''
         """
         Notes:
-            Based on template code in: ~/code/xcookie/xcookie/builders/docs_conf.py
+            Based on template code in:
+                ~/code/xcookie/xcookie/builders/docs_conf.py
+                ~/code/xcookie/xcookie/rc/conf_ext.py
 
             http://docs.readthedocs.io/en/latest/getting_started.html
 
@@ -252,7 +254,7 @@ def build_docs_conf(self):
         # -- Options for HTMLHelp output ---------------------------------------------
 
         # Output file base name for HTML help builder.
-        htmlhelp_basename = 'xcookiedoc'
+        htmlhelp_basename = '{repo_name}doc'
 
 
         # -- Options for LaTeX output ------------------------------------------------
