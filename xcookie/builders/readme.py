@@ -6,6 +6,7 @@ class BadgeBuilder:
         self.badges = {}
 
     def build_templates(self, group, repo_name, main_branch, workflow):
+        repo_dashname = repo_name.replace('_', '-')
         badges = self.badges = {}
         badges['CircleCI'] = {
             'image': f'https://circleci.com/gh/{group}/{repo_name}.svg?style=svg',
@@ -28,8 +29,8 @@ class BadgeBuilder:
             'target': f'https://pypistats.org/packages/{repo_name}',
         }
         badges['ReadTheDocs'] = {
-            'image': f'https://readthedocs.org/projects/{repo_name}/badge/?version=latest',
-            'target': f'http://{repo_name}.readthedocs.io/en/latest/',
+            'image': f'https://readthedocs.org/projects/{repo_dashname}/badge/?version=latest',
+            'target': f'http://{repo_dashname}.readthedocs.io/en/latest/',
         }
         badges['GithubActions'] = {
             'image': f'https://github.com/{group}/{repo_name}/actions/workflows/{workflow}.yml/badge.svg?branch={main_branch}',

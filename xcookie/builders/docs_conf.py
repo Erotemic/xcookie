@@ -2,12 +2,19 @@ def build_docs_conf(self):
     import ubelt as ub
     import datetime
 
+    author = self.config['author']
+    if isinstance(author, list):
+        author_str = ' '.join(author)
+    else:
+        author_str = author
+
     fmtkw = {
         'repo_name': self.config['repo_name'],
+        'repo_dashname': self.config['repo_name'].replace('_', '-'),
         'mod_name': self.config['mod_name'],
         'rel_mod_dpath': str(self.rel_mod_dpath),
         'repo_url': self.remote_info['url'],
-        'author': self.config['author'],
+        'author': author_str,
         'year': datetime.datetime.now().year,
     }
 
@@ -39,7 +46,7 @@ def build_docs_conf(self):
 
                 https://docs.readthedocs.io/en/stable/guides/autobuild-docs-for-pull-requests.html
 
-                https://readthedocs.org/dashboard/{repo_name}/advanced/
+                https://readthedocs.org/dashboard/{repo_dashname}/advanced/
 
                 ensure your github account is connected to readthedocs
                 https://readthedocs.org/accounts/social/connections/
@@ -60,7 +67,7 @@ def build_docs_conf(self):
                 For gitlab you also need to setup an integrations and add gitlab
                 incoming webhook
 
-                    https://readthedocs.org/dashboard/{repo_name}/integrations/create/
+                    https://readthedocs.org/dashboard/{repo_dashname}/integrations/create/
 
                 Then go to
 
@@ -73,7 +80,7 @@ def build_docs_conf(self):
                 See Docs for more details https://docs.readthedocs.io/en/stable/integrations.html
 
                 Will also need to activate the main branch:
-                    https://readthedocs.org/projects/{repo_name}/versions/
+                    https://readthedocs.org/projects/{repo_dashname}/versions/
         """
         #
         # Configuration file for the Sphinx documentation builder.
