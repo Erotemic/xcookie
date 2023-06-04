@@ -38,7 +38,7 @@ def build_docs_conf(self):
 
             # need to edit the conf.py
             cd ~/code/{repo_name}/docs
-            sphinx-apidoc -f -o ~/code/{repo_name}/docs/source ~/code/{repo_name}/{rel_mod_dpath} --separate
+            sphinx-apidoc --private -f -o ~/code/{repo_name}/docs/source ~/code/{repo_name}/{rel_mod_dpath} --separate
             make html
 
             Also:
