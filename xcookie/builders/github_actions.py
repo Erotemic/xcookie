@@ -35,7 +35,7 @@ class Actions:
     def setup_python(cls, *args, **kwargs):
         return cls.action({
             'name': 'Setup Python',
-            'uses': 'actions/setup-python@v4.5.0'
+            'uses': 'actions/setup-python@v4.6.1'
         }, *args, **kwargs)
 
     @classmethod
@@ -381,7 +381,7 @@ def build_and_test_sdist_job(self):
                     'echo "MOD_DPATH = $MOD_DPATH"',
                     # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
                     # TODO: change to test command
-                    'python -m pytest --cov={self.mod_name} $MOD_DPATH ../tests',
+                    'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
                     'cd ..',
                 ]
             },
@@ -402,7 +402,7 @@ def build_and_test_sdist_job(self):
                     f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
                     'echo "MOD_DPATH = $MOD_DPATH"',
                     # TODO: change to test command
-                    'python -m pytest --cov={self.mod_name} $MOD_DPATH ../tests',
+                    'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
                     # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
                     # Move coverage file to a new name
                     # 'mv .coverage "../.coverage.$WORKSPACE_DNAME"',

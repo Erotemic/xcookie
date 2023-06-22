@@ -16,6 +16,7 @@ def build_docs_conf(self):
         'repo_url': self.remote_info['url'],
         'author': author_str,
         'year': datetime.datetime.now().year,
+        'repodir_wrt_home': self.repodir.shrinkuser()
     }
 
     text = ub.codeblock(
@@ -30,16 +31,19 @@ def build_docs_conf(self):
 
             pip install sphinx sphinx-autobuild sphinx_rtd_theme sphinxcontrib-napoleon
 
-            cd ~/code/{repo_name}
+            cd {repodir_wrt_home}
             mkdir -p docs
             cd docs
 
             sphinx-quickstart
 
             # need to edit the conf.py
-            cd ~/code/{repo_name}/docs
-            sphinx-apidoc --private -f -o ~/code/{repo_name}/docs/source ~/code/{repo_name}/{rel_mod_dpath} --separate
+
+            cd {repodir_wrt_home}/docs
+            sphinx-apidoc --private -f -o {repodir_wrt_home}/docs/source {repodir_wrt_home}/{rel_mod_dpath} --separate
             make html
+
+            git add source/*.rst
 
             Also:
                 To turn on PR checks
@@ -323,5 +327,9 @@ def build_docs_conf(self):
     util_text = rc.resource_fpath('conf_ext.py').read_text()
     if 1:
         util_text = util_text.replace('RENDER_IMAGES = 0', 'RENDER_IMAGES = 1')
+
+    if self.config['repo_name'] == 'kwcoco':
+        util_text = util_text.replace('HACK_FOR_KWCOCO = 0', 'HACK_FOR_KWCOCO = 1')
+
     text = text + '\n' + util_text
     return text

@@ -42,8 +42,11 @@ ExampleUsage:
 
     python -m xcookie.main --repo_name=delayed_image --repodir=$HOME/code/delayed_image --tags="kitware,gitlab,purepy,cv2,gdal"
 
+
     HOST=https://gitlab.kitware.com
     export PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
+    python -m xcookie.main --repo_name=kwutil --repodir=$HOME/code/kwutil --tags="kitware,gitlab,purepy"
+
     python -m xcookie.main --repo_name=geowatch --repodir=$HOME/code/geowatch --tags="kitware,gitlab,purepy,cv2,gdal"
 
     python -m xcookie.main --repo_name=stdx --repodir=$HOME/code/stdx --tags="github,purepy,erotemic"
@@ -127,7 +130,6 @@ class XCookieConfig(scfg.DataConfig):
 
         'visibility': scfg.Value('public', help='or private. Does limit what we can do'),
 
-        'interactive': scfg.Value(True),
 
         'version': scfg.Value(None, help='repo metadata: url for the project'),
         'url': scfg.Value(None, help='repo metadata: url for the project'),
@@ -159,6 +161,7 @@ class XCookieConfig(scfg.DataConfig):
                 "cv2" - enable the headless hack
             ''')),
 
+        'interactive': scfg.Value(True),
         'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
 
         'linter': scfg.Value(True, help=ub.paragraph('if true enables lint checks in CI')),
@@ -1034,6 +1037,9 @@ class TemplateApplier:
             yourself for now:
 
             * Add typing to the module
+
+                # xdev requires the non-binary mypy
+                pip install -U mypy --no-binary :all:
 
                 # Generate stubs and check them
                 xdev docstubs {self.repo_name} && mypy {self.repo_name}

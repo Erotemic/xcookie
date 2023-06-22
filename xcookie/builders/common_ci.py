@@ -50,7 +50,7 @@ def make_install_and_test_wheel_parts(self,
 
     if test_command == 'auto':
         test_command = [
-            util_yaml.CodeBlock(f'python -m pytest -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="{self.mod_name}" "$MOD_DPATH" ../tests'),
+            util_yaml.CodeBlock(f'python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="{self.mod_name}" "$MOD_DPATH" ../tests'),
             'echo "pytest command finished, moving the coverage file to the repo root"',
         ]
 
