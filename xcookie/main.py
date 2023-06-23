@@ -294,6 +294,8 @@ class XCookieConfig(scfg.DataConfig):
     @classmethod
     def main(cls, cmdline=0, **kwargs):
         """
+        Main entry point
+
         Ignore:
             repodir = ub.Path('~/code/pyflann_ibeis').expand()
             kwargs = {
@@ -330,12 +332,24 @@ class XCookieConfig(scfg.DataConfig):
         repodir.ensuredir()
 
         self = TemplateApplier(config)
-        self.setup().apply()
+        self.setup()
+        self.apply()
 
 
 class TemplateApplier:
+    """
+    The primary xcookie autogeneration class.
+
+    Note:
+        this does not write any files unless you call setup (which just writes
+        to a temporary directory) or apply (which can destructively clobber
+        things).
+    """
 
     def __init__(self, config):
+        if isinstance(config, dict):
+            config = XCookieConfig(**config)
+
         self.config = config
         self.repodir = ub.Path(self.config['repodir'])
         if self.config['repo_name'] is None:
@@ -355,6 +369,11 @@ class TemplateApplier:
         }
 
     def apply(self):
+        """
+        Does the actual modification of the target repo.
+
+        Has special logic to handle building new respos versus updating repos.
+        """
         self.vcs_checks()
         self.copy_staged_files()
         if self.config['refresh_docs']:
@@ -551,6 +570,10 @@ class TemplateApplier:
         return set(self.config['tags'])
 
     def setup(self):
+        """
+        Finalizes a few variables and writes the "clean" template to the
+        staging directory.
+        """
         tags = set(self.config['tags'])
         self.remote_info = {
             'type': 'unknown'
@@ -737,6 +760,9 @@ class TemplateApplier:
 
     def _stage_file(self, info):
         """
+        Write a single file to the staging directory based on its template
+        info.
+
         Example:
             >>> from xcookie.main import *  # NOQA
             >>> dpath = ub.Path.appdir('xcookie/tests/test-stage').delete().ensuredir()

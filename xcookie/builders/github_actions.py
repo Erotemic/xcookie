@@ -228,14 +228,14 @@ def build_github_actions(self):
     cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.deploy
     cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .
 
-    Ignore:
-        from xcookie.builders.github_actions import *  # NOQA
-        from xcookie.main import XCookieConfig
-        from xcookie.main import TemplateApplier
-        config = XCookieConfig(tags=['purepy'])
-        self = TemplateApplier(config)
-        text = build_github_actions(self)
-        print(text)
+    Example:
+        >>> from xcookie.builders.github_actions import *  # NOQA
+        >>> from xcookie.main import XCookieConfig
+        >>> from xcookie.main import TemplateApplier
+        >>> config = XCookieConfig(tags=['purepy'])
+        >>> self = TemplateApplier(config)
+        >>> text = build_github_actions(self)
+        >>> print(text)
     """
     from xcookie.util_yaml import Yaml
 

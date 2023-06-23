@@ -3,6 +3,16 @@ from xcookie.builders import common_ci
 
 
 def build_gitlab_ci(self):
+    """
+    Example:
+        >>> from xcookie.builders.gitlab_ci import *  # NOQA
+        >>> from xcookie.main import XCookieConfig
+        >>> from xcookie.main import TemplateApplier
+        >>> config = XCookieConfig(tags=['purepy'])
+        >>> self = TemplateApplier(config)
+        >>> text = build_gitlab_ci(self)
+        >>> print(text)
+    """
     if 'purepy' in self.tags:
         return make_purepy_ci_jobs(self)
     else:
@@ -302,7 +312,7 @@ def make_purepy_ci_jobs(self):
     deploy = True
     if deploy:
         deploy_job = {}
-        deploy_job.update(ub.udict(Yaml.yaml_loads(ub.codeblock(
+        deploy_job.update(ub.udict(Yaml.loads(ub.codeblock(
             f'''
             image:
                 {deploy_image}
