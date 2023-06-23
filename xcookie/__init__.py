@@ -7,4 +7,4 @@ developments.
 Currently this module is specialized towards Erotemic / PyUtils / Kitware
 projects but the goal is to eventually generalize everything.
 """
-__version__ = '0.2.0'
+__version__ = '0.2.1'
