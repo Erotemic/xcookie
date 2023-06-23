@@ -162,6 +162,7 @@ class XCookieConfig(scfg.DataConfig):
                 "purepy" - this is a pure python repo
                 "gdal" - add in our gdal hack # TODO
                 "cv2" - enable the headless hack
+                "notypes" - disable mypy in lint checks
             ''')),
 
         'interactive': scfg.Value(True),

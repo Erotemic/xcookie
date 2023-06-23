@@ -242,17 +242,25 @@ def build_github_actions(self):
     jobs = Yaml.Dict({})
     if self.config.linter:
         jobs['lint_job'] = lint_job(self)
+        jobs['lint_job'].yaml_set_start_comment(ub.codeblock(
+            '''
+            ##
+            Run quick linting and typing checks.
+            To disable all linting add "linter=false" to the xcookie config.
+            To disable type checks add "notypes" to the xcookie tags.
+            ##
+            '''), indent=4)
 
     if 'purepy' in self.tags:
         name = 'PurePyCI'
         purepy_jobs = Yaml.Dict({})
         if 'nosrcdist' not in self.tags:
-            purepy_jobs['build_and_test_sdist'] = Yaml.Dict(build_and_test_sdist_job(self))
+            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
             purepy_jobs['build_and_test_sdist'].yaml_set_start_comment(ub.codeblock(
                 '''
                 ##
-                Build the package from source and test it in the same
-                environment.
+                Build the pure python package from source and test it in the
+                same environment.
                 ##
                 '''), indent=4)
 
@@ -280,8 +288,14 @@ def build_github_actions(self):
         name = 'BinPyCI'
         binpy_jobs = Yaml.Dict({})
         if 'nosrcdist' not in self.tags:
-            binpy_jobs['build_and_test_sdist'] = Yaml.Dict(build_and_test_sdist_job(self))
-            binpy_jobs['build_and_test_sdist'].yaml_set_start_comment('Test that the package works from source', indent=4)
+            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
+            binpy_jobs['build_and_test_sdist'].yaml_set_start_comment(ub.codeblock(
+                '''
+                ##
+                Build the binary package from source and test it in the same
+                environment.
+                ##
+                '''), indent=4)
 
         binpy_jobs['build_binpy_wheels'] = Yaml.Dict(build_binpy_wheels_job(self))
         binpy_jobs['test_binpy_wheels'] = Yaml.Dict(test_wheels_job(self, needs=['build_binpy_wheels']))
@@ -321,6 +335,7 @@ def build_github_actions(self):
         # For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
         # Based on ~/code/xcookie/xcookie/rc/tests.yml.in
         # Now based on ~/code/xcookie/xcookie/builders/github_actions.py
+        # See: https://github.com/Erotemic/xcookie
 
         name: {name}
 
@@ -374,6 +389,7 @@ def build_github_actions(self):
 
 
 def lint_job(self):
+    from xcookie.util_yaml import Yaml
     supported_platform_info = get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     job = {
@@ -417,10 +433,11 @@ def lint_job(self):
                     ''')
             }
         )
-    return job
+    return Yaml.Dict(job)
 
 
 def build_and_test_sdist_job(self):
+    from xcookie.util_yaml import Yaml
     supported_platform_info = get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     job = {
@@ -515,7 +532,7 @@ def build_and_test_sdist_job(self):
             }
         ]
     }
-    return job
+    return Yaml.Dict(job)
 
 
 def build_binpy_wheels_job(self):
@@ -851,11 +868,12 @@ def test_wheels_job(self, needs=None):
     #     # get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
     #     # get_modpath_bash = f'python -c "{get_modpath_python}"'
 
-    test_env = {}
+    install_env = {'INSTALL_EXTRAS': '${{ matrix.install-extras }}'}
+
     special_install_lines = []
     if 'gdal' in self.tags:
-        test_env['GDAL_REQUIREMENT_TXT'] = 'py${{ matrix.gdal-requirement-txt }}'
-        special_install_lines.append('pip install -r $GDAL_REQUIREMENT_TXT')
+        install_env['GDAL_REQUIREMENT_TXT'] = 'py${{ matrix.gdal-requirement-txt }}'
+        special_install_lines.append('pip install -r "$GDAL_REQUIREMENT_TXT"')
 
     if 'ibeis' == self.mod_name:
         custom_before_test_lines = [
@@ -919,9 +937,7 @@ def test_wheels_job(self, needs=None):
     action_steps.append(Actions.action({
         'name': 'Install wheel ${{ matrix.install-extras }}',
         'shell': 'bash',
-        'env': {
-            'INSTALL_EXTRAS': '${{ matrix.install-extras }}',
-        },
+        'env': install_env,
         'run': install_and_test_wheel_parts['install_wheel_commands'],
     }))
 
@@ -930,7 +946,7 @@ def test_wheels_job(self, needs=None):
         'shell': 'bash',
         'env': {
             'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
-        } | test_env,
+        },
         'run': install_and_test_wheel_parts['test_wheel_commands'],
     }))
     if WITH_COVERAGE:
