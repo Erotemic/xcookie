@@ -4,12 +4,52 @@ from xcookie.builders import common_ci
 
 class Actions:
     """
-    Help build action JSON objects
+    Help build Github Action JSON objects
+
+    Example:
+        from xcookie.builders.github_actions import Actions
+        import types
+        for attr_name in dir(Actions):
+            if not attr_name.startswith('_'):
+                attr = getattr(Actions, attr_name)
+                if isinstance(attr, types.MethodType):
+                    print(attr_name)
+                    action = attr()
+
+        ...
     """
     action_versions = {
         'checkout': 'actions/checkout@v3',
         'setup-python': 'actions/setup-python@v4',
     }
+
+    @classmethod
+    def _available_action_methods(Actions):
+        import types
+        for attr_name in dir(Actions):
+            if not attr_name.startswith('_'):
+                attr = getattr(Actions, attr_name)
+                if isinstance(attr, types.MethodType):
+                    if attr.__self__ is Actions:
+                        yield attr
+
+    @classmethod
+    def _check_for_updates(Actions):
+        # List all actions
+        # https://api.github.com/repos/pypa/cibuildwheel/releases/latest
+        import requests
+        for attr in Actions._available_action_methods():
+            action = attr()
+            if 'uses' in action:
+                suffix, current = action['uses'].split('@')
+                url = f'https://api.github.com/repos/{suffix}/releases/latest'
+                resp = requests.get(url)
+                data = resp.json()
+                latest = data['tag_name']
+                if current != latest:
+                    print(f'Update: {suffix} from {current} to {latest}')
+                    print('data = {}'.format(ub.urepr(data, nl=1)))
+
     @classmethod
     def action(cls, *args, **kwargs):
         """
@@ -148,7 +188,7 @@ class Actions:
         # https://github.com/marketplace/actions/ipfs-setup-action
         return cls.action({
             'name': 'Set up IPFS',
-            'uses': 'ibnesayeed/setup-ipfs@master',
+            'uses': 'ibnesayeed/setup-ipfs@0.6.0',
             'with': {
                 'ipfs_version': '0.14.0',
                 'run_daemon': True,
@@ -177,7 +217,7 @@ class Actions:
         # Emulate aarch64 ppc64le s390x under linux
         return cls.action({
             'name': 'Build binary wheels',
-            'uses': 'pypa/cibuildwheel@v2.11.2',
+            'uses': 'pypa/cibuildwheel@v2.13.1',
         }, *args, **kwargs)
 
 
@@ -187,28 +227,81 @@ def build_github_actions(self):
     cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.build_and_test_sdist
     cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.deploy
     cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .
-    """
 
-    jobs = {}
+    Ignore:
+        from xcookie.builders.github_actions import *  # NOQA
+        from xcookie.main import XCookieConfig
+        from xcookie.main import TemplateApplier
+        config = XCookieConfig(tags=['purepy'])
+        self = TemplateApplier(config)
+        text = build_github_actions(self)
+        print(text)
+    """
+    from xcookie.util_yaml import Yaml
+
+    jobs = Yaml.Dict({})
     if self.config.linter:
         jobs['lint_job'] = lint_job(self)
 
     if 'purepy' in self.tags:
         name = 'PurePyCI'
-        purepy_jobs = {}
+        purepy_jobs = Yaml.Dict({})
         if 'nosrcdist' not in self.tags:
-            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
-        purepy_jobs['build_purepy_wheels'] = build_purewheel_job(self)
-        purepy_jobs['test_purepy_wheels'] = test_wheels_job(self, needs=['build_purepy_wheels'])
+            purepy_jobs['build_and_test_sdist'] = Yaml.Dict(build_and_test_sdist_job(self))
+            purepy_jobs['build_and_test_sdist'].yaml_set_start_comment(ub.codeblock(
+                '''
+                ##
+                Build the package from source and test it in the same
+                environment.
+                ##
+                '''), indent=4)
+
+        purepy_jobs['build_purepy_wheels'] = Yaml.Dict(build_purewheel_job(self))
+        purepy_jobs['test_purepy_wheels'] = Yaml.Dict(test_wheels_job(self, needs=['build_purepy_wheels']))
+
+        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(ub.codeblock(
+            '''
+            ##
+            Build the pure-python wheels independently on a per-platform basis.
+            These will be tested later in the build_purepy_wheels step.
+            ##
+            '''), indent=4)
+        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(ub.codeblock(
+            '''
+            ##
+            Download and test the pure-python wheels that were build in the
+            build_purepy_wheels and test them in this independent environment.
+            ##
+            '''), indent=4)
+
         needs = list(purepy_jobs.keys())
         jobs.update(purepy_jobs)
     elif 'binpy' in self.tags:
         name = 'BinPyCI'
-        binpy_jobs = {}
+        binpy_jobs = Yaml.Dict({})
         if 'nosrcdist' not in self.tags:
-            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
-        binpy_jobs['build_binpy_wheels'] = build_binpy_wheels_job(self)
-        binpy_jobs['test_binpy_wheels'] = test_wheels_job(self, needs=['build_binpy_wheels'])
+            binpy_jobs['build_and_test_sdist'] = Yaml.Dict(build_and_test_sdist_job(self))
+            binpy_jobs['build_and_test_sdist'].yaml_set_start_comment('Test that the package works from source', indent=4)
+
+        binpy_jobs['build_binpy_wheels'] = Yaml.Dict(build_binpy_wheels_job(self))
+        binpy_jobs['test_binpy_wheels'] = Yaml.Dict(test_wheels_job(self, needs=['build_binpy_wheels']))
+
+        binpy_jobs['build_binpy_wheels'].yaml_set_start_comment(ub.codeblock(
+            '''
+            ##
+            Build the binary wheels. Note: even though cibuildwheel will test
+            them internally here, we will test them independently later in the
+            test_binpy_wheels step.
+            ##
+            '''), indent=4)
+        binpy_jobs['test_binpy_wheels'].yaml_set_start_comment(ub.codeblock(
+            '''
+            ##
+            Download the previously build binary wheels from the
+            build_binpy_wheels step, and test them in an independent
+            environment.
+            ##
+            '''), indent=4)
         needs = list(binpy_jobs.keys())
         jobs.update(binpy_jobs)
     else:
@@ -275,8 +368,8 @@ def build_github_actions(self):
     else:
         footer = ''
 
-    from xcookie import util_yaml
-    text = header + '\n\n' + util_yaml.yaml_dumps(body) + '\n\n' + footer
+    from xcookie.util_yaml import Yaml
+    text = header + '\n\n' + Yaml.dumps(body) + '\n\n' + footer
     return text
 
 
@@ -433,6 +526,7 @@ def build_binpy_wheels_job(self):
         Supported Action platforms:
             https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
     """
+    from xcookie.util_yaml import Yaml
     supported_platform_info = get_supported_platform_info(self)
     os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
@@ -454,7 +548,15 @@ def build_binpy_wheels_job(self):
     else:
         included_runs = []
 
-    matrix = {}
+    matrix = Yaml.Dict({})
+    matrix.yaml_set_start_comment(ub.codeblock(
+        '''
+        Normally, xcookie generates explicit lists of platforms to build / test
+        on, but in this case cibuildwheel does that for us, so we need to just
+        set the environment variables for cibuildwheel. These are parsed out of
+        the standard [tool.cibuildwheel] section in pyproject.toml and set
+        explicitly here.
+        '''), indent=8)
     matrix['os'] = os_list
 
     if 'win' in self.config['os']:
@@ -476,14 +578,14 @@ def build_binpy_wheels_job(self):
                 Actions.msvc_dev_cmd(bits=32, osvar='matrix.os', test_condition="${{ contains(matrix.cibw_skip, '*-win_amd64') }}"),
             ]
 
-    job = {
+    job = Yaml.Dict({
         'name': '${{ matrix.os }}, arch=${{ matrix.arch }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
             'matrix': matrix
         },
         'steps': None,
-    }
+    })
 
     job_steps = []
     # Actions.setup_xcode(sensible=True),
@@ -633,6 +735,7 @@ def build_purewheel_job(self):
 
 
 def test_wheels_job(self, needs=None):
+    from xcookie.util_yaml import Yaml
     wheelhouse_dpath = 'wheelhouse'
     supported_platform_info = get_supported_platform_info(self)
 
@@ -658,9 +761,10 @@ def test_wheels_job(self, needs=None):
     special_loose_test_env = {}
     if 'gdal' in self.tags:
         special_loose_test_env['gdal-requirement-txt'] = 'requirements/gdal.txt'
-        # TODO: need to have logic for a gdal strict
+        # TODO: need to have better logic for gdal strict that doesn't require
+        # separate tracked files.
         # special_strict_test_env['gdal-requirement-txt'] = 'requirements-strict/gdal.txt'
-        special_strict_test_env['gdal-requirement-txt'] = 'requirements/gdal.txt'
+        special_strict_test_env['gdal-requirement-txt'] = 'requirements/gdal-strict.txt'
 
     platform_basis = [
         {'os': osname, 'arch': 'auto'}
@@ -709,12 +813,12 @@ def test_wheels_job(self, needs=None):
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
             item['os'] = 'ubuntu-20.04'
 
-    job = {
+    job = Yaml.Dict({
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
         'runs-on': '${{ matrix.os }}',
         'needs': list(needs),
         'strategy': {
-            'matrix': {
+            'matrix': Yaml.Dict({
                 # 'os': os_list,
                 # 'python-version': python_versions_non34,
                 # 'install-extras': list(install_extras.take(['minimal-loose', 'full-loose'])),
@@ -722,10 +826,16 @@ def test_wheels_job(self, needs=None):
                 #     'auto'
                 # ],
                 'include': include,
-            }
+            })
         },
         'steps': None,
-    }
+    })
+
+    job['strategy']['matrix'].yaml_set_start_comment(ub.codeblock(
+        '''
+        Xcookie generates an explicit list of environments that will be used
+        for testing instead of using the more concise matrix notation.
+        '''), indent=8)
 
     # if 1:
     #     # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
@@ -820,7 +930,7 @@ def test_wheels_job(self, needs=None):
         'shell': 'bash',
         'env': {
             'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
-        },
+        } | test_env,
         'run': install_and_test_wheel_parts['test_wheel_commands'],
     }))
     if WITH_COVERAGE:

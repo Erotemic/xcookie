@@ -1,0 +1,5 @@
+# Note: normally we have a separate mechanism for auto-generating "strict"
+# variants of requirements, but gdal is special, so we are hard coding this file
+# for now and manually keeping it in sync with gdal.txt
+--find-links https://girder.github.io/large_image_wheels
+GDAL==3.4.1

@@ -324,7 +324,8 @@ class XCookieConfig(scfg.DataConfig):
         # import xdev
         # xdev.embed()
 
-        print('config = {}'.format(ub.repr2(dict(config), nl=1)))
+        import rich
+        rich.print('config = {}'.format(ub.repr2(config, nl=1)))
         repodir = ub.Path(config['repodir']).absolute()
         repodir.ensuredir()
 
@@ -471,6 +472,7 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/graphics.txt', 'tags': 'cv2'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/headless.txt', 'tags': 'cv2'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/gdal.txt', 'tags': 'gdal'},
+            {'template': 0, 'overwrite': 0, 'fname': 'requirements/gdal-strict.txt', 'tags': 'gdal'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},

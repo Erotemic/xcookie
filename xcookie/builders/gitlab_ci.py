@@ -61,7 +61,7 @@ def build_gitlab_rules(self):
 def make_purepy_ci_jobs(self):
     import ruamel.yaml
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
-    from xcookie import util_yaml
+    from xcookie.util_yaml import Yaml
 
     enable_gpg = self.config['enable_gpg']
 
@@ -72,7 +72,7 @@ def make_purepy_ci_jobs(self):
     ])
     body.yaml_add_eol_comment('stages', 'TEMPLATE1,c 1')
 
-    common_template = ub.udict(util_yaml.yaml_loads(ub.codeblock(
+    common_template = ub.udict(Yaml.loads(ub.codeblock(
         '''
         tags:
             # Tags define which runners will accept which jobs
@@ -132,7 +132,7 @@ def make_purepy_ci_jobs(self):
     common_test_template.add_yaml_merge([(0, common_template)])
     body['.common_test_template'] = common_test_template
 
-    setup_venv_template = util_yaml.CodeBlock(
+    setup_venv_template = Yaml.CodeBlock(
         '''
         # Setup the correct version of python (which should be the same as this instance)
         python --version  # Print out python version for debugging
@@ -231,7 +231,7 @@ def make_purepy_ci_jobs(self):
 
     if enable_gpg:
         gpgsign_job = {}
-        gpgsign_job.update(ub.udict(util_yaml.yaml_loads(ub.codeblock(
+        gpgsign_job.update(ub.udict(Yaml.loads(ub.codeblock(
             f'''
             image:
                 {deploy_image}
@@ -255,7 +255,7 @@ def make_purepy_ci_jobs(self):
 
         gpgsign_job['needs'] = [{'job': build_name, 'artifacts': True} for build_name in build_names]
 
-        gpgsign_job.update(util_yaml.yaml_loads(ub.codeblock(
+        gpgsign_job.update(Yaml.loads(ub.codeblock(
             '''
             script:
                 - ls ''' + wheelhouse_dpath + '''
@@ -276,7 +276,7 @@ def make_purepy_ci_jobs(self):
                 - GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
             ''')))
         gpgsign_job['script'].append(
-            util_yaml.CodeBlock(
+            Yaml.CodeBlock(
                 '''
                 WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
                 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
@@ -302,7 +302,7 @@ def make_purepy_ci_jobs(self):
     deploy = True
     if deploy:
         deploy_job = {}
-        deploy_job.update(ub.udict(util_yaml.yaml_loads(ub.codeblock(
+        deploy_job.update(ub.udict(Yaml.yaml_loads(ub.codeblock(
             f'''
             image:
                 {deploy_image}
@@ -319,7 +319,7 @@ def make_purepy_ci_jobs(self):
             f'ls {wheelhouse_dpath}',
         ]
         deploy_script += [
-            util_yaml.CodeBlock(
+            Yaml.CodeBlock(
                 '''
                 WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
                 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
@@ -335,7 +335,7 @@ def make_purepy_ci_jobs(self):
                 ''')
         ]
         deploy_script += [
-            util_yaml.CodeBlock(
+            Yaml.CodeBlock(
                 r'''
                 # Have the server git-tag the release and push the tags
                 export VERSION=$(python -c "import setup; print(setup.VERSION)")

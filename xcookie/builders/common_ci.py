@@ -32,12 +32,12 @@ def make_install_and_test_wheel_parts(self,
     References:
         https://stackoverflow.com/questions/42019184/python-how-can-i-get-the-version-number-from-a-whl-file
     """
-    from xcookie import util_yaml
+    from xcookie.util_yaml import Yaml
 
     # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
     # get_modname_bash = f'python -c "{get_modname_python}"'
 
-    get_wheel_fpath_python = util_yaml.CodeBlock(f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('{self.mod_name}*.whl'))[-1]).replace(chr(92), chr(47)))")
+    get_wheel_fpath_python = Yaml.CodeBlock(f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('{self.mod_name}*.whl'))[-1]).replace(chr(92), chr(47)))")
     # get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('{self.mod_name}*.whl'))[-1]).replace(r'\\', '/'))"
     get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
 
@@ -50,7 +50,7 @@ def make_install_and_test_wheel_parts(self,
 
     if test_command == 'auto':
         test_command = [
-            util_yaml.CodeBlock(f'python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="{self.mod_name}" "$MOD_DPATH" ../tests'),
+            Yaml.CodeBlock(f'python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="{self.mod_name}" "$MOD_DPATH" ../tests'),
             'echo "pytest command finished, moving the coverage file to the repo root"',
         ]
 
@@ -84,7 +84,7 @@ def make_install_and_test_wheel_parts(self,
         # 'pip freeze',
         '# Get the path to the installed package and run the tests',
         f'export MOD_DPATH=$({get_modpath_bash})',
-        util_yaml.CodeBlock(
+        Yaml.CodeBlock(
             '''
             echo "
             ---

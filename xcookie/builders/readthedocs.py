@@ -4,10 +4,10 @@ Build the readthedocs yaml file.
 
 
 def build_readthedocs(self):
-    from xcookie import util_yaml
+    from xcookie.util_yaml import Yaml
     import ubelt as ub
 
-    default_data = util_yaml.yaml_loads(ub.codeblock(
+    default_data = Yaml.loads(ub.codeblock(
         f'''
         # .readthedocs.yml
         # Read the Docs configuration file
