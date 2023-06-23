@@ -818,7 +818,7 @@ class TemplateApplier:
                 in_fname = info.get('input_fname', path_name)
                 raw_fpath = self.template_dpath / in_fname
                 if not raw_fpath.exists():
-                    raise IOError(f'Template file: {raw_fpath=} does not exist')
+                    raise IOError(f'Template file: raw_fpath={raw_fpath} does not exist')
                 shutil.copy2(raw_fpath, stage_fpath)
 
                 self._apply_xcookie_directives(stage_fpath)
