@@ -127,6 +127,35 @@ The top level CLI is:
 
 
 
+Invocations to create a new github repo:
+
+.. code:: bash
+
+    # Create a new python repo
+    python -m xcookie.main --repo_name=cookiecutter_purepy --repodir=$HOME/code/cookiecutter_purepy --tags="github,purepy"
+
+    # Create a new binary repo
+    python -m xcookie.main --repo_name=cookiecutter_binpy --repodir=$HOME/code/cookiecutter_binpy --tags="github,binpy,gdal"
+
+
+Given an initalized repository the general usage pattern is to edit the
+generated ``pyproject.toml`` and modify values in the ``[tool.xcookie]``
+section and then rerun ``xcookie`` in that directory. It will then present you
+with a diff of the proposed changes that you can reject, accept entirely, or
+accept selectively.
+
+For some files where the user is likely to do custom work, xcookie won't try to
+overwrite the file unless you tell it to regenerate it.  The ``setup.py`` is
+the main example of this, so if you want xcookie to update your setup.py you
+would run ``xcookie --regen setup.py``
+
+For rotating secrets, the interface is a bit weird. I haven't gotten it to work
+within an xcookie invocation due to the interactive nature of some of the
+secret tools, but if you run ``xcookie --rotate-secrets``, when it ask you
+``"Ready to rotate secrets?"``, say no, and it will list the commands that it
+would have run. So you can just copy / paste those manually. I hope to make
+this easier in the future.
+
 .. |CircleCI| image:: https://circleci.com/gh/Erotemic/xcookie.svg?style=svg
     :target: https://circleci.com/gh/Erotemic/xcookie
 

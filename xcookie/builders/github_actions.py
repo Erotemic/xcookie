@@ -872,7 +872,7 @@ def test_wheels_job(self, needs=None):
 
     special_install_lines = []
     if 'gdal' in self.tags:
-        install_env['GDAL_REQUIREMENT_TXT'] = 'py${{ matrix.gdal-requirement-txt }}'
+        install_env['GDAL_REQUIREMENT_TXT'] = '${{ matrix.gdal-requirement-txt }}'
         special_install_lines.append('pip install -r "$GDAL_REQUIREMENT_TXT"')
 
     if 'ibeis' == self.mod_name:
