@@ -142,6 +142,9 @@ class XCookieConfig(scfg.DataConfig):
         'defaultbranch': scfg.Value('main'),
         'xdoctest_style': scfg.Value('google', help='type of xdoctest style'),
 
+        'ci_pypi_live_password_varname': scfg.Value('TWINE_PASSWORD', help='variable of the live twine password in your secrets'),
+        'ci_pypi_test_password_varname': scfg.Value('TEST_TWINE_PASSWORD', help='variable of the test twine password in your secrets'),
+
         'regen': scfg.Value(None, help=ub.paragraph(
             '''
             if specified, any modified template file that matches this pattern
@@ -404,7 +407,7 @@ class TemplateApplier:
             # {'template': 1, 'overwrite': False, 'fname': '.circleci/config.yml'},
             # {'template': 1, 'overwrite': False, 'fname': '.travis.yml'},
 
-            {'template': 0, 'overwrite': 1, 'fname': 'dev/setup_secrets.sh'},
+            {'template': 0, 'overwrite': 1, 'fname': 'dev/setup_secrets.sh', 'enabled': self.config['enable_gpg']},
 
             {'template': 0, 'overwrite': 0, 'fname': '.gitignore'},
             # {'template': 1, 'overwrite': 1, 'fname': '.coveragerc'},
@@ -464,7 +467,7 @@ class TemplateApplier:
 
             # {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh', 'perms': 'x'},
 
-            {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt'},  # 'dynamic': 'build_requirements'},
+            {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt',  'dynamic': 'build_requirements'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/graphics.txt', 'tags': 'cv2'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/headless.txt', 'tags': 'cv2'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/gdal.txt', 'tags': 'gdal'},
@@ -485,7 +488,10 @@ class TemplateApplier:
             {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x',
              'dynamic': 'build_run_doctests',
              },  # TODO: template with xdoctest-style
-            {'template': 1, 'overwrite': 1, 'fname': 'run_linter.sh', 'perms': 'x'},
+
+            {'template': 0, 'overwrite': 1, 'fname': 'run_linter.sh', 'perms': 'x',
+             'dynamic': 'build_run_linter'},
+
             # TODO: template a clean script
             {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py',
              'perms': 'x', 'tags': 'binpy',
@@ -888,6 +894,8 @@ class TemplateApplier:
     def stage_files(self):
         self.staging_infos = []
         for info in ub.ProgIter(self.template_infos, desc='staging'):
+            if not info.get('enabled', True):
+                continue
             try:
                 info = self._stage_file(info)
             except SkipFile:
@@ -976,8 +984,23 @@ class TemplateApplier:
         print('stats = {}'.format(ub.repr2(stats, nl=2)))
         return stats, tasks
 
-    # def build_requirements(self):
-    #     pass
+    def build_requirements(self):
+        # existing = (self.repodir / 'requirements').ls()
+        candidate_all_requirements = [
+            'requirements/runtime.txt',
+            'requirements/tests.txt',
+            'requirements/optional.txt',
+            'requirements/build.txt',
+        ]
+        requirement_lines = []
+        for fpath_rel in candidate_all_requirements:
+            fpath_rel = ub.Path(fpath_rel)
+            fpath = self.repodir / fpath_rel
+            if fpath.exists():
+                requirement_lines.append('-r ' + os.fspath(fpath_rel))
+
+        text = '\n'.join(requirement_lines)
+        return text
 
     def refresh_docs(self):
         docs_dpath = self.repodir / 'docs'
@@ -1042,7 +1065,7 @@ class TemplateApplier:
                 pip install -U mypy --no-binary :all:
 
                 # Generate stubs and check them
-                xdev docstubs {self.repo_name} && mypy {self.repo_name}
+                xdev docstubs ./{self.rel_mod_dpath} && mypy ./{self.rel_mod_dpath}
 
                 # Then make sure you have typed = true in the [tool.xcookie]
                 # section of pyproject.toml and regenerate setup.py
@@ -1081,6 +1104,16 @@ class TemplateApplier:
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci
         return gitlab_ci.build_gitlab_ci(self)
+
+    def build_run_linter(self):
+        text = ub.codeblock(
+            f"""
+            #!/bin/bash
+            flake8 --count --select=E9,F63,F7,F82 --show-source --statistics {self.rel_mod_dpath}
+            flake8 --count --select=E9,F63,F7,F82 --show-source --statistics ./tests
+            """
+        )
+        return text
 
     def build_gitlab_rules(self):
         from xcookie.builders import gitlab_ci

@@ -250,27 +250,30 @@ def build_github_actions(self):
         'jobs': jobs
     }
 
-    footer = ub.codeblock(
-        r'''
-        ###
-        # Unfortunately we cant (yet) use the yaml docstring trick here
-        # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
-        #__doc__: |
-        #    # How to run locally
-        #    # https://packaging.python.org/guides/using-testpypi/
-        #    git clone https://github.com/nektos/act.git $HOME/code/act
-        #    chmod +x $HOME/code/act/install.sh
-        #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
-        #
-        #    load_secrets
-        #    unset GITHUB_TOKEN
-        #    $HOME/.local/opt/act/act \
-        #        --secret=EROTEMIC_TWINE_PASSWORD=$EROTEMIC_TWINE_PASSWORD \
-        #        --secret=EROTEMIC_TWINE_USERNAME=$EROTEMIC_TWINE_USERNAME \
-        #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET \
-        #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
-        #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD
-        ''')
+    if 'erotemic' in self.tags:
+        footer = ub.codeblock(
+            r'''
+            ###
+            # Unfortunately we cant (yet) use the yaml docstring trick here
+            # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
+            #__doc__: |
+            #    # How to run locally
+            #    # https://packaging.python.org/guides/using-testpypi/
+            #    git clone https://github.com/nektos/act.git $HOME/code/act
+            #    chmod +x $HOME/code/act/install.sh
+            #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
+            #
+            #    load_secrets
+            #    unset GITHUB_TOKEN
+            #    $HOME/.local/opt/act/act \
+            #        --secret=EROTEMIC_TWINE_PASSWORD=$EROTEMIC_TWINE_PASSWORD \
+            #        --secret=EROTEMIC_TWINE_USERNAME=$EROTEMIC_TWINE_USERNAME \
+            #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET \
+            #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
+            #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD
+            ''')
+    else:
+        footer = ''
 
     from xcookie import util_yaml
     text = header + '\n\n' + util_yaml.yaml_dumps(body) + '\n\n' + footer
@@ -339,10 +342,10 @@ def build_and_test_sdist_job(self):
                 'name': 'Upgrade pip',
                 'run': [_ for _ in [
                     'python -m pip install --upgrade pip',
-                    'python -m pip install -r requirements/tests.txt',
-                    'python -m pip install -r requirements/runtime.txt',
-                    'python -m pip install -r requirements/headless.txt' if 'cv2' in self.tags else None,
-                    'python -m pip install -r requirements/gdal.txt' if 'gdal' in self.tags else None,
+                    'python -m pip install --prefer-binary -r requirements/tests.txt',
+                    'python -m pip install --prefer-binary -r requirements/runtime.txt',
+                    'python -m pip install --prefer-binary -r requirements/headless.txt' if 'cv2' in self.tags else None,
+                    'python -m pip install --prefer-binary -r requirements/gdal.txt' if 'gdal' in self.tags else None,
                 ] if _ is not None]
             },
             {
@@ -838,12 +841,16 @@ def build_deploy(self, mode='live', needs=None):
 
     enable_gpg = self.config['enable_gpg']
 
+    live_pass_varname = self.config['ci_pypi_live_password_varname']
+    test_pass_varname = self.config['ci_pypi_test_password_varname']
+
     assert mode in {'live', 'test'}
     if mode == 'live':
         env = {
             'TWINE_REPOSITORY_URL': 'https://upload.pypi.org/legacy/',
-            'TWINE_USERNAME': '${{ secrets.TWINE_USERNAME }}',
-            'TWINE_PASSWORD': '${{ secrets.TWINE_PASSWORD }}',
+            # 'TWINE_USERNAME': '${{ secrets.TWINE_USERNAME }}',
+            'TWINE_USERNAME': '__user__',
+            'TWINE_PASSWORD': '${{ secrets.' + live_pass_varname + ' }}',
         }
         if enable_gpg:
             # TODO: make this not me-specific
@@ -852,8 +859,9 @@ def build_deploy(self, mode='live', needs=None):
     elif mode == 'test':
         env = {
             'TWINE_REPOSITORY_URL': 'https://test.pypi.org/legacy/',
-            'TWINE_USERNAME': '${{ secrets.TEST_TWINE_USERNAME }}',
-            'TWINE_PASSWORD': '${{ secrets.TEST_TWINE_PASSWORD }}',
+            # 'TWINE_USERNAME': '${{ secrets.TEST_TWINE_USERNAME }}',
+            'TWINE_USERNAME': '__user__',
+            'TWINE_PASSWORD': '${{ secrets.' + test_pass_varname + ' }}',
         }
         if enable_gpg:
             # TODO: make this not me-specific
