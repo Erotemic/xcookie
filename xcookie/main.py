@@ -570,10 +570,11 @@ class TemplateApplier:
     def tags(self):
         return set(self.config['tags'])
 
-    def setup(self):
+    def _presetup(self):
         """
-        Finalizes a few variables and writes the "clean" template to the
-        staging directory.
+        This logic used to live in setup, but it doesn't have external side
+        effects, so it would be good if we were able have these fields
+        populated on initialization for tests.
         """
         tags = set(self.config['tags'])
         self.remote_info = {
@@ -585,23 +586,6 @@ class TemplateApplier:
 
         if self.config['remote_group'] is not None:
             self.remote_info['group'] = self.config['remote_group']
-
-        def _parse_remote_url(url):
-            info = {}
-            if url.startswith('https://'):
-                parts = url.split('https://')[1].split('/')
-                info['host'] = 'https://' + parts[0]
-                info['group'] = parts[1]
-                info['repo_name'] = parts[2]
-            elif url.startswith('git@'):
-                url.split('git@')[1]
-                parts = url.split('git@')[1].split(':')
-                info['host'] = 'https://' + parts[0]
-                info['group'] = parts[1].split('/')[0]
-                info['repo_name'] = parts[1].split('/')[1]
-            else:
-                raise ValueError(url)
-            return info
 
         url = self.config.get('url', None)
         if url is not None:
@@ -634,20 +618,32 @@ class TemplateApplier:
 
         self.remote_info = ub.udict(default_remote_info) | ub.udict(self.remote_info)
 
-        self.config['remote_host'] = self.remote_info['host']
-        self.config['remote_group'] = self.remote_info['group']
+        self.remote_info['repo_name'] = self.config['repo_name']
 
-        print(f'tags={tags}')
-        print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
+        if 'group' in self.remote_info and 'host' in self.remote_info:
+            self.config['remote_host'] = self.remote_info['host']
+            self.config['remote_group'] = self.remote_info['group']
+            self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name']])
+            self.remote_info['git_url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
+
+    def setup(self):
+        """
+        Finalizes a few variables and writes the "clean" template to the
+        staging directory.
+        """
+        self._presetup()
+
+        tags = set(self.config['tags'])
+
         if self.remote_info['type'] == 'unknown':
+            print(f'tags={tags}')
+            print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
             raise Exception('Specify github or gitlab in tags')
 
         if 'group' not in self.remote_info:
+            print(f'tags={tags}')
+            print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
             raise Exception('Unknown user / group, specify a tag for a known user. Or a URL in the pyproject.toml [tool.xcookie]')
-
-        self.remote_info['repo_name'] = self.config['repo_name']
-        self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name']])
-        self.remote_info['git_url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
 
         self._build_template_registry()
         self.stage_files()
@@ -1273,6 +1269,24 @@ def main():
         'strict': True,
         'autocomplete': True,
     })
+
+
+def _parse_remote_url(url):
+    info = {}
+    if url.startswith('https://'):
+        parts = url.split('https://')[1].split('/')
+        info['host'] = 'https://' + parts[0]
+        info['group'] = parts[1]
+        info['repo_name'] = parts[2]
+    elif url.startswith('git@'):
+        url.split('git@')[1]
+        parts = url.split('git@')[1].split(':')
+        info['host'] = 'https://' + parts[0]
+        info['group'] = parts[1].split('/')[0]
+        info['repo_name'] = parts[1].split('/')[1]
+    else:
+        raise ValueError(url)
+    return info
 
 if __name__ == '__main__':
     """

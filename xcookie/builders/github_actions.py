@@ -1,5 +1,6 @@
 import ubelt as ub
 from xcookie.builders import common_ci
+from xcookie.util_yaml import Yaml
 
 
 class Actions:
@@ -237,8 +238,6 @@ def build_github_actions(self):
         >>> text = build_github_actions(self)
         >>> print(text)
     """
-    from xcookie.util_yaml import Yaml
-
     jobs = Yaml.Dict({})
     if self.config.linter:
         jobs['lint_job'] = lint_job(self)
@@ -383,13 +382,11 @@ def build_github_actions(self):
     else:
         footer = ''
 
-    from xcookie.util_yaml import Yaml
     text = header + '\n\n' + Yaml.dumps(body) + '\n\n' + footer
     return text
 
 
 def lint_job(self):
-    from xcookie.util_yaml import Yaml
     supported_platform_info = get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     job = {
@@ -437,7 +434,6 @@ def lint_job(self):
 
 
 def build_and_test_sdist_job(self):
-    from xcookie.util_yaml import Yaml
     supported_platform_info = get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     job = {
@@ -543,7 +539,6 @@ def build_binpy_wheels_job(self):
         Supported Action platforms:
             https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
     """
-    from xcookie.util_yaml import Yaml
     supported_platform_info = get_supported_platform_info(self)
     os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
@@ -752,7 +747,6 @@ def build_purewheel_job(self):
 
 
 def test_wheels_job(self, needs=None):
-    from xcookie.util_yaml import Yaml
     wheelhouse_dpath = 'wheelhouse'
     supported_platform_info = get_supported_platform_info(self)
 
@@ -964,6 +958,17 @@ def test_wheels_job(self, needs=None):
 
 
 def build_deploy(self, mode='live', needs=None):
+    """
+    Example:
+        >>> from xcookie.builders.github_actions import *  # NOQA
+        >>> from xcookie.main import XCookieConfig
+        >>> from xcookie.main import TemplateApplier
+        >>> config = XCookieConfig(tags=['purepy'], remote_group='Org', repo_name='Repo')
+        >>> self = TemplateApplier(config)
+        >>> self._presetup()
+        >>> text = Yaml.dumps(build_deploy(self))
+        >>> print(text)
+    """
 
     enable_gpg = self.config['enable_gpg']
 
@@ -981,6 +986,7 @@ def build_deploy(self, mode='live', needs=None):
         if enable_gpg:
             # TODO: make this not me-specific
             env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
+
         condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
     elif mode == 'test':
         env = {
@@ -996,6 +1002,20 @@ def build_deploy(self, mode='live', needs=None):
         condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
     else:
         raise KeyError(mode)
+
+    if 'group' in self.remote_info and 'repo_name' in self.remote_info:
+        group = self.remote_info['group']
+        repo_name = self.remote_info['repo_name']
+        repo_suffix = f'{group}/{repo_name}'  # NOQA
+        # https://github.com/orgs/community/discussions/25217
+        is_not_fork_condition = "github.event.pull_request.head.repo.full_name == '" + repo_suffix + "'"
+        # Note: disabling because this does not seem to work?
+        is_not_fork_condition = None
+    else:
+        is_not_fork_condition = None
+
+    if is_not_fork_condition is not None:
+        condition = condition + ' && ' + is_not_fork_condition
 
     if needs is None:
         needs = []
@@ -1031,7 +1051,7 @@ def build_deploy(self, mode='live', needs=None):
         run = [
             # 'pip install requests[security] twine pyopenssl ndg-httpsclient pyasn1 -U',
             'pip install urllib3 requests[security] twine -U',
-            'twine upload --username=__token__ --password=$TWINE_PASSWORD --repository-url "$TWINE_REPOSITORY_URL" wheelhouse/* --skip-existing --verbose || { echo "failed to twine upload" ; exit 1; }',
+            'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" wheelhouse/* --skip-existing --verbose || { echo "failed to twine upload" ; exit 1; }',
         ]
 
     job = {
@@ -1045,7 +1065,7 @@ def build_deploy(self, mode='live', needs=None):
             {'name': 'Show files to upload', 'shell': 'bash', 'run': 'ls -la wheelhouse'},
             # TODO: it might make sense to make this a script that is invoked
             {
-                'name': 'Sign and Publish',
+                'name': 'Sign and Publish' if self.config['enable_gpg'] else 'Publish',
                 'env': env,
                 'run': run,
             }
