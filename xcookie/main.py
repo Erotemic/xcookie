@@ -52,6 +52,10 @@ ExampleUsage:
     python -m xcookie.main --repo_name=stdx --repodir=$HOME/code/stdx --tags="github,purepy,erotemic"
 
     python -m xcookie.main --repo_name=ustd --repodir=$HOME/code/ustd --tags="github,purepy,erotemic"
+
+    load_secrets
+    export PRIVATE_GITLAB_TOKEN=$(git_token_for "https://gitlab.kitware.com")
+    python -m xcookie.main --repo_name=simple_dvc --repodir=$HOME/code/simple_dvc --tags="gitlab,kitware,purepy,erotemic"
 """
 import toml
 import shutil
@@ -489,18 +493,17 @@ class TemplateApplier:
             # {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh', 'perms': 'x'},
 
             {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt',  'dynamic': 'build_requirements'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/graphics.txt', 'tags': 'cv2'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/headless.txt', 'tags': 'cv2'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/gdal.txt', 'tags': 'gdal'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/gdal-strict.txt', 'tags': 'gdal'},
+            {'template': 0, 'overwrite': 1, 'fname': 'requirements/graphics.txt', 'tags': 'cv2'},
+            {'template': 0, 'overwrite': 1, 'fname': 'requirements/headless.txt', 'tags': 'cv2'},
+            {'template': 0, 'overwrite': 1, 'fname': 'requirements/gdal.txt', 'tags': 'gdal'},
+            {'template': 0, 'overwrite': 1, 'fname': 'requirements/gdal-strict.txt', 'tags': 'gdal'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt'},
-            {'template': 1, 'overwrite': 0, 'fname': 'docs/source/conf.py',
-             'dynamic': 'build_docs_conf'},
-            {'template': 1, 'overwrite': 0, 'fname': 'docs/Makefile'},
-            {'template': 1, 'overwrite': 0, 'fname': 'docs/make.bat'},
+            {'template': 1, 'overwrite': 1, 'fname': 'docs/source/conf.py', 'dynamic': 'build_docs_conf'},
+            {'template': 1, 'overwrite': 1, 'fname': 'docs/Makefile'},
+            {'template': 1, 'overwrite': 1, 'fname': 'docs/make.bat'},
 
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
