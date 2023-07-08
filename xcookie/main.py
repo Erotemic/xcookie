@@ -206,7 +206,7 @@ class XCookieConfig(scfg.DataConfig):
         if self['repo_name'] is None:
             self['repo_name'] = self['repodir'].name
         if self['mod_name'] is None:
-            self['mod_name'] = self['repo_name']
+            self['mod_name'] = self['repo_name'].replace('-', '_')
         if self['is_new'] == 'auto':
             self['is_new'] = not (self['repodir'] / '.git').exists()
         if self['rotate_secrets'] == 'auto':
@@ -583,6 +583,14 @@ class TemplateApplier:
         self.remote_info = {
             'type': 'unknown'
         }
+
+        if self.config.url is None and 'github' not in tags and 'gitlab' not in tags:
+            # We can infer this if the repo already exists.
+            git_dpath = self.repodir / '.git'
+            if git_dpath.exists():
+                remote_url = ub.cmd('git remote -v  get-url origin', cwd=self.repodir)['out'].strip()
+                if self.config.url is None:
+                    self.config.url = remote_url
 
         if self.config['remote_host'] is not None:
             self.remote_info['host'] = self.config['remote_host']
@@ -1176,10 +1184,8 @@ class TemplateApplier:
             return ub.codeblock(
                 '''
                 # Changelog
-
-                We are currently working on porting this changelog to the specifications in
-                [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
-                This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+                We [keep a changelog](https://keepachangelog.com/en/1.0.0/).
+                We aim to adhere to [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
                 ## [Version 0.0.1] -
 
