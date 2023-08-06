@@ -5,7 +5,7 @@ def build_setup(self):
     # from distutils.version import Version
     # from packaging.version import parse as Version
 
-    repo_name = self.config['repo_name']
+    pkg_name = self.config['pkg_name']
     min_python = self.config['min_python']
     # min_py_version = str(self.config['min_python'])
     dev_status = self.config['dev_status']
@@ -50,7 +50,7 @@ def build_setup(self):
     parts.append(lut['HELPERS'])
     parts.append(ub.codeblock(
         f'''
-        NAME = '{repo_name}'
+        NAME = '{pkg_name}'
         INIT_PATH = '{self.rel_mod_dpath}/__init__.py'
         VERSION = parse_version(INIT_PATH)
         '''))
@@ -117,6 +117,14 @@ if __name__ == '__main__':
         ''')
     if 'cv2' in self.tags:
         parts.append(cv2_part)
+
+    postgresql_part = '''
+        'postgresql': parse_requirements('requirements/postgresql.txt', versions='loose'),
+        'postgresql-strict': parse_requirements('requirements/postgresql.txt', versions='strict'),
+    '''
+
+    if 'postgresql' in self.tags:
+        parts.append(postgresql_part)
 
     parts.append(ub.identity(
         '''

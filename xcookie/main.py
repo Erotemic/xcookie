@@ -165,6 +165,7 @@ class XCookieConfig(scfg.DataConfig):
                 "pyutils" - this is an pyutils repo
                 "purepy" - this is a pure python repo
                 "gdal" - add in our gdal hack # TODO
+                "postgresql" - add in postgresql dependencies
                 "cv2" - enable the headless hack
                 "notypes" - disable mypy in lint checks
             ''')),
@@ -207,6 +208,8 @@ class XCookieConfig(scfg.DataConfig):
             self['repo_name'] = self['repodir'].name
         if self['mod_name'] is None:
             self['mod_name'] = self['repo_name'].replace('-', '_')
+        if self['pkg_name'] is None:
+            self['pkg_name'] = self['mod_name']
         if self['is_new'] == 'auto':
             self['is_new'] = not (self['repodir'] / '.git').exists()
         if self['rotate_secrets'] == 'auto':
@@ -418,6 +421,10 @@ class TemplateApplier:
     @property
     def mod_name(self):
         return self.config['mod_name']
+
+    @property
+    def pkg_name(self):
+        return self.config['pkg_name']
 
     def _build_template_registry(self):
         """
@@ -1027,6 +1034,7 @@ class TemplateApplier:
             'requirements/tests.txt',
             'requirements/optional.txt',
             'requirements/build.txt',
+            'requirements/postgresql.txt',
         ]
         requirement_lines = []
         for fpath_rel in candidate_all_requirements:

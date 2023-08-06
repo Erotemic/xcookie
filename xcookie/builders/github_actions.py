@@ -470,7 +470,7 @@ def build_and_test_sdist_job(self):
                 'name': 'Install sdist',
                 'run': [
                     'ls -al ./wheelhouse',
-                    f'pip install --prefer-binary wheelhouse/{self.mod_name}*.tar.gz -v',
+                    f'pip install --prefer-binary wheelhouse/{self.pkg_name}*.tar.gz -v',
                 ]
             },
             {
@@ -980,7 +980,7 @@ def build_deploy(self, mode='live', needs=None):
         env = {
             'TWINE_REPOSITORY_URL': 'https://upload.pypi.org/legacy/',
             # 'TWINE_USERNAME': '${{ secrets.TWINE_USERNAME }}',
-            'TWINE_USERNAME': '__user__',
+            'TWINE_USERNAME': '__token__',
             'TWINE_PASSWORD': '${{ secrets.' + live_pass_varname + ' }}',
         }
         if enable_gpg:
@@ -992,7 +992,7 @@ def build_deploy(self, mode='live', needs=None):
         env = {
             'TWINE_REPOSITORY_URL': 'https://test.pypi.org/legacy/',
             # 'TWINE_USERNAME': '${{ secrets.TEST_TWINE_USERNAME }}',
-            'TWINE_USERNAME': '__user__',
+            'TWINE_USERNAME': '__token__',
             'TWINE_PASSWORD': '${{ secrets.' + test_pass_varname + ' }}',
         }
         if enable_gpg:

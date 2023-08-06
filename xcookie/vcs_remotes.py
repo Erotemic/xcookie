@@ -28,6 +28,13 @@ class GitlabRemote:
         load_secrets
         HOST=https://gitlab.kitware.com
         export PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
+
+        ipy
+
+        from xcookie.vcs_remotes import *  # NOQA
+        self = GitlabRemote('kwutil', 'computer-vision', 'https://gitlab.kitware.com')
+
+
     """
     def __init__(self, proj_name, proj_group, url, visibility='public',
                  private_token='env:PRIVATE_GITLAB_TOKEN'):
@@ -92,14 +99,19 @@ class GitlabRemote:
             'visibility': self.visibility,
         }
         new_proj = self.gitlab.projects.create(new_proj_data)
+
         print(new_proj)
+
+        # Setup protected branches
+        self.set_protected_branches()
 
     def set_protected_branches(self):
         project = self.project
 
         existing_protected_branches = project.protectedbranches.list()
         expected_protected_branches = [
-            'release', 'main', 'master'
+            'release', 'main',
+            'master'
         ]
 
         existing = {b.name for b in existing_protected_branches}

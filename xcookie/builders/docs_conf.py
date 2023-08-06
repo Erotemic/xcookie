@@ -135,7 +135,7 @@ def build_docs_conf(self):
         author = '{author}'
         modname = '{mod_name}'
 
-        modpath = join(dirname(dirname(dirname(__file__))), modname, '__init__.py')
+        modpath = join(dirname(dirname(dirname(__file__))), '{rel_mod_dpath}', '__init__.py')
         release = parse_version(modpath)
         version = '.'.join(release.split('.')[0:2])
 
@@ -150,6 +150,7 @@ def build_docs_conf(self):
         # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
         # ones.
         extensions = [
+            # 'autoapi.extension',
             'sphinx.ext.autodoc',
             'sphinx.ext.autosummary',
             'sphinx.ext.intersphinx',
@@ -157,6 +158,10 @@ def build_docs_conf(self):
             'sphinx.ext.todo',
             'sphinx.ext.viewcode',
             # 'myst_parser',  # TODO
+
+            'sphinx.ext.githubpages',
+            # 'sphinxcontrib.redirects',
+            'sphinx_reredirects',
         ]
 
         todo_include_todos = True
@@ -169,6 +174,15 @@ def build_docs_conf(self):
         autodoc_member_order = 'bysource'
         autoclass_content = 'both'
         # autodoc_mock_imports = ['torch', 'torchvision', 'visdom']
+
+        # autoapi_modules = {{
+        #     modname: {{
+        #         'override': False,
+        #         'output': 'auto'
+        #     }}
+        # }}
+        # autoapi_dirs = [f'../../src/{{modname}}']
+        # autoapi_keep_files = True
 
         intersphinx_mapping = {{
             # 'pytorch': ('http://pytorch.org/docs/master/', None),
@@ -187,6 +201,12 @@ def build_docs_conf(self):
             'networkx': ('https://networkx.org/documentation/stable/', None),
             'scriptconfig': ('https://scriptconfig.readthedocs.io/en/latest/', None),
 
+            'pytest': ('https://docs.pytest.org/en/latest/', None),
+            # 'pytest._pytest.doctest': ('https://docs.pytest.org/en/latest/_modules/_pytest/doctest.html', None),
+            # 'colorama': ('https://pypi.org/project/colorama/', None),
+            # 'numpy': ('http://docs.scipy.org/doc/numpy/', None),
+            # 'cv2' : ('http://docs.opencv.org/2.4/', None),
+            # 'h5py' : ('http://docs.h5py.org/en/latest/', None)
         }}
         __dev_note__ = """
         python -m sphinx.ext.intersphinx https://docs.python.org/3/objects.inv
@@ -196,6 +216,11 @@ def build_docs_conf(self):
         python -m sphinx.ext.intersphinx https://kwimage.readthedocs.io/en/latest/objects.inv
         python -m sphinx.ext.intersphinx https://ubelt.readthedocs.io/en/latest/objects.inv
         python -m sphinx.ext.intersphinx https://networkx.org/documentation/stable/objects.inv
+
+        sphobjinv suggest -t 90 -u https://readthedocs.org/projects/pytest/reference/objects.inv
+        "signal.convolve2d"
+
+        python -m sphinx.ext.intersphinx https://pygments-doc.readthedocs.io/en/latest/objects.inv
         """
 
 
@@ -265,7 +290,7 @@ def build_docs_conf(self):
         # -- Options for HTMLHelp output ---------------------------------------------
 
         # Output file base name for HTML help builder.
-        htmlhelp_basename = '{repo_name}doc'
+        htmlhelp_basename = project + 'doc'
 
 
         # -- Options for LaTeX output ------------------------------------------------
