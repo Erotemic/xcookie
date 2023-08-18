@@ -182,7 +182,10 @@ class XCookieConfig(scfg.DataConfig):
         else:
             self['repodir'] = ub.Path(self['repodir']).absolute()
 
-        self['repodir'] = find_git_root(self['repodir'])
+        try:
+            self['repodir'] = find_git_root(self['repodir'])
+        except Exception:
+            print('assuming the root was given and we are not in a repo yet')
 
         if self['tags']:
             if isinstance(self['tags'], str):
