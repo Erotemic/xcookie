@@ -6,5 +6,14 @@ developments.
 
 Currently this module is specialized towards Erotemic / PyUtils / Kitware
 projects but the goal is to eventually generalize everything.
+
++------------------+----------------------------------------------+
+| Read the docs    | https://xcookie.readthedocs.io               |
++------------------+----------------------------------------------+
+| Github           | https://github.com/Erotemic/xcookie          |
++------------------+----------------------------------------------+
+| Pypi             | https://pypi.org/project/xcookie             |
++------------------+----------------------------------------------+
+
 """
 __version__ = '0.2.1'
