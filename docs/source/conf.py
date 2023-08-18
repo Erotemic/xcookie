@@ -1,7 +1,7 @@
 """
 Notes:
     Based on template code in:
-        ~/code/xcookie/docs/source/conf.py
+        ~/code/xcookie/xcookie/builders/docs_conf.py
         ~/code/xcookie/xcookie/rc/conf_ext.py
 
     http://docs.readthedocs.io/en/latest/getting_started.html
@@ -17,8 +17,10 @@ Notes:
     # need to edit the conf.py
 
     cd ~/code/xcookie/docs
-    sphinx-apidoc -f -o ~/code/xcookie/docs/source ~/code/xcookie/xcookie --separate
+    sphinx-apidoc --private -f -o ~/code/xcookie/docs/source ~/code/xcookie/xcookie --separate
     make html
+
+    git add source/*.rst
 
     Also:
         To turn on PR checks
@@ -40,11 +42,23 @@ Notes:
         Make sure you have a .readthedocs.yml file
 
         Click import project: (for github you can select, but gitlab you need to import manually)
-            Set the Repository NAME: $REPO_NAME
-            Set the Repository URL: $REPO_URL
+            Set the Repository NAME: xcookie
+            Set the Repository URL: https://github.com/Erotemic/xcookie
 
         For gitlab you also need to setup an integrations and add gitlab
-        incoming webhook Then go to $REPO_URL/hooks and add the URL
+        incoming webhook
+
+            https://readthedocs.org/dashboard/xcookie/integrations/create/
+
+        Then go to
+
+            https://github.com/Erotemic/xcookie/hooks
+
+        and add the URL
+
+        select push, tag, and merge request
+
+        See Docs for more details https://docs.readthedocs.io/en/stable/integrations.html
 
         Will also need to activate the main branch:
             https://readthedocs.org/projects/xcookie/versions/
@@ -94,11 +108,11 @@ def parse_version(fpath):
     return visitor.version
 
 project = 'xcookie'
-copyright = '2022, Jon Crall'
+copyright = '2023, Jon Crall'
 author = 'Jon Crall'
 modname = 'xcookie'
 
-modpath = join(dirname(dirname(dirname(__file__))), modname, '__init__.py')
+modpath = join(dirname(dirname(dirname(__file__))), 'xcookie', '__init__.py')
 release = parse_version(modpath)
 version = '.'.join(release.split('.')[0:2])
 
@@ -113,6 +127,7 @@ version = '.'.join(release.split('.')[0:2])
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    # 'autoapi.extension',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.intersphinx',
@@ -120,6 +135,10 @@ extensions = [
     'sphinx.ext.todo',
     'sphinx.ext.viewcode',
     # 'myst_parser',  # TODO
+
+    'sphinx.ext.githubpages',
+    # 'sphinxcontrib.redirects',
+    'sphinx_reredirects',
 ]
 
 todo_include_todos = True
@@ -130,7 +149,17 @@ napoleon_use_ivar = True
 autodoc_inherit_docstrings = False
 
 autodoc_member_order = 'bysource'
+autoclass_content = 'both'
 # autodoc_mock_imports = ['torch', 'torchvision', 'visdom']
+
+# autoapi_modules = {
+#     modname: {
+#         'override': False,
+#         'output': 'auto'
+#     }
+# }
+# autoapi_dirs = [f'../../src/{modname}']
+# autoapi_keep_files = True
 
 intersphinx_mapping = {
     # 'pytorch': ('http://pytorch.org/docs/master/', None),
@@ -148,7 +177,14 @@ intersphinx_mapping = {
     'xdoctest': ('https://xdoctest.readthedocs.io/en/latest/', None),
     'networkx': ('https://networkx.org/documentation/stable/', None),
     'scriptconfig': ('https://scriptconfig.readthedocs.io/en/latest/', None),
+    'rich': ('https://rich.readthedocs.io/en/latest/', None),
 
+    'pytest': ('https://docs.pytest.org/en/latest/', None),
+    # 'pytest._pytest.doctest': ('https://docs.pytest.org/en/latest/_modules/_pytest/doctest.html', None),
+    # 'colorama': ('https://pypi.org/project/colorama/', None),
+    # 'numpy': ('http://docs.scipy.org/doc/numpy/', None),
+    # 'cv2' : ('http://docs.opencv.org/2.4/', None),
+    # 'h5py' : ('http://docs.h5py.org/en/latest/', None)
 }
 __dev_note__ = """
 python -m sphinx.ext.intersphinx https://docs.python.org/3/objects.inv
@@ -158,6 +194,11 @@ python -m sphinx.ext.intersphinx https://kwarray.readthedocs.io/en/latest/object
 python -m sphinx.ext.intersphinx https://kwimage.readthedocs.io/en/latest/objects.inv
 python -m sphinx.ext.intersphinx https://ubelt.readthedocs.io/en/latest/objects.inv
 python -m sphinx.ext.intersphinx https://networkx.org/documentation/stable/objects.inv
+
+sphobjinv suggest -t 90 -u https://readthedocs.org/projects/pytest/reference/objects.inv
+"signal.convolve2d"
+
+python -m sphinx.ext.intersphinx https://pygments-doc.readthedocs.io/en/latest/objects.inv
 """
 
 
@@ -227,7 +268,7 @@ html_static_path = ['_static']
 # -- Options for HTMLHelp output ---------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'xcookiedoc'
+htmlhelp_basename = project + 'doc'
 
 
 # -- Options for LaTeX output ------------------------------------------------
@@ -282,8 +323,6 @@ texinfo_documents = [
 
 
 # -- Extension configuration -------------------------------------------------
-
-
 from sphinx.domains.python import PythonDomain  # NOQA
 # from sphinx.application import Sphinx  # NOQA
 from typing import Any, List  # NOQA
@@ -387,28 +426,25 @@ class GoogleStyleDocstringProcessor:
         Example:
             >>> import ubelt as ub
             >>> self = GoogleStyleDocstringProcessor()
-            >>> lines = ub.codeblock(
-            ...     '''
-            ...     Hello world
-            ...
-            ...     CommandLine:
-            ...         hi
-            ...
-            ...     CommandLine:
-            ...
-            ...         bye
-            ...
-            ...     TextArt:
-            ...
-            ...         1
-            ...         2
-            ...
-            ...         345
-            ...
-            ...     Foobar:
-            ...
-            ...     TextArt:
-            ...     ''').split(chr(10))
+            >>> lines = ['Hello world',
+            >>>              '',
+            >>>              'CommandLine:',
+            >>>              '    hi',
+            >>>              '',
+            >>>              'CommandLine:',
+            >>>              '',
+            >>>              '    bye',
+            >>>              '',
+            >>>              'TextArt:',
+            >>>              '',
+            >>>              '    1',
+            >>>              '    2',
+            >>>              '',
+            >>>              '    345',
+            >>>              '',
+            >>>              'Foobar:',
+            >>>              '',
+            >>>              'TextArt:']
             >>> new_lines = self.process(lines[:])
             >>> print(chr(10).join(new_lines))
         """
@@ -507,7 +543,8 @@ class GoogleStyleDocstringProcessor:
         #     import xdev
         #     xdev.embed()
 
-        if 0:
+        RENDER_IMAGES = 1
+        if RENDER_IMAGES:
             # DEVELOPING
             if any('REQUIRES(--show)' in line for line in lines):
                 # import xdev
@@ -521,41 +558,44 @@ class GoogleStyleDocstringProcessor:
                     lines[idx] = "**Example:**"
                     lines.insert(idx + 1, "")
 
-        REFORMAT_RETURNS = 0
-        if REFORMAT_RETURNS:
-            # FORMAT THE RETURNS SECTION A BIT NICER
-            # Split by sphinx types
-            import re
-            tag_pat = re.compile(r'^:(\w*):')
-            directive_pat = re.compile(r'^.. (\w*)::\s*(\w*)')
-            sphinx_parts = []
-            for idx, line in enumerate(lines):
-                tag_match = tag_pat.search(line)
-                directive_match = directive_pat.search(line)
-                if tag_match:
-                    tag = tag_match.groups()[0]
-                    sphinx_parts.append({
-                        'tag': tag, 'start_offset': idx,
-                        'type': 'tag',
-                    })
-                elif directive_match:
-                    tag = directive_match.groups()[0]
-                    sphinx_parts.append({
-                        'tag': tag, 'start_offset': idx,
-                        'type': 'directive',
-                    })
+        REFORMAT_SECTIONS = 0
+        if REFORMAT_SECTIONS:
+            REFORMAT_RETURNS = 0
+            REFORMAT_PARAMS = 0
 
-            prev_offset = len(lines)
-            for part in sphinx_parts[::-1]:
-                part['end_offset'] = prev_offset
-                prev_offset = part['start_offset']
+            docstr = SphinxDocstring(lines)
 
-            for part in sphinx_parts[::-1]:
-                if part['tag'] == 'returns':
-                    edit_slice = slice(part['start_offset'] + 2, part['end_offset'])
-                    return_section = lines[edit_slice]
-                    text = '\n'.join(return_section)
+            if REFORMAT_PARAMS:
+                for found in docstr.find_tagged_lines('Parameters'):
+                    print(found['text'])
+                    edit_slice = found['edit_slice']
 
+                    # TODO: figure out how to do this.
+
+                    # # file = 'foo.rst'
+                    # import rstparse
+                    # rst = rstparse.Parser()
+                    # import io
+                    # rst.read(io.StringIO(found['text']))
+                    # rst.parse()
+                    # for line in rst.lines:
+                    #     print(line)
+
+                    # # found['text']
+                    # import docutils
+
+                    # settings = docutils.frontend.OptionParser(
+                    #     components=(docutils.parsers.rst.Parser,)
+                    #     ).get_default_values()
+                    # document = docutils.utils.new_document('<tempdoc>', settings)
+                    # from docutils.parsers import rst
+                    # rst.Parser().parse(found['text'], document)
+
+            if REFORMAT_RETURNS:
+                for found in docstr.find_tagged_lines('returns'):
+                    # FIXME: account for new slice with -2 offset
+                    edit_slice = found['edit_slice']
+                    text = found['text']
                     new_lines = []
                     for para in text.split('\n\n'):
                         indent = para[:len(para) - len(para.lstrip())]
@@ -571,6 +611,60 @@ class GoogleStyleDocstringProcessor:
         # if name == 'kwimage.Affine.translate':
         #     import sys
         #     sys.exit(1)
+
+
+class SphinxDocstring:
+    """
+    Helper to parse and modify sphinx docstrings
+    """
+    def __init__(docstr, lines):
+        docstr.lines = lines
+
+        # FORMAT THE RETURNS SECTION A BIT NICER
+        import re
+        tag_pat = re.compile(r'^:(\w*):')
+        directive_pat = re.compile(r'^.. (\w*)::\s*(\w*)')
+
+        # Split by sphinx types, mark the line offset where they start / stop
+        sphinx_parts = []
+        for idx, line in enumerate(lines):
+            tag_match = tag_pat.search(line)
+            directive_match = directive_pat.search(line)
+            if tag_match:
+                tag = tag_match.groups()[0]
+                sphinx_parts.append({
+                    'tag': tag, 'start_offset': idx,
+                    'type': 'tag',
+                })
+            elif directive_match:
+                tag = directive_match.groups()[0]
+                sphinx_parts.append({
+                    'tag': tag, 'start_offset': idx,
+                    'type': 'directive',
+                })
+
+        prev_offset = len(lines)
+        for part in sphinx_parts[::-1]:
+            part['end_offset'] = prev_offset
+            prev_offset = part['start_offset']
+
+        docstr.sphinx_parts = sphinx_parts
+
+        if 0:
+            for line in lines:
+                print(line)
+
+    def find_tagged_lines(docstr, tag):
+        for part in docstr.sphinx_parts[::-1]:
+            if part['tag'] == tag:
+                edit_slice = slice(part['start_offset'], part['end_offset'])
+                return_section = docstr.lines[edit_slice]
+                text = '\n'.join(return_section)
+                found = {
+                    'edit_slice': edit_slice,
+                    'text': text,
+                }
+                yield found
 
 
 def paragraph(text):
@@ -770,6 +864,17 @@ def setup(app):
     app : sphinx.application.Sphinx = app
     app.add_domain(PatchedPythonDomain, override=True)
     docstring_processor = GoogleStyleDocstringProcessor()
-    app.connect('autodoc-process-docstring', docstring_processor.process_docstring_callback)
     # https://stackoverflow.com/questions/26534184/can-sphinx-ignore-certain-tags-in-python-docstrings
+    app.connect('autodoc-process-docstring', docstring_processor.process_docstring_callback)
+
+    ### Hack for kwcoco: TODO: figure out a way for the user to configure this.
+    HACK_FOR_KWCOCO = 0
+    if HACK_FOR_KWCOCO:
+        import pathlib
+        import shutil
+        doc_outdir = pathlib.Path(app.outdir)
+        doc_srcdir = pathlib.Path(app.srcdir)
+        schema_src = (doc_srcdir / '../../kwcoco/coco_schema.json')
+        shutil.copy(schema_src, doc_outdir / 'coco_schema.json')
+        shutil.copy(schema_src, doc_srcdir / 'coco_schema.json')
     return app
