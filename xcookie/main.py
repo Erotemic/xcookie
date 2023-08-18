@@ -182,6 +182,8 @@ class XCookieConfig(scfg.DataConfig):
         else:
             self['repodir'] = ub.Path(self['repodir']).absolute()
 
+        self['repodir'] = find_git_root(self['repodir'])
+
         if self['tags']:
             if isinstance(self['tags'], str):
                 self['tags'] = [self['tags']]
@@ -1304,6 +1306,21 @@ def _parse_remote_url(url):
     else:
         raise ValueError(url)
     return info
+
+
+def find_git_root(dpath):
+    cwd = ub.Path(dpath).resolve()
+    parts = cwd.parts
+    found = None
+    for i in reversed(range(0, len(parts) + 1)):
+        p = ub.Path(*parts[0:i])
+        cand = p / '.git'
+        if cand.exists():
+            found = p
+            break
+    if found is None:
+        raise Exception('cannot find git root')
+    return found
 
 if __name__ == '__main__':
     """

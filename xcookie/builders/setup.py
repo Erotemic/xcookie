@@ -85,6 +85,10 @@ def build_setup(self):
         'License :: OSI Approved :: Apache Software License',
     ]
 
+    pyproject_settings = self.config._load_xcookie_pyproject_settings()
+    if 'classifiers' in pyproject_settings:
+        other_classifiers += pyproject_settings['classifiers']
+
     classifiers = [dev_status] + other_classifiers + version_classifiers
 
     # if 0:
@@ -135,7 +139,7 @@ if __name__ == '__main__':
         }
         '''))
 
-    classifier_text = ub.repr2(classifiers)
+    classifier_text = ub.urepr(classifiers)
 
     # author=static_parse('__author__', INIT_PATH),
     # author_email=static_parse('__author_email__', INIT_PATH),
@@ -172,18 +176,17 @@ if __name__ == '__main__':
         # We use a key of an empty string to indicate that the directory we are
         # pointing to should be considered the root. Then the value is src, telling
         # setuptools to use that directory as the root of our source.
-        setupkw_parts['package_dir'] = ub.repr2(
+        setupkw_parts['package_dir'] = ub.urepr(
             {'': self.config['rel_mod_parent_dpath']}
         )
 
     # hack
-    pyproject_settings = self.config._load_xcookie_pyproject_settings()
     if pyproject_settings is None:
         pyproject_settings = {}
     if 'entry_points' in pyproject_settings:
-        setupkw_parts['entry_points'] = ub.repr2(pyproject_settings['entry_points'])
+        setupkw_parts['entry_points'] = ub.urepr(pyproject_settings['entry_points'])
     if 'scripts' in pyproject_settings:
-        setupkw_parts['scripts'] = ub.repr2(pyproject_settings['scripts'])
+        setupkw_parts['scripts'] = ub.urepr(pyproject_settings['scripts'])
     if 'package_data' in pyproject_settings:
         setupkw_parts.setdefault('package_data', {})
         setupkw_parts['package_data'].update(pyproject_settings['package_data'])
