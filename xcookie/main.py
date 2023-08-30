@@ -596,13 +596,17 @@ class TemplateApplier:
             'type': 'unknown'
         }
 
-        if self.config.url is None and 'github' not in tags and 'gitlab' not in tags:
+        if self.config.url is None:
+            # if 'github' not in tags and 'gitlab' not in tags:
             # We can infer this if the repo already exists.
             git_dpath = self.repodir / '.git'
             if git_dpath.exists():
                 remote_url = ub.cmd('git remote -v  get-url origin', cwd=self.repodir)['out'].strip()
                 if self.config.url is None:
-                    self.config.url = remote_url
+                    self.config.url = GitURL(remote_url).to_https()
+                    if self.config.url.endswith('.git'):
+                        self.config.url = self.config.url[:-4]
+                    # print(f'self.config.url={self.config.url}')
 
         if self.config['remote_host'] is not None:
             self.remote_info['host'] = self.config['remote_host']
@@ -612,7 +616,8 @@ class TemplateApplier:
 
         url = self.config.get('url', None)
         if url is not None:
-            info = _parse_remote_url(url)
+            url = GitURL(url)
+            info = url.info
             self.remote_info['group'] = info['group']
             self.remote_info['host'] = info['host']
             self.remote_info['repo_name'] = info['repo_name']
@@ -1324,6 +1329,80 @@ def find_git_root(dpath):
     if found is None:
         raise Exception('cannot find git root')
     return found
+
+
+class GitURL(str):
+    """
+    Represents a url to a git repo and can parse info about / modify the
+    protocol
+
+    Example:
+        >>> from git_well.git_remote_protocol import *  # NOQA
+        >>> url1 = GitURL('https://foo.bar/user/repo.git')
+        >>> url2 = GitURL('git@foo.bar:group/repo.git')
+        >>> print(url1.to_git())
+        >>> print(url1.to_https())
+        >>> print(url2.to_git())
+        >>> print(url2.to_https())
+        git@foo.bar:user/repo.git
+        https://foo.bar/user/repo.git
+        git@foo.bar:group/repo.git
+        https://foo.bar/group/repo.git
+        >>> print(ub.urepr(url1.info))
+        >>> print(ub.urepr(url2.info))
+        {
+            'host': 'foo.bar',
+            'group': 'user',
+            'repo_name': 'repo.git',
+            'protocol': 'https',
+            'url': 'https://foo.bar/user/repo.git',
+        }
+        {
+            'host': 'foo.bar',
+            'group': 'group',
+            'repo_name': 'repo.git',
+            'protocol': 'git',
+            'url': 'git@foo.bar:group/repo.git',
+        }
+    """
+
+    def __init__(self, data):
+        # note: inheriting from str so data is handled in __new__
+        self._info = None
+
+    @property
+    def info(self):
+        if self._info is None:
+            url = self
+            info = {}
+            if url.startswith('https://'):
+                parts = url.split('https://')[1].split('/')
+                info['host'] = parts[0]
+                info['group'] = parts[1]
+                info['repo_name'] = parts[2]
+                info['protocol'] = 'https'
+            elif url.startswith('git@'):
+                url.split('git@')[1]
+                parts = url.split('git@')[1].split(':')
+                info['host'] = parts[0]
+                info['group'] = parts[1].split('/')[0]
+                info['repo_name'] = parts[1].split('/')[1]
+                info['protocol'] = 'git'
+            else:
+                raise ValueError(url)
+            info['url'] = url
+            self._info = info
+        return self._info
+
+    def to_git(self):
+        info = self.info
+        new_url = 'git@' + info['host']  + ':' + info['group'] + '/' + info['repo_name']
+        return self.__class__(new_url)
+
+    def to_https(self):
+        info = self.info
+        new_url = 'https://' + info['host']  + '/' + info['group'] + '/' + info['repo_name']
+        return self.__class__(new_url)
 
 if __name__ == '__main__':
     """

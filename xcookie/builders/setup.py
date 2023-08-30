@@ -190,11 +190,13 @@ if __name__ == '__main__':
     if 'package_data' in pyproject_settings:
         setupkw_parts.setdefault('package_data', {})
         setupkw_parts['package_data'].update(pyproject_settings['package_data'])
-    if 'setuptools' in pyproject_settings:
-        setupkw_parts.update(pyproject_settings['setuptools'])
 
     for k, v in setupkw_parts.items():
         parts.append(ub.indent(f"setupkw[{k!r}] = {v}"))
+
+    if 'setuptools' in pyproject_settings:
+        for k, v in pyproject_settings['setuptools'].items():
+            parts.append(ub.indent(f"setupkw[{k!r}] = {v!r}"))
     parts.append(ub.indent('setup(**setupkw)'))
 
     text = '\n'.join(parts)

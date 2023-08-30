@@ -7,6 +7,8 @@ def build_readthedocs(self):
     from xcookie.util_yaml import Yaml
     import ubelt as ub
 
+    # https://docs.readthedocs.io/en/stable/config-file/v2.html#build
+
     default_data = Yaml.loads(ub.codeblock(
         f'''
         # .readthedocs.yml
@@ -18,6 +20,11 @@ def build_readthedocs(self):
 
         # Required
         version: 2
+
+        build:
+          os: "ubuntu-22.04"
+          tools:
+            python: "3.11"
 
         # Build documentation in the docs/ directory with Sphinx
         sphinx:
@@ -31,9 +38,6 @@ def build_readthedocs(self):
         formats: all
 
         python:
-          version: 3.7
-          # Optionally set the version of Python and requirements required to
-          # build your docs
           install:
             - requirements: requirements/docs.txt
             - method: pip

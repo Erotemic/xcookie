@@ -13,7 +13,8 @@ def build_docs_conf(self):
         'repo_dashname': self.config['repo_name'].replace('_', '-'),
         'mod_name': self.config['mod_name'],
         'rel_mod_dpath': str(self.rel_mod_dpath),
-        'repo_url': self.remote_info['url'],
+        # 'repo_url': self.remote_info['url'],
+        'repo_url': self.config.url,
         'author': author_str,
         'year': datetime.datetime.now().year,
         'repodir_wrt_home': self.repodir.shrinkuser()
@@ -68,10 +69,12 @@ def build_docs_conf(self):
                     Set the Repository NAME: {repo_name}
                     Set the Repository URL: {repo_url}
 
-                For gitlab you also need to setup an integrations and add gitlab
-                incoming webhook
+                For gitlab you also need to setup an integrations. Navigate to:
 
                     https://readthedocs.org/dashboard/{repo_dashname}/integrations/create/
+
+                Then add gitlab incoming webhook and copy the URL (make sure
+                you copy the real url and not the text so https is included).
 
                 Then go to
 
