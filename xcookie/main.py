@@ -102,7 +102,9 @@ class XCookieConfig(scfg.DataConfig):
             '''
         )),
 
-        'min_python': scfg.Value('3.7'),
+        'min_python': scfg.Value('3.7', type=str, help='used to infer supported_python_versions'),
+        'max_python': scfg.Value(None, type=str, help='used to infer supported_python_versions'),
+
         'typed': scfg.Value(None, help='Should be None, False, True, partial or full'),
         'supported_python_versions': scfg.Value('auto', help=ub.paragraph(
             '''
@@ -174,6 +176,8 @@ class XCookieConfig(scfg.DataConfig):
         'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
 
         'linter': scfg.Value(True, help=ub.paragraph('if true enables lint checks in CI')),
+
+        'render_doc_images': scfg.Value(False, help=ub.paragraph('if true, adds kwplot as a dependency to build docs and enable rendering images from doctests.')),
     }
 
     def __post_init__(self):
@@ -243,9 +247,23 @@ class XCookieConfig(scfg.DataConfig):
 
         if self['supported_python_versions'] == 'auto':
             from xcookie.constants import KNOWN_PYTHON_VERSIONS
-            min_python = str(self['min_python'])
+            min_python = str(self['min_python']).lower()
+            max_python = str(self['max_python']).lower()
+
+            def satisfies_minmax(v):
+                v = Version(v)
+                if min_python != 'none':
+                    min_v = Version(min_python)
+                    if v < min_v:
+                        return False
+                if max_python != 'none':
+                    max_v = Version(max_python)
+                    if v > max_v:
+                        return False
+                return True
+
             python_versions = [v for v in KNOWN_PYTHON_VERSIONS
-                               if Version(v) >= Version(min_python)]
+                               if satisfies_minmax(v)]
             self['supported_python_versions'] = python_versions
 
         if self['ci_cpython_versions'] == 'auto':
@@ -512,7 +530,7 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt'},
+            {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt', 'dynamic': 'build_docs_requirements'},
             {'template': 1, 'overwrite': 1, 'fname': 'docs/source/conf.py', 'dynamic': 'build_docs_conf'},
             {'template': 1, 'overwrite': 1, 'fname': 'docs/Makefile'},
             {'template': 1, 'overwrite': 1, 'fname': 'docs/make.bat'},
@@ -1182,8 +1200,12 @@ class TemplateApplier:
         return docs.build_docs_index(self)
 
     def build_docs_conf(self):
-        from xcookie.builders import docs_conf
-        return docs_conf.build_docs_conf(self)
+        from xcookie.builders import docs
+        return docs.build_docs_conf(self)
+
+    def build_docs_requirements(self):
+        from xcookie.builders import docs
+        return docs.build_docs_requirements(self)
 
     def build_run_doctests(self):
         return ub.codeblock(

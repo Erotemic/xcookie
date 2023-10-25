@@ -45,10 +45,12 @@ Notes:
             Set the Repository NAME: xcookie
             Set the Repository URL: https://github.com/Erotemic/xcookie
 
-        For gitlab you also need to setup an integrations and add gitlab
-        incoming webhook
+        For gitlab you also need to setup an integrations. Navigate to:
 
             https://readthedocs.org/dashboard/xcookie/integrations/create/
+
+        Then add gitlab incoming webhook and copy the URL (make sure
+        you copy the real url and not the text so https is included).
 
         Then go to
 
@@ -335,8 +337,10 @@ class PatchedPythonDomain(PythonDomain):
     """
     def resolve_xref(self, env, fromdocname, builder, typ, target, node, contnode):
         # TODO: can use this to resolve references nicely
-        # if target.startswith('ub.'):
-        #     target = 'ubelt.' + target[3]
+        if target.startswith('ub.'):
+            target = 'ubelt.' + target[3]
+        if target.startswith('xdoc.'):
+            target = 'xdoctest.' + target[3]
         return_value = super(PatchedPythonDomain, self).resolve_xref(
             env, fromdocname, builder, typ, target, node, contnode)
         return return_value

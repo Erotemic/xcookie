@@ -69,14 +69,14 @@ class Actions:
     def checkout(cls, *args, **kwargs):
         return cls.action({
             'name': 'Checkout source',
-            'uses': 'actions/checkout@v3'
+            'uses': 'actions/checkout@v4'
         }, *args, **kwargs)
 
     @classmethod
     def setup_python(cls, *args, **kwargs):
         return cls.action({
             'name': 'Setup Python',
-            'uses': 'actions/setup-python@v4.6.1'
+            'uses': 'actions/setup-python@v4.7.1'
         }, *args, **kwargs)
 
     @classmethod
@@ -167,7 +167,7 @@ class Actions:
         # Emulate aarch64 ppc64le s390x under linux
         return cls.action({
             'name': 'Set up QEMU',
-            'uses': 'docker/setup-qemu-action@v2',
+            'uses': 'docker/setup-qemu-action@v3',
         }, *args, **kwargs)
 
     @classmethod
@@ -218,7 +218,7 @@ class Actions:
         # Emulate aarch64 ppc64le s390x under linux
         return cls.action({
             'name': 'Build binary wheels',
-            'uses': 'pypa/cibuildwheel@v2.13.1',
+            'uses': 'pypa/cibuildwheel@v2.16.2',
         }, *args, **kwargs)
 
 

@@ -196,6 +196,8 @@ def make_purepy_ci_jobs(self):
         test_templates[extra_key] = test
 
     python_images = {
+        # TODO allow rc?
+        'cp312': 'python:3.12',
         'cp311': 'python:3.11',
         'cp310': 'python:3.10',
         'cp39': 'python:3.9',
