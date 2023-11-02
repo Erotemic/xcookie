@@ -91,6 +91,8 @@ def build_setup(self):
 
     classifiers = [dev_status] + other_classifiers + version_classifiers
 
+    classifiers = list(ub.oset(classifiers))
+
     # if 0:
     #     setupkw['entry_points'] = {
     #         # the console_scripts entry point creates the package CLI
@@ -98,6 +100,9 @@ def build_setup(self):
     #             'xcookie = xcookie.__main__:main'
     #         ]
     #     }
+
+    extras = ['runtime', 'tests', 'optional']
+
     parts.append(ub.identity(
         '''
 if __name__ == '__main__':
@@ -111,33 +116,57 @@ if __name__ == '__main__':
 
         '''))
 
-    cv2_part = ub.identity(
-        '''
-        'headless': parse_requirements('requirements/headless.txt', versions='loose'),
-        'graphics': parse_requirements('requirements/graphics.txt', versions='loose'),
-        # Strict versions
-        'headless-strict': parse_requirements('requirements/headless.txt', versions='strict'),
-        'graphics-strict': parse_requirements('requirements/graphics.txt', versions='strict'),
-        ''')
+    # cv2_part = ub.identity(
+    #     '''
+    #     'headless': parse_requirements('requirements/headless.txt', versions='loose'),
+    #     'graphics': parse_requirements('requirements/graphics.txt', versions='loose'),
+    #     # Strict versions
+    #     'headless-strict': parse_requirements('requirements/headless.txt', versions='strict'),
+    #     'graphics-strict': parse_requirements('requirements/graphics.txt', versions='strict'),
+    #     ''')
     if 'cv2' in self.tags:
-        parts.append(cv2_part)
+        extras = ['headless', 'graphics']
+    #     parts.append(cv2_part)
 
-    postgresql_part = '''
-        'postgresql': parse_requirements('requirements/postgresql.txt', versions='loose'),
-        'postgresql-strict': parse_requirements('requirements/postgresql.txt', versions='strict'),
-    '''
+    # postgresql_part = '''
+    #     'postgresql': parse_requirements('requirements/postgresql.txt', versions='loose'),
+    #     'postgresql-strict': parse_requirements('requirements/postgresql.txt', versions='strict'),
+    # '''
 
     if 'postgresql' in self.tags:
-        parts.append(postgresql_part)
+        extras += ['postgresql']
+    #     parts.append(postgresql_part)
 
-    parts.append(ub.identity(
-        '''
-        'all-strict': parse_requirements('requirements.txt', versions='strict'),
-        'runtime-strict': parse_requirements('requirements/runtime.txt', versions='strict'),
-        'tests-strict': parse_requirements('requirements/tests.txt', versions='strict'),
-        'optional-strict': parse_requirements('requirements/optional.txt', versions='strict'),
-        }
-        '''))
+    requirements_dpath = self.repodir / 'requirements'
+    if requirements_dpath.exists():
+        # Hack to add in relevant extras
+        existing_req_files = sorted(requirements_dpath.glob('*.txt'))
+        extras += [f.stem for f in existing_req_files]
+
+    if extras:
+        extra_keyvalues = {}
+        extras = ub.oset(extras)
+        extra_lines = []
+        extra_keyvalues['all'] = "parse_requirements('requirements.txt', versions='loose')"
+        for name in extras:
+            extra_keyvalues[name] = f"parse_requirements('requirements/{name}.txt', versions='loose')"
+        extra_keyvalues['all-strict'] = "parse_requirements('requirements.txt', versions='strict')"
+        for name in extras:
+            extra_keyvalues[name + '-strict'] = f"parse_requirements('requirements/{name}.txt', versions='strict')"
+
+        for name, line in extra_keyvalues.items():
+            extra_lines.append(f"'{name}': {line},")
+
+        parts.append(ub.indent('\n'.join(extra_lines)) + '\n}')
+
+    # parts.append(ub.identity(
+    #     '''
+    #     'all-strict': parse_requirements('requirements.txt', versions='strict'),
+    #     'runtime-strict': parse_requirements('requirements/runtime.txt', versions='strict'),
+    #     'tests-strict': parse_requirements('requirements/tests.txt', versions='strict'),
+    #     'optional-strict': parse_requirements('requirements/optional.txt', versions='strict'),
+    #     }
+    #     '''))
 
     classifier_text = ub.urepr(classifiers)
 

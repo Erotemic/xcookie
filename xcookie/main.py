@@ -141,7 +141,7 @@ class XCookieConfig(scfg.DataConfig):
         'url': scfg.Value(None, help='repo metadata: url for the project'),
         'author': scfg.Value(None, help='repo metadata: author for the project'),
         'author_email': scfg.Value(None, help='repo metadata'),
-        'description': scfg.Value(None, help='repo metadata'),
+        'description': scfg.Value(None, type=str, help='repo metadata'),
         'license': scfg.Value(None, help='repo metadata'),
         'dev_status': scfg.Value('planning'),
         'enable_gpg': scfg.Value(True),
