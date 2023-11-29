@@ -53,6 +53,9 @@ def build_readthedocs(self):
 
     if 'cv2' in self.tags:
         data['python']['install'].insert(0, {'requirements': 'requirements/headless.txt'})
+    # else:
+    #     if self.config.render_doc_images:
+    #         data['python']['install'].insert(0, {'requirements': 'requirements/special-headless.txt'})
 
     if 'gdal' in self.tags:
         data['python']['install'].insert(0, {'requirements': 'requirements/gdal.txt'})

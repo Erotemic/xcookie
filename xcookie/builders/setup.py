@@ -85,8 +85,11 @@ def build_setup(self):
         'License :: OSI Approved :: Apache Software License',
     ]
 
+    disk_config = self.config._load_pyproject_config()
+    other_classifiers += disk_config.get('project', {}).get('classifiers', [])
+
     pyproject_settings = self.config._load_xcookie_pyproject_settings()
-    if 'classifiers' in pyproject_settings:
+    if pyproject_settings is not None and 'classifiers' in pyproject_settings:
         other_classifiers += pyproject_settings['classifiers']
 
     classifiers = [dev_status] + other_classifiers + version_classifiers
@@ -110,11 +113,11 @@ if __name__ == '__main__':
 
     setupkw['install_requires'] = parse_requirements('requirements/runtime.txt', versions='loose')
     setupkw['extras_require'] = {
-        'all': parse_requirements('requirements.txt', versions='loose'),
-        'tests': parse_requirements('requirements/tests.txt', versions='loose'),
-        'optional': parse_requirements('requirements/optional.txt', versions='loose'),
 
         '''))
+    # 'all': parse_requirements('requirements.txt', versions='loose'),
+    # 'tests': parse_requirements('requirements/tests.txt', versions='loose'),
+    # 'optional': parse_requirements('requirements/optional.txt', versions='loose'),
 
     # cv2_part = ub.identity(
     #     '''

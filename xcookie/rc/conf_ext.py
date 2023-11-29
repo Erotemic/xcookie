@@ -220,8 +220,8 @@ class GoogleStyleDocstringProcessor:
         #     import xdev
         #     xdev.embed()
 
-        RENDER_IMAGES = 0
-        if RENDER_IMAGES:
+        render_doc_images = 0
+        if render_doc_images:
             # DEVELOPING
             if any('REQUIRES(--show)' in line for line in lines):
                 # import xdev

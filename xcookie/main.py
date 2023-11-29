@@ -172,12 +172,20 @@ class XCookieConfig(scfg.DataConfig):
                 "notypes" - disable mypy in lint checks
             ''')),
 
-        'interactive': scfg.Value(True),
-        'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
-
         'linter': scfg.Value(True, help=ub.paragraph('if true enables lint checks in CI')),
 
         'render_doc_images': scfg.Value(False, help=ub.paragraph('if true, adds kwplot as a dependency to build docs and enable rendering images from doctests.')),
+
+        # TODO: Better mechanism for controlling which of the loose / strict /
+        # minimal / full variants will be run.
+        'test_variants': scfg.Value([
+            'full-loose', 'full-strict',
+            'minimal-loose', 'minimal-strict'],
+            help='A list of which CI loose / strict / minimal / full varaints to use'),
+
+        # ---
+        'interactive': scfg.Value(True),
+        'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
     }
 
     def __post_init__(self):
@@ -544,15 +552,15 @@ class TemplateApplier:
              'dynamic': 'build_run_doctests',
              },  # TODO: template with xdoctest-style
 
-            {'template': 0, 'overwrite': 1, 'fname': 'run_linter.sh', 'perms': 'x',
+            {'template': 0, 'overwrite': 0, 'fname': 'run_linter.sh', 'perms': 'x',
              'dynamic': 'build_run_linter'},
 
             # TODO: template a clean script
-            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py',
+            {'template': 1, 'overwrite': 0, 'fname': 'run_tests.py',
              'perms': 'x', 'tags': 'binpy',
              'input_fname': rc.resource_fpath('run_tests.binpy.py.in')},
 
-            {'template': 1, 'overwrite': 1, 'fname': 'run_tests.py',
+            {'template': 1, 'overwrite': 0, 'fname': 'run_tests.py',
              'perms': 'x', 'tags': 'purepy',
              'input_fname': rc.resource_fpath('run_tests.purepy.py.in')},
 

@@ -72,14 +72,20 @@ def make_purepy_ci_jobs(self):
     import ruamel.yaml
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
     from xcookie.util_yaml import Yaml
+    from xcookie.constants import KNOWN_CPYTHON_DOCKER_IMAGES
 
     enable_gpg = self.config['enable_gpg']
 
     body = CommentedMap()
-    body['stages'] = CommentedSeq([
-        'build',
-        'test',
-    ])
+
+    enable_lint = self.config.linter
+
+    stages = []
+    if enable_lint:
+        stages.append('lint')
+    stages.append('build')
+    stages.append('test')
+    body['stages'] = CommentedSeq(stages)
     body.yaml_add_eol_comment('stages', 'TEMPLATE1,c 1')
 
     common_template = ub.udict(Yaml.loads(ub.codeblock(
@@ -168,6 +174,9 @@ def make_purepy_ci_jobs(self):
         'minimal-strict' : 'tests-strict,runtime-strict' + strict_cv2,
         'full-strict'    : 'tests-strict,runtime-strict,optional-strict' + strict_cv2,
     })
+
+    install_extras = ub.udict(install_extras) & self.config.test_variants
+
     for extra_key, extra in install_extras.items():
         if 'gdal' in self.tags:
             special_install_lines = [
@@ -195,16 +204,7 @@ def make_purepy_ci_jobs(self):
         body['.' + anchor] = test
         test_templates[extra_key] = test
 
-    python_images = {
-        # TODO allow rc?
-        'cp312': 'python:3.12',
-        'cp311': 'python:3.11',
-        'cp310': 'python:3.10',
-        'cp39': 'python:3.9',
-        'cp38': 'python:3.8',
-        'cp37': 'python:3.7',
-        'cp36': 'python:3.6',
-    }
+    python_images = KNOWN_CPYTHON_DOCKER_IMAGES
 
     build_names = []
 
@@ -239,7 +239,34 @@ def make_purepy_ci_jobs(self):
 
     body.update(jobs)
 
-    deploy_image = python_images['cp38']
+    deploy_image = python_images['cp311']
+
+    if enable_lint:
+        lint_job = {}
+        lint_job.update(ub.udict(Yaml.loads(ub.codeblock(
+            f'''
+            image:
+                {deploy_image}
+
+            stage:
+                lint
+            '''))))
+
+        # TODO: add mypy if typed.
+        # TODO: only install linting requirements if the file exists.
+        lint_job.update(Yaml.loads(ub.codeblock(
+            '''
+            script:
+                - pip install -r requirements/linting.txt
+                - ./run_linter.sh
+            ''')))
+
+        lint_job = CommentedMap(lint_job)
+        lint_job.add_yaml_merge([(0, common_template)])
+
+        lint_job['allow_failure'] = True
+
+        body['lint'] = lint_job
 
     if enable_gpg:
         gpgsign_job = {}

@@ -252,6 +252,9 @@ def build_docs_conf(self):
         # autoapi_dirs = [f'../../src/{{modname}}']
         # autoapi_keep_files = True
 
+        # References:
+        # https://stackoverflow.com/questions/21538983/specifying-targets-for-intersphinx-links-to-numpy-scipy-and-matplotlib
+
         intersphinx_mapping = {{
             # 'pytorch': ('http://pytorch.org/docs/master/', None),
             'python': ('https://docs.python.org/3', None),
@@ -270,10 +273,20 @@ def build_docs_conf(self):
             'scriptconfig': ('https://scriptconfig.readthedocs.io/en/latest/', None),
             'rich': ('https://rich.readthedocs.io/en/latest/', None),
 
+            'numpy': ('https://numpy.org/doc/stable/', None),
+            'sympy': ('https://docs.sympy.org/latest/', None),
+            'scikit-learn': ('https://scikit-learn.org/stable/', None),
+            'pandas': ('https://pandas.pydata.org/docs/', None),
+            'matplotlib': ('https://matplotlib.org/stable/', None),
+
             'pytest': ('https://docs.pytest.org/en/latest/', None),
+            'platformdirs': ('https://platformdirs.readthedocs.io/en/latest/', None),
+
+            'timerit': ('https://timerit.readthedocs.io/en/latest/', None),
+            'progiter': ('https://progiter.readthedocs.io/en/latest/', None),
+            'dateutil': ('https://dateutil.readthedocs.io/en/latest/', None),
             # 'pytest._pytest.doctest': ('https://docs.pytest.org/en/latest/_modules/_pytest/doctest.html', None),
             # 'colorama': ('https://pypi.org/project/colorama/', None),
-            # 'numpy': ('http://docs.scipy.org/doc/numpy/', None),
             # 'cv2' : ('http://docs.opencv.org/2.4/', None),
             # 'h5py' : ('http://docs.h5py.org/en/latest/', None)
         }}
@@ -421,7 +434,7 @@ def build_docs_conf(self):
     util_text = rc.resource_fpath('conf_ext.py').read_text()
 
     if self.config.render_doc_images:
-        util_text = util_text.replace('RENDER_IMAGES = 0', 'RENDER_IMAGES = 1')
+        util_text = util_text.replace('render_doc_images = 0', 'render_doc_images = 1')
 
     if self.config['repo_name'] == 'kwcoco':
         util_text = util_text.replace('HACK_FOR_KWCOCO = 0', 'HACK_FOR_KWCOCO = 1')
@@ -435,17 +448,22 @@ def build_docs_requirements(self):
 
     docs_requierments = ub.codeblock(
         '''
-        sphinx >= 5.0.1
-        sphinx-autobuild >= 2021.3.14
-        sphinx_rtd_theme >= 1.0.0
-        sphinxcontrib-napoleon >= 0.7
-        sphinx-autoapi >= 1.8.4
-        Pygments >= 2.9.0
-        myst_parser >= 0.18.0
-        sphinx-reredirects >= 0.0.1
+        sphinx>=5.0.1
+        sphinx-autobuild>=2021.3.14
+        sphinx_rtd_theme>=1.0.0
+        sphinxcontrib-napoleon>=0.7
+        sphinx-autoapi>=1.8.4
+        Pygments>=2.9.0
+        myst_parser>=0.18.0
+        sphinx-reredirects>=0.0.1
+        xdoctest>=1.1.2
         ''')
 
     if self.config.render_doc_images:
-        docs_requierments += '\nkwplot>=0.4.15'
+        if self.config['mod_name'] != 'kwplot':
+            if 'cv2' in self.tags:
+                docs_requierments += '\nkwplot>=0.4.15'
+            else:
+                docs_requierments += '\nkwplot[headless]>=0.4.15'
 
     return docs_requierments

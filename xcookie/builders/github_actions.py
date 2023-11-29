@@ -600,7 +600,8 @@ def build_binpy_wheels_job(self):
     })
 
     job_steps = []
-    # Actions.setup_xcode(sensible=True),
+    #job_steps += [Actions.setup_xcode(sensible=True)]
+
     # Emulate aarch64 ppc64le s390x under linux
     job_steps += [Actions.checkout()]
     job_steps += conditional_actions
