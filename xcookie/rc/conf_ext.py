@@ -10,6 +10,15 @@ class PatchedPythonDomain(PythonDomain):
     """
     def resolve_xref(self, env, fromdocname, builder, typ, target, node, contnode):
         # TODO: can use this to resolve references nicely
+        if 1:
+            import ubelt as ub
+            print('contnode = {}'.format(ub.urepr(contnode, nl=1)))
+            print('node = {}'.format(ub.urepr(node, nl=1)))
+            print('target = {}'.format(ub.urepr(target, nl=1)))
+            print('typ = {}'.format(ub.urepr(typ, nl=1)))
+            print('builder = {}'.format(ub.urepr(builder, nl=1)))
+            print('fromdocname = {}'.format(ub.urepr(fromdocname, nl=1)))
+            print('env = {}'.format(ub.urepr(env, nl=1)))
         if target.startswith('ub.'):
             target = 'ubelt.' + target[3]
         if target.startswith('xdoc.'):
