@@ -536,10 +536,35 @@ def create_doctest_figure(app, obj, name, lines):
         lines.insert(insert_index, '')
 
 
+def postprocess_hyperlinks(app, doctree, docname):
+    """
+    Extension to fixup hyperlinks.
+    This should be connected to the Sphinx application's
+    "autodoc-process-docstring" event.
+    """
+    # Your hyperlink postprocessing logic here
+    from docutils import nodes
+    import pathlib
+    for node in doctree.traverse(nodes.reference):
+        if 'refuri' in node.attributes:
+            refuri = node.attributes['refuri']
+            if '.rst' in refuri:
+                if 'source' in node.document:
+                    fpath = pathlib.Path(node.document['source'])
+                    parent_dpath = fpath.parent
+                    if (parent_dpath / refuri).exists():
+                        node.attributes['refuri'] = refuri.replace('.rst', '.html')
+                else:
+                    raise AssertionError
+
+
 def setup(app):
     import sphinx
     app : sphinx.application.Sphinx = app
     app.add_domain(PatchedPythonDomain, override=True)
+
+    app.connect("doctree-resolved", postprocess_hyperlinks)
+
     docstring_processor = GoogleStyleDocstringProcessor()
     # https://stackoverflow.com/questions/26534184/can-sphinx-ignore-certain-tags-in-python-docstrings
     app.connect('autodoc-process-docstring', docstring_processor.process_docstring_callback)

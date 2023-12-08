@@ -123,6 +123,7 @@ def make_purepy_ci_jobs(self):
         'stage': 'build',
         'before_script': [
             'python -V  # Print out python version for debugging',
+            'df -h',
         ],
         'script': build_wheel_parts['commands'],
         'artifacts': {
@@ -256,6 +257,8 @@ def make_purepy_ci_jobs(self):
         # TODO: only install linting requirements if the file exists.
         lint_job.update(Yaml.loads(ub.codeblock(
             '''
+            before_script:
+                - df -h
             script:
                 - pip install -r requirements/linting.txt
                 - ./run_linter.sh
