@@ -90,7 +90,7 @@ def build_docs_conf(self):
         """
         Notes:
             Based on template code in:
-                ~/code/xcookie/xcookie/builders/docs_conf.py
+                ~/code/xcookie/xcookie/builders/docs.py
                 ~/code/xcookie/xcookie/rc/conf_ext.py
 
             http://docs.readthedocs.io/en/latest/getting_started.html
@@ -106,10 +106,10 @@ def build_docs_conf(self):
             # need to edit the conf.py
 
             cd {repodir_wrt_home}/docs
-            sphinx-apidoc --private -f -o {repodir_wrt_home}/docs/source {repodir_wrt_home}/{rel_mod_dpath} --separate
+            sphinx-apidoc --private -f -o {repodir_wrt_home}/docs/source/auto {repodir_wrt_home}/{rel_mod_dpath} --separate
             make html
 
-            git add source/*.rst
+            git add source/auto/*.rst
 
             Also:
                 To turn on PR checks
