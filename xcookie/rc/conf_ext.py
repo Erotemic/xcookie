@@ -3,22 +3,22 @@ from sphinx.domains.python import PythonDomain  # NOQA
 from typing import Any, List  # NOQA
 
 
+USE_TIMER = 0
+if USE_TIMER:
+    import ubelt  # NOQA
+    TIMER = ubelt.Timer()
+    TIMER.tic()
+
+
 class PatchedPythonDomain(PythonDomain):
     """
     References:
         https://github.com/sphinx-doc/sphinx/issues/3866
     """
     def resolve_xref(self, env, fromdocname, builder, typ, target, node, contnode):
-        # TODO: can use this to resolve references nicely
-        if 1:
-            import ubelt as ub
-            print('contnode = {}'.format(ub.urepr(contnode, nl=1)))
-            print('node = {}'.format(ub.urepr(node, nl=1)))
-            print('target = {}'.format(ub.urepr(target, nl=1)))
-            print('typ = {}'.format(ub.urepr(typ, nl=1)))
-            print('builder = {}'.format(ub.urepr(builder, nl=1)))
-            print('fromdocname = {}'.format(ub.urepr(fromdocname, nl=1)))
-            print('env = {}'.format(ub.urepr(env, nl=1)))
+        """
+        Helps to resolves cross-references
+        """
         if target.startswith('ub.'):
             target = 'ubelt.' + target[3]
         if target.startswith('xdoc.'):
@@ -230,6 +230,12 @@ class GoogleStyleDocstringProcessor:
         #     xdev.embed()
 
         render_doc_images = 0
+
+        # HACK TO PREVENT EXCESSIVE TIME.
+        # TODO: FIXME FOR REAL
+        if USE_TIMER and TIMER.toc() > 60 * 5:
+            render_doc_images = 0  # FIXME too slow on RTD
+
         if render_doc_images:
             # DEVELOPING
             if any('REQUIRES(--show)' in line for line in lines):
