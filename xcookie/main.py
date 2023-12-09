@@ -102,6 +102,13 @@ class XCookieConfig(scfg.DataConfig):
             '''
         )),
 
+        'init_new_remotes': scfg.Value(True, help=ub.paragraph(
+            '''
+            If True, try to initialize a new repo on the remote if the repo is
+            new.
+            '''
+        )),
+
         'min_python': scfg.Value('3.7', type=str, help='used to infer supported_python_versions'),
         'max_python': scfg.Value(None, type=str, help='used to infer supported_python_versions'),
 
@@ -138,7 +145,7 @@ class XCookieConfig(scfg.DataConfig):
 
 
         'version': scfg.Value(None, help='repo metadata: url for the project'),
-        'url': scfg.Value(None, help='repo metadata: url for the project'),
+        'url': scfg.Value(None, type=str, help='repo metadata: url for the project'),
         'author': scfg.Value(None, help='repo metadata: author for the project'),
         'author_email': scfg.Value(None, help='repo metadata'),
         'description': scfg.Value(None, type=str, help='repo metadata'),
@@ -294,6 +301,7 @@ class XCookieConfig(scfg.DataConfig):
 
     def _load_xcookie_pyproject_settings(self):
         disk_config = self._load_pyproject_config()
+        print(f'disk_config = {ub.urepr(disk_config, nl=1)}')
         if disk_config is not None:
             settings = disk_config.get('tool', {}).get('xcookie', {})
             return settings
@@ -355,12 +363,12 @@ class XCookieConfig(scfg.DataConfig):
         """
         # We load the config multiple times to get the right defaults.
         config = XCookieConfig.cli(cmdline=cmdline, data=kwargs)
-        config.normalize()
+        # config.__post_init__()
         settings = config._load_xcookie_pyproject_settings()
         if settings:
             print(f'settings={settings}')
             config = XCookieConfig.cli(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
-        config.normalize()
+        # config.__post_init__()
 
         # import xdev
         # xdev.embed()
@@ -711,7 +719,7 @@ class TemplateApplier:
         task_summary = ub.map_vals(len, tasks)
         if any(task_summary.values()):
             print('task_summary = {}'.format(ub.repr2(task_summary, nl=1)))
-            ans = self.config.prompt('What parts of the patch to apply?', ['yes', 'all', 'some', 'none'])
+            ans = self.config.prompt('What parts of the patch to apply?', ['yes', 'all', 'some', 'none'], default='yes')
             if ans in {'all', 'yes'}:
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
@@ -785,7 +793,7 @@ class TemplateApplier:
                 if self.config.confirm('Do git init?'):
                     queue.run()
 
-            if self.config.confirm('Do you want to create the repo on the remote?'):
+            if self.config['init_new_remotes'] and self.config.confirm('Do you want to create the repo on the remote?'):
                 if 'gitlab' in self.tags:
                     """
                     Requires user do something to load secrets:
@@ -825,7 +833,7 @@ class TemplateApplier:
             >>>     'interactive': False,
             >>> }
             >>> config = XCookieConfig.cli(cmdline=0, data=kwargs)
-            >>> config.normalize()
+            >>> #config.__post_init__()
             >>> print('config = {}'.format(ub.repr2(dict(config), nl=1)))
             >>> self = TemplateApplier(config)
             >>> self._build_template_registry()
@@ -1351,7 +1359,10 @@ def find_git_root(dpath):
     parts = cwd.parts
     found = None
     for i in reversed(range(0, len(parts) + 1)):
-        p = ub.Path(*parts[0:i])
+        subparts = parts[0:i]
+        if len(subparts) == 0:
+            break
+        p = ub.Path(*subparts)
         cand = p / '.git'
         if cand.exists():
             found = p

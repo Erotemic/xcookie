@@ -86,6 +86,8 @@ def build_setup(self):
     ]
 
     disk_config = self.config._load_pyproject_config()
+    if disk_config is None:
+        disk_config = {}
     other_classifiers += disk_config.get('project', {}).get('classifiers', [])
 
     pyproject_settings = self.config._load_xcookie_pyproject_settings()
