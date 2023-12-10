@@ -19,6 +19,8 @@ class DocsBuilder:
 
     @property
     def docs_auto_outdir(docs_builder):
+        # FIXME:
+        # return docs_builder.docs_dpath / 'source'
         return docs_builder.docs_dpath / 'source/auto'
 
     def sphinx_apidoc_invocation(docs_builder, shrinkuser=False):
@@ -126,6 +128,8 @@ def build_docs_conf(self):
     }
 
     fmtkw['invoke_apidoc'] = docs_builder.sphinx_apidoc_invocation(shrinkuser=True)
+    fmtkw['docs_dpath_wrt_home'] = docs_builder.docs_dpath.shrinkuser()
+    fmtkw['rel_add_dir'] = docs_builder.docs_auto_outdir.relative_to(docs_builder.docs_dpath)
 
     text = ub.codeblock(
         r'''
@@ -147,11 +151,14 @@ def build_docs_conf(self):
 
             # need to edit the conf.py
 
-            cd {repodir_wrt_home}/docs
+            cd {docs_dpath_wrt_home}
             {invoke_apidoc}
+
+            # Note: the module should importable before running this
+            # (e.g. install it in developer mode or munge the PYTHONPATH)
             make html
 
-            git add source/auto/*.rst
+            git add {rel_add_dir}/*.rst
 
             Also:
                 To turn on PR checks
@@ -216,6 +223,7 @@ def build_docs_conf(self):
 
         # -- Project information -----------------------------------------------------
         import sphinx_rtd_theme
+        import sys
         from os.path import exists
         from os.path import dirname
         from os.path import join
@@ -245,11 +253,15 @@ def build_docs_conf(self):
         author = '{author}'
         modname = '{mod_name}'
 
-        mod_dpath = join(dirname(dirname(dirname(__file__))), '{rel_mod_dpath}')
+        repo_dpath = dirname(dirname(dirname(__file__)))
+        mod_dpath = join(repo_dpath, '{rel_mod_dpath}')
+        src_dpath = dirname(mod_dpath)
         modpath = join(mod_dpath, '__init__.py')
         release = parse_version(modpath)
         version = '.'.join(release.split('.')[0:2])
 
+        # Hack to ensure the module is importable
+        # sys.path.insert(0, os.path.abspath(src_dpath))
 
         # -- General configuration ---------------------------------------------------
 
@@ -280,8 +292,8 @@ def build_docs_conf(self):
         napoleon_use_param = False
         napoleon_use_ivar = True
 
-        autoapi_type = 'python'
-        autoapi_dirs = [mod_dpath]
+        #autoapi_type = 'python'
+        #autoapi_dirs = [mod_dpath]
 
         autodoc_inherit_docstrings = False
 

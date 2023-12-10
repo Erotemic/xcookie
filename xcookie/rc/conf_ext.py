@@ -546,7 +546,8 @@ def create_doctest_figure(app, obj, name, lines):
             insert_index = end_index
         else:
             raise KeyError(INSERT_AT)
-        lines.insert(insert_index, '.. image:: {}'.format(rel_to_root_fpath))
+        lines.insert(insert_index, '.. image:: {}'.format('..' / rel_to_root_fpath))
+        # lines.insert(insert_index, '.. image:: {}'.format(rel_to_root_fpath))
         # lines.insert(insert_index, '.. image:: {}'.format(rel_to_static_fpath))
         lines.insert(insert_index, '')
 

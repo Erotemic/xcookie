@@ -1,4 +1,13 @@
 def test_simple_repo():
+    """
+    This performs a simple run of xcookie, adds a few dummy files, and builds
+    the docs.
+
+    TODO:
+        - [ ] Add checks. There are no checks other than that things run
+              without errors.
+
+    """
     import ubelt as ub
     dpath = ub.Path.appdir('xcookie/tests/test-init/simple_repo')
     dpath.delete().ensuredir()
@@ -42,6 +51,7 @@ def test_simple_repo():
         A simple demo module.
         """
 
+
         def add3(x, y, z):
             """
             Args:
@@ -51,17 +61,44 @@ def test_simple_repo():
 
             Returns:
                 int:
+
+            Example:
+                >>> # xdoctest: +REQUIRES(--show)
+                >>> import kwplot
+                >>> kwplot.autompl()
+                >>> kwplot.plt.plot([1, 2, 3], [1, 2, 3])
+                >>> kwplot.show_if_requested()
             """
             return x + y + z
         '''))
+
+    mymod1_init_fpath = self.mod_dpath / '__init__.py'
+    text = mymod1_init_fpath.read_text()
+    text = text.replace('Basic', ub.paragraph(
+        '''
+        Hello world. This is an example documentation written to the module
+        dunder init. It should be rendered in the main sphinx apidoc page.
+        ''')) + '\n\n# foobar\n\n'
+    mymod1_init_fpath.write_text(text)
+
+    # We could do mkinit if we wanted.
+    # ub.cmd(f'mkinit {mymod1_init_fpath} -w', verbose=3)
 
     self = main.XCookieConfig.main(
         cmdline=0,
         **kwargs,
         refresh_docs=True,
+        render_doc_images=True,
     )
     docs_dpath = self.repodir / 'docs'
-    ub.cmd('make html', cwd=docs_dpath, verbose=3)
+
+    # hack to ensure module is importable before make html
+    import os
+    env = os.environ
+    PYTHONPATH = env.get('PYTHONPATH', '').split(os.pathsep)
+    PYTHONPATH.insert(0, str(self.mod_dpath.parent.absolute()))
+    env['PYTHONPATH'] = os.pathsep.join(PYTHONPATH)
+    ub.cmd('make html', cwd=docs_dpath, verbose=3, env=env)
 
     if 0:
         # For Debugging
