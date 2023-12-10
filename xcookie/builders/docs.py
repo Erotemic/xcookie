@@ -1,3 +1,42 @@
+import ubelt as ub
+
+
+class DocsBuilder:
+    """
+    Helper to build sphinx docs related files
+    """
+    def __init__(docs_builder, config):
+        """
+        Args:
+            config (XCookieConfig.shrinkuser()):
+        """
+        docs_builder.config = config
+
+    @property
+    def docs_dpath(docs_builder):
+        repodir = ub.Path(docs_builder.config['repodir']).absolute()
+        return repodir / 'docs'
+
+    @property
+    def docs_auto_outdir(docs_builder):
+        return docs_builder.docs_dpath / 'source/auto'
+
+    def sphinx_apidoc_invocation(docs_builder, shrinkuser=False):
+        """
+        Instructions to invoke sphinx-apidoc.
+        Xcookie calls this, but also writes it to the conf.py docstring for
+        transparency.
+        """
+        repodir = ub.Path(docs_builder.config['repodir']).absolute()
+        docs_outdir = docs_builder.docs_auto_outdir
+        if shrinkuser:
+            repodir = repodir.shrinkuser()
+            docs_outdir = docs_outdir.shrinkuser()
+        rel_mod_dpath = ub.Path(docs_builder.config['rel_mod_parent_dpath']) / docs_builder.config['mod_name']
+        mod_abspath = repodir / rel_mod_dpath
+        invocation = f'sphinx-apidoc --private -f -o {docs_outdir} {mod_abspath} --separate'
+        return invocation
+
 
 def build_docs_index(self):
     import ubelt as ub
@@ -64,8 +103,9 @@ def build_docs_index(self):
 
 
 def build_docs_conf(self):
-    import ubelt as ub
-    import datetime
+    import datetime as datetime_mod
+
+    docs_builder = DocsBuilder(self.config)
 
     author = self.config['author']
     if isinstance(author, list):
@@ -81,9 +121,11 @@ def build_docs_conf(self):
         # 'repo_url': self.remote_info['url'],
         'repo_url': self.config.url,
         'author': author_str,
-        'year': datetime.datetime.now().year,
+        'year': datetime_mod.datetime.now().year,
         'repodir_wrt_home': self.repodir.shrinkuser()
     }
+
+    fmtkw['invoke_apidoc'] = docs_builder.sphinx_apidoc_invocation(shrinkuser=True)
 
     text = ub.codeblock(
         r'''
@@ -106,7 +148,7 @@ def build_docs_conf(self):
             # need to edit the conf.py
 
             cd {repodir_wrt_home}/docs
-            sphinx-apidoc --private -f -o {repodir_wrt_home}/docs/source/auto {repodir_wrt_home}/{rel_mod_dpath} --separate
+            {invoke_apidoc}
             make html
 
             git add source/auto/*.rst
@@ -203,7 +245,8 @@ def build_docs_conf(self):
         author = '{author}'
         modname = '{mod_name}'
 
-        modpath = join(dirname(dirname(dirname(__file__))), '{rel_mod_dpath}', '__init__.py')
+        mod_dpath = join(dirname(dirname(dirname(__file__))), '{rel_mod_dpath}')
+        modpath = join(mod_dpath, '__init__.py')
         release = parse_version(modpath)
         version = '.'.join(release.split('.')[0:2])
 
@@ -236,6 +279,9 @@ def build_docs_conf(self):
         napoleon_google_docstring = True
         napoleon_use_param = False
         napoleon_use_ivar = True
+
+        autoapi_type = 'python'
+        autoapi_dirs = [mod_dpath]
 
         autodoc_inherit_docstrings = False
 

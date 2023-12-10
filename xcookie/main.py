@@ -381,6 +381,7 @@ class XCookieConfig(scfg.DataConfig):
         self = TemplateApplier(config)
         self.setup()
         self.apply()
+        return self
 
 
 class TemplateApplier:
@@ -1091,12 +1092,16 @@ class TemplateApplier:
         return text
 
     def refresh_docs(self):
-        docs_dpath = self.repodir / 'docs'
-        docs_source_dpath = (docs_dpath / 'source').ensuredir()
-        command = f'sphinx-apidoc -f -o "{docs_source_dpath}" "{self.mod_dpath}" --separate'
+        from xcookie.builders import docs
+        docs_builder = docs.DocsBuilder(self.config)
+
+        docs_dpath = docs_builder.docs_dpath
+        docs_auto_outdir = docs_builder.docs_auto_outdir
+        command = docs_builder.sphinx_apidoc_invocation()
+
         ub.cmd(command, verbose=3, check=True, cwd=docs_dpath)
         if self.has_git:
-            ub.cmd(f'git add {docs_source_dpath}/*.rst', verbose=3, check=True, cwd=docs_dpath)
+            ub.cmd(f'git add {docs_auto_outdir}/*.rst', verbose=3, check=True, cwd=docs_dpath)
             # ub.cmd('make html', verbose=3, check=True, cwd=docs_dpath)
 
     def rotate_secrets(self):

@@ -20,7 +20,7 @@ def test_simple_repo():
     # config['repodir'] = 'fds'
     # rich.print(f'config = {ub.urepr(config, nl=1)}')
 
-    main.XCookieConfig.main(
+    self = main.XCookieConfig.main(
         cmdline=0,
         **kwargs
     )
@@ -32,3 +32,39 @@ def test_simple_repo():
     #                          block_dnames=['.git'])
     # walker.build()
     # walker.write_network_text()
+
+    # ---
+    # Write some simple content into the module
+    mymod1_fpath = self.mod_dpath / 'mymod1.py'
+    mymod1_fpath.write_text(ub.codeblock(
+        '''
+        """
+        A simple demo module.
+        """
+
+        def add3(x, y, z):
+            """
+            Args:
+                x (int): a number
+                y (int): a number
+                z (int): a number
+
+            Returns:
+                int:
+            """
+            return x + y + z
+        '''))
+
+    self = main.XCookieConfig.main(
+        cmdline=0,
+        **kwargs,
+        refresh_docs=True,
+    )
+    docs_dpath = self.repodir / 'docs'
+    ub.cmd('make html', cwd=docs_dpath, verbose=3)
+
+    if 0:
+        # For Debugging
+        import xdev
+        index_html_fpath = (docs_dpath / 'build/html/index.html')
+        xdev.startfile(index_html_fpath)
