@@ -138,10 +138,10 @@ class GitlabRemote:
         # TODO: figure out how to change access levels
         for branch in protected_branches:
             print('---')
-            print('branch = {}'.format(ub.repr2(branch, nl=1)))
-            print('branch.push_access_levels = {}'.format(ub.repr2(branch.push_access_levels, nl=1)))
-            print('branch.merge_access_levels = {}'.format(ub.repr2(branch.merge_access_levels, nl=1)))
-            print('branch.allow_force_push = {}'.format(ub.repr2(branch.allow_force_push, nl=1)))
+            print('branch = {}'.format(ub.urepr(branch, nl=1)))
+            print('branch.push_access_levels = {}'.format(ub.urepr(branch.push_access_levels, nl=1)))
+            print('branch.merge_access_levels = {}'.format(ub.urepr(branch.merge_access_levels, nl=1)))
+            print('branch.allow_force_push = {}'.format(ub.urepr(branch.allow_force_push, nl=1)))
         # if 0:
         #         # API doesnt directly support this, hack it in
         #         post_data = {

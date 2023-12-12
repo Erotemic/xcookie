@@ -374,7 +374,7 @@ class XCookieConfig(scfg.DataConfig):
         # xdev.embed()
 
         import rich
-        rich.print('config = {}'.format(ub.repr2(config, nl=1)))
+        rich.print('config = {}'.format(ub.urepr(config, nl=1)))
         repodir = ub.Path(config['repodir']).absolute()
         repodir.ensuredir()
 
@@ -609,7 +609,7 @@ class TemplateApplier:
                             'overwrite': False,
                             'fname': os.fspath(rel_fpath),
                         })
-            print('template_contents = {}'.format(ub.repr2(sorted(template_contents, key=lambda x: x['fname']), nl=1, sort=0)))
+            print('template_contents = {}'.format(ub.urepr(sorted(template_contents, key=lambda x: x['fname']), nl=1, sort=0)))
             known_fpaths = {d['fname'] for d in self.template_infos}
             exist_fpaths = {d['fname'] for d in template_contents}
             unexpected_fpaths = exist_fpaths - known_fpaths
@@ -700,12 +700,12 @@ class TemplateApplier:
 
         if self.remote_info['type'] == 'unknown':
             print(f'tags={tags}')
-            print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
+            print('self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1)))
             raise Exception('Specify github or gitlab in tags')
 
         if 'group' not in self.remote_info:
             print(f'tags={tags}')
-            print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
+            print('self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1)))
             raise Exception('Unknown user / group, specify a tag for a known user. Or a URL in the pyproject.toml [tool.xcookie]')
 
         self._build_template_registry()
@@ -719,7 +719,7 @@ class TemplateApplier:
         mkdir_tasks = tasks['mkdir']
         task_summary = ub.map_vals(len, tasks)
         if any(task_summary.values()):
-            print('task_summary = {}'.format(ub.repr2(task_summary, nl=1)))
+            print('task_summary = {}'.format(ub.urepr(task_summary, nl=1)))
             ans = self.config.prompt('What parts of the patch to apply?', ['yes', 'all', 'some', 'none'], default='yes')
             if ans in {'all', 'yes'}:
                 dirs = {d.parent for s, d in copy_tasks}
@@ -760,7 +760,7 @@ class TemplateApplier:
         #     if not fpath.exists():
         #         missing.append(fpath)
         # if missing:
-        #     print('missing = {}'.format(ub.repr2(missing, nl=1)))
+        #     print('missing = {}'.format(ub.urepr(missing, nl=1)))
         if self.config['is_new']:
             create_new_repo_info = ub.codeblock(
                 f'''
@@ -835,7 +835,7 @@ class TemplateApplier:
             >>> }
             >>> config = XCookieConfig.cli(cmdline=0, data=kwargs)
             >>> #config.__post_init__()
-            >>> print('config = {}'.format(ub.repr2(dict(config), nl=1)))
+            >>> print('config = {}'.format(ub.urepr(dict(config), nl=1)))
             >>> self = TemplateApplier(config)
             >>> self._build_template_registry()
             >>> info = [d for d in self.template_infos if d['fname'] == 'setup.py'][0]
@@ -993,7 +993,7 @@ class TemplateApplier:
 
         if 1:
             import pandas as pd
-            # print('self.staging_infos = {}'.format(ub.repr2(self.staging_infos, nl=1)))
+            # print('self.staging_infos = {}'.format(ub.urepr(self.staging_infos, nl=1)))
             df = pd.DataFrame(self.staging_infos)
             print(df)
 
@@ -1069,7 +1069,7 @@ class TemplateApplier:
                 # else:
                 #     tasks['perms'].append((info['repo_fpath'], mode_want))
 
-        print('stats = {}'.format(ub.repr2(stats, nl=2)))
+        print('stats = {}'.format(ub.urepr(stats, nl=2)))
         return stats, tasks
 
     def build_requirements(self):

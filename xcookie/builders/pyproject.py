@@ -8,7 +8,7 @@ def build_pyproject(self):
         str: templated code
     """
     # data = toml.loads((self.template_dpath / 'pyproject.toml').read_text())
-    # print('data = {}'.format(ub.repr2(data, nl=5)))
+    # print('data = {}'.format(ub.urepr(data, nl=5)))
     pyproj_config = ub.AutoDict()
     # {'tool': {}}
     if 'binpy' in self.config['tags']:

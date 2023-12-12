@@ -308,7 +308,7 @@ def _dev():
     import yaml
     fpath = rc.resource_fpath('gitlab-ci.purepy.yml.in')
     data = yaml.load(open(fpath, 'r'), yaml.SafeLoader)
-    print('data = {}'.format(ub.repr2(data, nl=-1)))
+    print('data = {}'.format(ub.urepr(data, nl=-1)))
     from xcookie.util_yaml import Yaml
     print(Yaml.dumps(data))
 
