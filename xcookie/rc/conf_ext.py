@@ -233,8 +233,9 @@ class GoogleStyleDocstringProcessor:
 
         # HACK TO PREVENT EXCESSIVE TIME.
         # TODO: FIXME FOR REAL
-        if USE_TIMER and TIMER.toc() > 60 * 5:
-            render_doc_images = 0  # FIXME too slow on RTD
+        MAX_TIME_MINUTES = 5
+        if USE_TIMER and TIMER.toc() > 60 * MAX_TIME_MINUTES:
+            render_doc_images = False  # FIXME too slow on RTD
 
         if render_doc_images:
             # DEVELOPING

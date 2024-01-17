@@ -246,6 +246,7 @@ html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 html_theme_options = {
     'collapse_navigation': False,
     'display_version': True,
+    'navigation_depth': -1,
     # 'logo_only': True,
 }
 # html_logo = '.static/xcookie.svg'

@@ -33,10 +33,23 @@ class BadgeBuilder:
             'target': f'http://{repo_dashname}.readthedocs.io/en/latest/',
         }
         badges['GithubActions'] = {
-            'image': f'https://github.com/{group}/{repo_name}/actions/workflows/{workflow}.yml/badge.svg?branch={main_branch}',
+            'image': f'https://github.com/{group}/{repo_name}/actions/workflows/{workflow}.yml/badge.svg',
             'target': f'https://github.com/{group}/{repo_name}/actions?query=branch%3A{main_branch}',
         }
+        badges['GitlabCIPipeline'] = {
+            'image': f'https://gitlab.kitware.com/{group}/{repo_name}/badges/main/pipeline.svg',
+            'target': f'https://gitlab.kitware.com/{group}/{repo_name}/-/jobs',
+        }
+        badges['GitlabCICoverage'] = {
+            'image': f'https://gitlab.kitware.com/{group}/{repo_name}/badges/main/coverage.svg',
+            'target': f'https://gitlab.kitware.com/{group}/{repo_name}/commits/main',
+        }
         return badges
+
+
+class ReadmeBuilder:
+    def __init__(self):
+        ...
 
 
 def build_readme(self):
@@ -64,13 +77,36 @@ def build_readme(self):
     parts.append(title)
     parts.append('')
 
-    chosen_badges = ['Pypi', 'PypiDownloads']
+    chosen_badges = ['Pypi', 'PypiDownloads', 'ReadTheDocs']
     if 'github' in self.config['tags']:
         chosen_badges += ['GithubActions', 'Codecov']
+    if 'gitlab' in self.config['tags']:
+        chosen_badges += ['GitlabCIPipeline', 'GitlabCICoverage']
 
     badge_header = ' '.join(['|{}|'.format(b) for b in chosen_badges])
     parts.append(badge_header)
     parts.append('')
+
+    WITH_LINK_TABLE = 1
+    if WITH_LINK_TABLE:
+        table = []
+        pkg_name = self.config['pkg_name']
+        badges['ReadTheDocs']['target']
+        table.append(['Read the Docs', badges['ReadTheDocs']['target']])
+        if 'gitlab' in self.tags:
+            table.append(['Gitlab (main)', self.config['url']])
+            if 'kitware' in self.tags:
+                github_mirror = f'https://github.com/Kitware/{pkg_name}'
+                table.append(['Github (mirror)', github_mirror])
+        pypi_url = f"https://pypi.org/project/{pkg_name}"
+        table.append(['Pypi', pypi_url])
+        import tabulate
+        tablefmt = 'grid'
+        # for tablefmt in tabulate.tabulate_formats:
+        #     print(f'tablefmt={tablefmt}')
+        text = tabulate.tabulate(table, tablefmt=tablefmt)
+        parts.append(text)
+        parts.append('')
 
     for b in chosen_badges:
         badge = badges[b]

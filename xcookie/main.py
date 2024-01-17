@@ -62,6 +62,7 @@ import shutil
 import ubelt as ub
 import tempfile
 import scriptconfig as scfg
+import warnings
 import xdev
 import os
 from packaging.version import parse as Version
@@ -181,7 +182,10 @@ class XCookieConfig(scfg.DataConfig):
 
         'linter': scfg.Value(True, help=ub.paragraph('if true enables lint checks in CI')),
 
-        'render_doc_images': scfg.Value(False, help=ub.paragraph('if true, adds kwplot as a dependency to build docs and enable rendering images from doctests.')),
+        'render_doc_images': scfg.Value(False, help=ub.paragraph(
+            '''
+            if true, adds kwplot as a dependency to build docs and enable rendering images from doctests.
+            ''')),
 
         # TODO: Better mechanism for controlling which of the loose / strict /
         # minimal / full variants will be run.
@@ -189,6 +193,11 @@ class XCookieConfig(scfg.DataConfig):
             'full-loose', 'full-strict',
             'minimal-loose', 'minimal-strict'],
             help='A list of which CI loose / strict / minimal / full varaints to use'),
+
+        'use_vcs': scfg.Value('auto', help=ub.paragraph(
+            '''
+            Set to False to disable VCS. Will default to True if config has enough information to infer a VCS
+            ''')),
 
         # ---
         'interactive': scfg.Value(True),
@@ -375,8 +384,8 @@ class XCookieConfig(scfg.DataConfig):
 
         import rich
         rich.print('config = {}'.format(ub.urepr(config, nl=1)))
-        repodir = ub.Path(config['repodir']).absolute()
-        repodir.ensuredir()
+        # repodir = ub.Path(config['repodir']).absolute()
+        # repodir.ensuredir()
 
         self = TemplateApplier(config)
         self.setup()
@@ -422,16 +431,19 @@ class TemplateApplier:
 
         Has special logic to handle building new respos versus updating repos.
         """
-        self.vcs_checks()
+        if self.config['use_vcs']:
+            self.vcs_checks()
         self.copy_staged_files()
         if self.config['refresh_docs']:
             self.refresh_docs()
-        if self.config['rotate_secrets']:
-            self.rotate_secrets()
+        if self.config['use_vcs']:
+            if self.config['rotate_secrets']:
+                self.rotate_secrets()
         self.print_help_tips()
 
-        if self.config['autostage']:
-            self.autostage()
+        if self.config['use_vcs']:
+            if self.config['autostage']:
+                self.autostage()
 
     def autostage(self):
         import git
@@ -698,15 +710,33 @@ class TemplateApplier:
 
         tags = set(self.config['tags'])
 
+        use_vcs = self.config['use_vcs']
+
         if self.remote_info['type'] == 'unknown':
+            if use_vcs == 'auto':
+                use_vcs = False
             print(f'tags={tags}')
             print('self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1)))
-            raise Exception('Specify github or gitlab in tags')
+            msg = 'Tags does not include github or gitlab. Cannot use VCS system without that'
+            if use_vcs:
+                raise Exception(msg)
+            else:
+                warnings.warn(msg)
 
         if 'group' not in self.remote_info:
+            if use_vcs == 'auto':
+                use_vcs = False
             print(f'tags={tags}')
             print('self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1)))
-            raise Exception('Unknown user / group, specify a tag for a known user. Or a URL in the pyproject.toml [tool.xcookie]')
+            msg = 'Unknown user / group, specify a tag for a known user. Or a URL in the pyproject.toml [tool.xcookie]'
+            if use_vcs:
+                raise Exception(msg)
+            else:
+                warnings.warn(msg)
+
+        if use_vcs == 'auto':
+            use_vcs = True
+        self.config['use_vcs'] = use_vcs
 
         self._build_template_registry()
         self.stage_files()
@@ -823,6 +853,15 @@ class TemplateApplier:
         Write a single file to the staging directory based on its template
         info.
 
+        Args:
+            info (dict):
+                a template dictionary that defines how to construct a file
+
+        Returns:
+            dict: enriched information.
+                A side effect of this function is writing the data to temporary
+                storage
+
         Example:
             >>> from xcookie.main import *  # NOQA
             >>> dpath = ub.Path.appdir('xcookie/tests/test-stage').delete().ensuredir()
@@ -867,12 +906,13 @@ class TemplateApplier:
                     text = self.lut(info)
                 else:
                     text = getattr(self, dynamic_var)()
+                if text is None:
+                    raise SkipFile('file was disabled')
                 try:
                     stage_fpath.write_text(text)
                 except Exception:
                     print(f'text={text}')
                     raise
-                    pass
             else:
                 in_fname = info.get('input_fname', path_name)
                 raw_fpath = self.template_dpath / in_fname
@@ -1214,6 +1254,8 @@ class TemplateApplier:
 
     def build_readme(self):
         from xcookie.builders import readme
+        if not self.config['use_vcs']:
+            return None
         return readme.build_readme(self)
 
     def build_docs_index(self):
