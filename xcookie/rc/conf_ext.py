@@ -37,6 +37,7 @@ class GoogleStyleDocstringProcessor:
     """
 
     def __init__(self, autobuild=1):
+        self.debug = 0
         self.registry = {}
         if autobuild:
             self._register_builtins()
@@ -215,7 +216,9 @@ class GoogleStyleDocstringProcessor:
             https://www.sphinx-doc.org/en/1.5.1/_modules/sphinx/ext/autodoc.html
             https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
         """
-        # print(f'name={name}')
+        if self.debug:
+            print(f'ProcessDocstring: name={name}, what_={what_}, num_lines={len(lines)}')
+
         # print('BEFORE:')
         # import ubelt as ub
         # print('lines = {}'.format(ub.urepr(lines, nl=1)))
@@ -572,6 +575,13 @@ def postprocess_hyperlinks(app, doctree, docname):
                         node.attributes['refuri'] = refuri.replace('.rst', '.html')
                 else:
                     raise AssertionError
+
+
+def fix_rst_todo_section(lines):
+    new_lines = []
+    for line in lines:
+        ...
+    ...
 
 
 def setup(app):

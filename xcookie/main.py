@@ -1085,7 +1085,7 @@ class TemplateApplier:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:
                         if regen_pat is not None:
-                            if regen_pat.search(info['fname']):
+                            if regen_pat.search(os.fspath(info['fname'])):
                                 want_rewrite = True
 
                     if want_rewrite:

@@ -284,7 +284,7 @@ def make_purepy_ci_jobs(self):
             artifacts:
                 paths:
                     - {wheelhouse_dpath}/*.asc
-
+                    - {wheelhouse_dpath}/*.whl
             only:
                 refs:
                     # Gitlab will only expose protected variables on protected branches
@@ -340,6 +340,14 @@ def make_purepy_ci_jobs(self):
         gpgsign_job.add_yaml_merge([(0, common_template)])
         body['stages'].append('gpgsign')
         body['gpgsign/wheels'] = gpgsign_job
+
+        enable_otc = True
+        if enable_otc:
+            # Use an open timestamp to tag when the signature and wheels were
+            # created
+            gpgsign_job['artifacts']['paths'].append(f'{wheelhouse_dpath}/*.ots')
+            gpgsign_job['script'].append('python -m pip install opentimestamps-client')
+            gpgsign_job['script'].append(f'ots stamp {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.asc')
 
     deploy = True
     if deploy:

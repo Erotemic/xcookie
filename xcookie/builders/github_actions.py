@@ -594,7 +594,8 @@ def build_binpy_wheels_job(self):
         'name': '${{ matrix.os }}, arch=${{ matrix.arch }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
-            'matrix': matrix
+            'fail-fast': False,
+            'matrix': matrix,
         },
         'steps': None,
     })
@@ -709,6 +710,7 @@ def build_purewheel_job(self):
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
+            'fail-fast': False,
             'matrix': {
                 # Build on one of the platforms with the newest python version
                 # (it doesnt really matter)
@@ -830,6 +832,7 @@ def test_wheels_job(self, needs=None):
         'runs-on': '${{ matrix.os }}',
         'needs': list(needs),
         'strategy': {
+            'fail-fast': False,
             'matrix': Yaml.Dict({
                 # 'os': os_list,
                 # 'python-version': python_versions_non34,
