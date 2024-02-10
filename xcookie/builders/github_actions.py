@@ -69,20 +69,24 @@ class Actions:
     def checkout(cls, *args, **kwargs):
         return cls.action({
             'name': 'Checkout source',
-            'uses': 'actions/checkout@v4'
+            'uses': 'actions/checkout@v4.1.1'
         }, *args, **kwargs)
 
     @classmethod
     def setup_python(cls, *args, **kwargs):
         return cls.action({
             'name': 'Setup Python',
-            'uses': 'actions/setup-python@v4.7.1'
+            'uses': 'actions/setup-python@v5.0.0'
         }, *args, **kwargs)
 
     @classmethod
     def codecov_action(cls, *args, **kwargs):
+        """
+        References:
+            https://github.com/codecov/codecov-action
+        """
         return cls.action({
-            'uses': 'codecov/codecov-action@v3'
+            'uses': 'codecov/codecov-action@v4.0.1'
         }, *args, **kwargs)
 
     @classmethod
@@ -112,13 +116,13 @@ class Actions:
     @classmethod
     def upload_artifact(cls, *args, **kwargs):
         return cls.action({
-            'uses': 'actions/upload-artifact@v3'
+            'uses': 'actions/upload-artifact@v4.3.1'
         }, *args, **kwargs)
 
     @classmethod
     def download_artifact(cls, *args, **kwargs):
         return cls.action({
-            'uses': 'actions/download-artifact@v3',
+            'uses': 'actions/download-artifact@v4.1.2',
         }, *args, **kwargs)
 
     @classmethod
@@ -323,6 +327,10 @@ def build_github_actions(self):
     jobs['test_deploy'] = build_deploy(self, mode='test', needs=needs)
     jobs['live_deploy'] = build_deploy(self, mode='live', needs=needs)
 
+    if 1:
+        # New action to create a proper release
+        jobs['release'] = build_github_release(self, needs=['live_deploy'])
+
     defaultbranch = self.config['defaultbranch']
     run_on_branches = ub.oset([defaultbranch, 'main'])
     run_on_branches_str = ', '.join(run_on_branches)
@@ -436,6 +444,7 @@ def lint_job(self):
 def build_and_test_sdist_job(self):
     supported_platform_info = get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
+    wheelhouse_dpath = 'wheelhouse'
     job = {
         'name': 'Build sdist',
         'runs-on': 'ubuntu-latest',
@@ -463,14 +472,14 @@ def build_and_test_sdist_job(self):
                     # "python -m pip wheel --wheel-dir wheelhouse .",
                     'python -m pip install pip -U',
                     'python -m pip install setuptools>=0.8 wheel build',
-                    'python -m build --sdist --outdir wheelhouse',
+                    f'python -m build --sdist --outdir {wheelhouse_dpath}',
                 ]
             },
             {
                 'name': 'Install sdist',
                 'run': [
-                    'ls -al ./wheelhouse',
-                    f'pip install --prefer-binary wheelhouse/{self.pkg_name}*.tar.gz -v',
+                    f'ls -al {wheelhouse_dpath}',
+                    f'pip install --prefer-binary {wheelhouse_dpath}/{self.pkg_name}*.tar.gz -v',
                 ]
             },
             {
@@ -518,14 +527,13 @@ def build_and_test_sdist_job(self):
                     'cd ..',
                 ]
             },
-            {
+            Actions.upload_artifact({
                 'name': 'Upload sdist artifact',
-                'uses': 'actions/upload-artifact@v3',
                 'with': {
-                    'name': 'wheels',
-                    'path': './wheelhouse/*.tar.gz'
+                    'name': 'sdist_wheels',
+                    'path': f"{wheelhouse_dpath}/*.tar.gz"
                 }
-            }
+            })
         ]
     }
     return Yaml.Dict(job)
@@ -628,7 +636,8 @@ def build_binpy_wheels_job(self):
         Actions.codecov_action({
             'name': 'Codecov Upload',
             'with': {
-                'file': './coverage.xml'
+                'file': './coverage.xml',
+                'token': '${{ secrets.CODECOV_TOKEN }}',
             }
         }),
         Actions.upload_artifact({
@@ -953,7 +962,8 @@ def test_wheels_job(self, needs=None):
             Actions.codecov_action({
                 'name': 'Codecov Upload',
                 'with': {
-                    'file': './coverage.xml'
+                    'file': './coverage.xml',
+                    'token': '${{ secrets.CODECOV_TOKEN }}',
                 }
             }),
         ]
@@ -1024,6 +1034,16 @@ def build_deploy(self, mode='live', needs=None):
     if needs is None:
         needs = []
 
+    # TODO: this is probably configured earlier, update it to point to the
+    # single source of truth.
+    wheelhouse_dpath = 'wheelhouse'
+
+    artifact_globs = [
+        f'{wheelhouse_dpath}/*.whl',
+        f'{wheelhouse_dpath}/*.zip',
+        f'{wheelhouse_dpath}/*.tar.gz',
+    ]
+
     if enable_gpg:
         run = [
             # 'ls -al',
@@ -1046,16 +1066,54 @@ def build_deploy(self, mode='live', needs=None):
             'pip install urllib3 requests[security] twine',
             'GPG_KEYID=$(cat dev/public_gpg_key)',
             '''echo "GPG_KEYID = '$GPG_KEYID'"''',
-            ('DO_GPG=True GPG_KEYID=$GPG_KEYID TWINE_REPOSITORY_URL=${TWINE_REPOSITORY_URL} '
-             'TWINE_PASSWORD=$TWINE_PASSWORD TWINE_USERNAME=$TWINE_USERNAME '
-             'GPG_EXECUTABLE=$GPG_EXECUTABLE DO_UPLOAD=True DO_TAG=False '
-             './publish.sh'),
+            'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
         ]
+        run += ub.codeblock(
+            '''
+            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
+            WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
+            echo "$WHEEL_PATHS_STR"
+            for WHEEL_PATH in "${WHEEL_PATHS[@]}"
+            do
+                echo "------"
+                echo "WHEEL_PATH = $WHEEL_PATH"
+                $GPG_SIGN_CMD --output $WHEEL_PATH.asc $WHEEL_PATH
+                $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH  || echo "hack, the first run of gpg very fails"
+                $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH
+            done
+            ls -la wheelhouse
+            ''').strip().split('\n')
+
+        artifact_globs.append(
+            f'{wheelhouse_dpath}/*.asc'
+        )
+
+        enable_otc = True
+        if enable_otc:
+            run += [
+                'pip install opentimestamps-client',
+                f'ots stamp {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.asc',
+                'ls -la wheelhouse'
+            ]
+            artifact_globs.append(
+                f'{wheelhouse_dpath}/*.ots'
+            )
+
+        run += [
+            f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
+        ]
+        # pypi doesn't care about GPG keys anymore, but we can keep them as artifacts.
+        # run += [
+        #     ('DO_GPG=True GPG_KEYID=$GPG_KEYID TWINE_REPOSITORY_URL=${TWINE_REPOSITORY_URL} '
+        #      'TWINE_PASSWORD=$TWINE_PASSWORD TWINE_USERNAME=$TWINE_USERNAME '
+        #      'GPG_EXECUTABLE=$GPG_EXECUTABLE DO_UPLOAD=True DO_TAG=False '
+        #      './publish.sh'),
+        # ]
     else:
         run = [
             # 'pip install requests[security] twine pyopenssl ndg-httpsclient pyasn1 -U',
             'pip install urllib3 requests[security] twine -U',
-            'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" wheelhouse/* --skip-existing --verbose || { echo "failed to twine upload" ; exit 1; }',
+            f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
         ]
 
     job = {
@@ -1065,14 +1123,79 @@ def build_deploy(self, mode='live', needs=None):
         'needs': list(needs),
         'steps': [
             Actions.checkout(name='Checkout source'),
-            Actions.download_artifact({'name': 'Download wheels and sdist', 'with': {'name': 'wheels', 'path': 'wheelhouse'}}),
-            {'name': 'Show files to upload', 'shell': 'bash', 'run': 'ls -la wheelhouse'},
+            Actions.download_artifact({'name': 'Download wheels', 'with': {'name': 'wheels', 'path': wheelhouse_dpath}}),
+            Actions.download_artifact({'name': 'Download sdist', 'with': {'name': 'sdist_wheels', 'path': wheelhouse_dpath}}),
+            {'name': 'Show files to upload', 'shell': 'bash', 'run': f'ls -la {wheelhouse_dpath}'},
             # TODO: it might make sense to make this a script that is invoked
             {
                 'name': 'Sign and Publish' if self.config['enable_gpg'] else 'Publish',
                 'env': env,
                 'run': run,
-            }
+            },
+            Actions.upload_artifact({
+                'name': 'Upload deploy artifacts',
+                'with': {
+                    'name': 'deploy_artifacts',
+                    'path': chr(10).join(artifact_globs)
+                }
+            })
+        ]
+    }
+    return job
+
+
+def build_github_release(self, needs=None):
+    """
+    References:
+        https://github.com/marketplace/actions/create-a-release-in-a-github-action
+        https://github.com/softprops/action-gh-release
+    """
+    condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
+    env = {
+        'GITHUB_TOKEN': '${{ secrets.GITHUB_TOKEN }}',
+    }
+
+    write_release_notes_action = {
+        'run': 'echo "Automatic Release Notes. TODO: improve" > ${{ github.workspace }}-CHANGELOG.txt'
+    }
+
+    wheelhouse_dpath = 'wheelhouse'
+    artifact_globs = [
+        f'{wheelhouse_dpath}/*.whl',
+        f'{wheelhouse_dpath}/*.asc',
+        f'{wheelhouse_dpath}/*.ots',
+        f'{wheelhouse_dpath}/*.zip',
+        f'{wheelhouse_dpath}/*.tar.gz',
+    ]
+
+    release_action = {
+        'uses': 'softprops/action-gh-release@v1',
+        'name': 'Create Release',
+        'id': 'create_release',
+        'env': env,
+        'with': {
+            'body_path': '${{ github.workspace }}-CHANGELOG.txt',
+            'tag_name': '${{ github.ref }}',
+            'release_name': 'Release ${{ github.ref }}',
+            'body': 'Automatic Release',
+            'draft': True,  # Maybe keep as a draft until we determine this is ok?
+            'prerelease': False,
+            'files': chr(10).join(artifact_globs),
+        }
+    }
+
+    job = {
+        'name': "Create Github Release",
+        'if': condition,
+        'runs-on': 'ubuntu-latest',
+        'permissions': {'contents': 'write'},
+        'needs': list(needs),
+        'steps': [
+            Actions.checkout(name='Checkout source'),
+            Actions.download_artifact({'name': 'Download artifacts', 'with': {'name': 'deploy_artifacts', 'path': 'wheelhouse'}}),
+            {'name': 'Show files to release', 'shell': 'bash', 'run': 'ls -la wheelhouse'},
+            write_release_notes_action,
+            release_action,
         ]
     }
     return job
