@@ -1241,7 +1241,7 @@ class TemplateApplier:
     def build_run_linter(self):
         text = ub.codeblock(
             f"""
-            #!/bin/bash
+            #!/usr/bin/env bash
             flake8 --count --select=E9,F63,F7,F82 --show-source --statistics {self.rel_mod_dpath}
             flake8 --count --select=E9,F63,F7,F82 --show-source --statistics ./tests
             """
