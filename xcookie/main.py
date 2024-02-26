@@ -80,7 +80,7 @@ class XCookieConfig(scfg.DataConfig):
 
         'repo_name': scfg.Value(None, help='defaults to ``repodir.name``'),
         'mod_name': scfg.Value(None, help='The name of the importable Python module. defaults to ``repo_name``'),
-        'pkg_name': scfg.Value(None, help='The name of the installable Python package. defaults to ``mod_name``'),
+        'pkg_name': scfg.Value(None, help='The distribution project name of the installable Python package (i.e. what you pass to ``pip install``). defaults to ``mod_name``'),
         'rel_mod_parent_dpath': scfg.Value('.', help=ub.paragraph(
             '''
             The location of the module directory relative to the repository
@@ -1279,6 +1279,9 @@ class TemplateApplier:
 
     def lut(self, info):
         """
+        Hacked builders when template_info source is dynamic, but there is no
+        corresponding explicit function.
+
         Returns:
             str: templated code
         """

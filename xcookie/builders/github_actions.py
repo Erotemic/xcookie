@@ -116,13 +116,19 @@ class Actions:
     @classmethod
     def upload_artifact(cls, *args, **kwargs):
         return cls.action({
-            'uses': 'actions/upload-artifact@v4.3.1'
+            # 'uses': 'actions/upload-artifact@v4.3.1'
+            # Rollback to 3.x due to
+            # https://github.com/actions/upload-artifact/issues/478
+            # todo: migrate
+            # https://github.com/actions/upload-artifact/blob/main/docs/MIGRATION.md#multiple-uploads-to-the-same-named-artifact
+            'uses': 'actions/upload-artifact@v3.1.3'
         }, *args, **kwargs)
 
     @classmethod
     def download_artifact(cls, *args, **kwargs):
         return cls.action({
-            'uses': 'actions/download-artifact@v4.1.2',
+            # 'uses': 'actions/download-artifact@v4.1.2',
+            'uses': 'actions/download-artifact@v2.1.1',
         }, *args, **kwargs)
 
     @classmethod
@@ -222,7 +228,8 @@ class Actions:
         # Emulate aarch64 ppc64le s390x under linux
         return cls.action({
             'name': 'Build binary wheels',
-            'uses': 'pypa/cibuildwheel@v2.16.2',
+            # 'uses': 'pypa/cibuildwheel@v2.16.2',
+            'uses': 'pypa/cibuildwheel@v2.16.5',
         }, *args, **kwargs)
 
 
