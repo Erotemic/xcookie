@@ -32,7 +32,7 @@ class GitlabRemote:
         ipy
 
         from xcookie.vcs_remotes import *  # NOQA
-        self = GitlabRemote('kwutil', 'computer-vision', 'https://gitlab.kitware.com')
+        self = GitlabRemote('geowatch', 'computer-vision', 'https://gitlab.kitware.com')
 
 
     """

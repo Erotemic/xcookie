@@ -506,7 +506,7 @@ def build_and_test_sdist_job(self):
                     'echo "MOD_DPATH = $MOD_DPATH"',
                     # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
                     # TODO: change to test command
-                    'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
+                    f'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
                     'cd ..',
                 ]
             },
@@ -527,7 +527,7 @@ def build_and_test_sdist_job(self):
                     f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
                     'echo "MOD_DPATH = $MOD_DPATH"',
                     # TODO: change to test command
-                    'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
+                    f'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
                     # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
                     # Move coverage file to a new name
                     # 'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
@@ -899,14 +899,6 @@ def test_wheels_job(self, needs=None):
     else:
         custom_before_test_lines = []
 
-    if 'ibeis' == self.mod_name:
-        test_command = [
-            'python -m xdoctest $MOD_DPATH --style=google all',
-            'echo "xdoctest command finished"'
-        ]
-    else:
-        test_command = 'auto'
-
     action_steps = []
     action_steps += [
         Actions.checkout(),
@@ -943,7 +935,6 @@ def test_wheels_job(self, needs=None):
         ]
     install_and_test_wheel_parts = common_ci.make_install_and_test_wheel_parts(
         self, wheelhouse_dpath, special_install_lines, workspace_dname,
-        test_command=test_command,
         custom_before_test_lines=custom_before_test_lines,
         custom_after_test_commands=custom_after_test_commands,
     )

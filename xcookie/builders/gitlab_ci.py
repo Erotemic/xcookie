@@ -413,6 +413,34 @@ def make_purepy_ci_jobs(self):
                 fi
                 ''')
         ]
+
+        PUBLISH_ARTIFACTS = 1
+        if PUBLISH_ARTIFACTS:
+            # Add artifacts to the package registry
+            deploy_script += [
+                Yaml.CodeBlock(
+                    fr'''
+                    # https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
+                    echo "CI_PROJECT_URL=$CI_PROJECT_URL"
+                    echo "CI_PROJECT_ID=$CI_PROJECT_ID"
+                    echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
+                    echo "CI_PROJECT_NAMESPACE=$CI_PROJECT_NAMESPACE"
+                    echo "CI_API_V4_URL=$CI_API_V4_URL"
+
+                    export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+                    echo "PROJECT_VERSION=$PROJECT_VERSION"
+
+                    # --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" \
+                    for FPATH in "{wheelhouse_dpath}"/*; do
+                        FNAME=$(basename $FPATH)
+                        echo $FNAME
+                        curl \
+                            --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+                            --upload-file $FPATH \
+                            "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$CI_PROJECT_NAME/$PROJECT_VERSION/$FNAME"
+                    done
+                    ''')
+            ]
         deploy_job['script'] = deploy_script
         deploy_job = CommentedMap(deploy_job)
         deploy_job.add_yaml_merge([(0, common_template)])

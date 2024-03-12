@@ -22,7 +22,6 @@ def make_install_and_test_wheel_parts(self,
                                       wheelhouse_dpath,
                                       special_install_lines,
                                       workspace_dname,
-                                      test_command='auto',
                                       custom_before_test_lines=[],
                                       custom_after_test_commands=[],
                                       ):
@@ -49,11 +48,22 @@ def make_install_and_test_wheel_parts(self,
     get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
     get_modpath_bash = f'python -c "{get_modpath_python}"'
 
+    test_command = self.config['test_command']
+
     if test_command == 'auto':
-        test_command = [
-            Yaml.CodeBlock(f'python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="{self.mod_name}" "$MOD_DPATH" ../tests'),
-            'echo "pytest command finished, moving the coverage file to the repo root"',
-        ]
+        if 'ibeis' == self.mod_name:
+            test_command = [
+                'python -m xdoctest $MOD_DPATH --style=google all',
+                'echo "xdoctest command finished"'
+            ]
+        else:
+            test_command = [
+                Yaml.CodeBlock('python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests'),
+                'echo "pytest command finished, moving the coverage file to the repo root"',
+            ]
+    else:
+        if isinstance(test_command, str):
+            test_command = [Yaml.CodeBlock(test_command)]
 
     # Note: export does not expose the enviornment variable to subsequent jobs.
     install_wheel_commands = [
@@ -85,6 +95,7 @@ def make_install_and_test_wheel_parts(self,
         # 'pip freeze',
         '# Get the path to the installed package and run the tests',
         f'export MOD_DPATH=$({get_modpath_bash})',
+        f'export MOD_NAME={self.mod_name}',
         Yaml.CodeBlock(
             '''
             echo "

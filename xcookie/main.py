@@ -155,6 +155,7 @@ class XCookieConfig(scfg.DataConfig):
         'enable_gpg': scfg.Value(True),
         'defaultbranch': scfg.Value('main'),
         'xdoctest_style': scfg.Value('google', help='type of xdoctest style'),
+        'test_command': scfg.Value('auto', help='The pytest command to run in the CL'),
 
         'ci_pypi_live_password_varname': scfg.Value('TWINE_PASSWORD', help='variable of the live twine password in your secrets'),
         'ci_pypi_test_password_varname': scfg.Value('TEST_TWINE_PASSWORD', help='variable of the test twine password in your secrets'),
