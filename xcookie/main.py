@@ -537,10 +537,11 @@ class TemplateApplier:
              'dynamic': 'build_gitlab_ci'
              },
 
-            {'template': 0, 'overwrite': 1, 'fname': '.rules.yml', 'tags': 'gitlab',
-             # 'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')
-             'dynamic': 'build_gitlab_rules'
-             },
+            # Broken
+            # {'template': 0, 'overwrite': 1, 'fname': '.gitlab/rules.yml', 'tags': 'gitlab',
+            #  # 'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')
+            #  'dynamic': 'build_gitlab_rules'
+            #  },
 
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,binpy',
              'input_fname': rc.resource_fpath('gitlab-ci.binpy.yml.in')},

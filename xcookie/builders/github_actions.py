@@ -292,7 +292,8 @@ def build_github_actions(self):
             ##
             '''), indent=4)
 
-        needs = list(purepy_jobs.keys())
+        deploy_needs = list(purepy_jobs.keys())
+        deploy_needs = set(deploy_needs) - {'test_purepy_wheels'}
         jobs.update(purepy_jobs)
     elif 'binpy' in self.tags:
         name = 'BinPyCI'
@@ -326,13 +327,14 @@ def build_github_actions(self):
             environment.
             ##
             '''), indent=4)
-        needs = list(binpy_jobs.keys())
+        deploy_needs = list(binpy_jobs.keys())
+        deploy_needs = set(deploy_needs) - {'test_binpy_wheels'}
         jobs.update(binpy_jobs)
     else:
         raise Exception('Need to specify binpy or purepy in tags')
 
-    jobs['test_deploy'] = build_deploy(self, mode='test', needs=needs)
-    jobs['live_deploy'] = build_deploy(self, mode='live', needs=needs)
+    jobs['test_deploy'] = build_deploy(self, mode='test', needs=deploy_needs)
+    jobs['live_deploy'] = build_deploy(self, mode='live', needs=deploy_needs)
 
     if 1:
         # New action to create a proper release
@@ -843,8 +845,10 @@ def test_wheels_job(self, needs=None):
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
             item['os'] = 'ubuntu-20.04'
 
+    condition = "! startsWith(github.event.ref, 'refs/heads/release')"
     job = Yaml.Dict({
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
+        'if': condition,
         'runs-on': '${{ matrix.os }}',
         'needs': list(needs),
         'strategy': {
@@ -1142,11 +1146,35 @@ def build_deploy(self, mode='live', needs=None):
     return job
 
 
+# def build_github_tag_release(self, needs=None):
+#     """
+#     References:
+#         https://github.com/softprops/action-gh-release/issues/20#issuecomment-572245945
+#     """
+#     condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/heads/release'))"
+#     job = {
+#         'name': "Tag Release Commit",
+#         'if': condition,
+#         'runs-on': 'ubuntu-latest',
+#         'permissions': {'contents': 'write'},
+#         'needs': list(needs),
+#         'steps': [
+#             Actions.checkout(name='Checkout source'),
+#             Actions.download_artifact({'name': 'Download artifacts', 'with': {'name': 'deploy_artifacts', 'path': 'wheelhouse'}}),
+#             {'name': 'Show files to release', 'shell': 'bash', 'run': 'ls -la wheelhouse'},
+#             write_release_notes_action,
+#             release_action,
+#         ]
+#     }
+#     return job
+
+
 def build_github_release(self, needs=None):
     """
     References:
         https://github.com/marketplace/actions/create-a-release-in-a-github-action
         https://github.com/softprops/action-gh-release
+        https://github.com/softprops/action-gh-release/issues/20#issuecomment-572245945
     """
     condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
     env = {
@@ -1166,6 +1194,23 @@ def build_github_release(self, needs=None):
         f'{wheelhouse_dpath}/*.tar.gz',
     ]
 
+    needs_tag_condition = "(startsWith(github.event.ref, 'refs/heads/release'))"
+    tag_action = {
+        'name': 'Tag Release Commit',
+        'if': needs_tag_condition,
+        'run': ub.codeblock(
+            '''
+            export VERSION=$(python -c "import setup; print(setup.VERSION)")
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+            ''')
+    }
+
+    # 'release_name', valid inputs are ['body', 'body_path', 'name',
+    # 'tag_name', 'draft', 'prerelease', 'files', 'fail_on_unmatched_files',
+    # 'repository', 'token', 'target_commitish', 'discussion_category_name',
+    # 'generate_release_notes', 'append_body']
+
     release_action = {
         'uses': 'softprops/action-gh-release@v1',
         'name': 'Create Release',
@@ -1174,7 +1219,8 @@ def build_github_release(self, needs=None):
         'with': {
             'body_path': '${{ github.workspace }}-CHANGELOG.txt',
             'tag_name': '${{ github.ref }}',
-            'release_name': 'Release ${{ github.ref }}',
+            # 'release_name': 'Release ${{ github.ref }}',
+            'name': 'Release ${{ github.ref }}',
             'body': 'Automatic Release',
             'draft': True,  # Maybe keep as a draft until we determine this is ok?
             'prerelease': False,
@@ -1193,6 +1239,7 @@ def build_github_release(self, needs=None):
             Actions.download_artifact({'name': 'Download artifacts', 'with': {'name': 'deploy_artifacts', 'path': 'wheelhouse'}}),
             {'name': 'Show files to release', 'shell': 'bash', 'run': 'ls -la wheelhouse'},
             write_release_notes_action,
+            tag_action,
             release_action,
         ]
     }

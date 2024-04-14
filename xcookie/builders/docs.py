@@ -61,6 +61,12 @@ def build_docs_index(self):
             :gitlab_url: https://gitlab.kitware.com/computer-vision/{mod_name}
             '''))
 
+    if {'github'}.issubset(tags):
+        parts.append(ub.codeblock(
+            f'''
+            :github_url: {self.config['url']}
+            '''))
+
     logo_part = ub.codeblock(
         '''
         .. The large version wont work because github strips rst image rescaling. https://i.imgur.com/AcWVroL.png
@@ -187,16 +193,16 @@ def build_docs_conf(self):
 
                 ### For gitlab
 
+                To enable the read-the-docs go to https://readthedocs.org/dashboard/ and login
+
                 The user will need to enable the repo on their readthedocs account:
                 https://readthedocs.org/dashboard/import/manual/?
 
-                To enable the read-the-docs go to https://readthedocs.org/dashboard/ and login
-
-                Make sure you have a .readthedocs.yml file
-
-                Click import project: (for github you can select, but gitlab you need to import manually)
+                Enter the following information:
                     Set the Repository NAME: {repo_name}
                     Set the Repository URL: {repo_url}
+
+                Make sure you have a .readthedocs.yml file
 
                 For gitlab you also need to setup an integrations. Navigate to:
 

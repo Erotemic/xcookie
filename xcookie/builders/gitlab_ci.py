@@ -85,6 +85,16 @@ def make_purepy_ci_jobs(self):
         stages.append('lint')
     stages.append('build')
     stages.append('test')
+
+    # Broken: needs to be fixed
+    # body.update(Yaml.loads(ub.codeblock(
+    #     '''
+    #     include:
+    #         - local: .gitlab/rules.yml
+    #     ''')))
+
+    # # Metadata shared my many jobs
+    # - local: .gitlab/rules.yml
     body['stages'] = CommentedSeq(stages)
     body.yaml_add_eol_comment('stages', 'TEMPLATE1,c 1')
 

@@ -58,7 +58,7 @@ def make_install_and_test_wheel_parts(self,
             ]
         else:
             test_command = [
-                Yaml.CodeBlock('python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --cov="$MOD_NAME" "$MOD_DPATH" ../tests'),
+                Yaml.CodeBlock('python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --durations=100 --cov="$MOD_NAME" "$MOD_DPATH" ../tests'),
                 'echo "pytest command finished, moving the coverage file to the repo root"',
             ]
     else:
@@ -79,6 +79,9 @@ def make_install_and_test_wheel_parts(self,
         f'export MOD_VERSION=$({get_mod_version_bash})',
         # 'echo "MOD_VERSION=$MOD_VERSION"',
     ] + special_install_lines + [
+        'echo "$WHEEL_FPATH=WHEEL_FPATH"',
+        'echo "$INSTALL_EXTRAS=INSTALL_EXTRAS"',
+        'echo "$MOD_VERSION=MOD_VERSION"',
         f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
         'echo "Install finished."',
     ]
