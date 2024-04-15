@@ -1222,6 +1222,7 @@ def build_github_release(self, needs=None):
             # 'release_name': 'Release ${{ github.ref }}',
             'name': 'Release ${{ github.ref }}',
             'body': 'Automatic Release',
+            'generate_release_notes': True,
             'draft': True,  # Maybe keep as a draft until we determine this is ok?
             'prerelease': False,
             'files': chr(10).join(artifact_globs),
