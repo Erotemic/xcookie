@@ -436,15 +436,11 @@ def lint_job(self):
     }
 
     if 'notypes' not in self.tags:
+        mypy_check_commands = common_ci.make_mypy_check_parts(self)
         job['steps'].append(
             {
                 'name': 'Typecheck with mypy',
-                'run': ub.codeblock(
-                    f'''
-                    python -m pip install mypy
-                    mypy --install-types --non-interactive ./{self.rel_mod_dpath}
-                    mypy ./{self.rel_mod_dpath}
-                    ''')
+                'run': mypy_check_commands
             }
         )
     return Yaml.Dict(job)

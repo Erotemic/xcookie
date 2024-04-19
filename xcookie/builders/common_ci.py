@@ -3,6 +3,23 @@ Common subroutines for consitency between gitlab-ci / github actions / etc...
 """
 
 
+def make_mypy_check_parts(self):
+    import ubelt as ub
+
+    type_requirement_files = [
+        'requirements/runtime.txt'
+    ]
+    req_files_text = ' '.join(type_requirement_files)
+    commands = ub.codeblock(
+        f'''
+        python -m pip install mypy
+        pip install -r {req_files_text}
+        mypy --install-types --non-interactive ./{self.rel_mod_dpath}
+        mypy ./{self.rel_mod_dpath}
+        ''')
+    return commands
+
+
 def make_build_wheel_parts(self, wheelhouse_dpath='wheelhouse'):
     commands = [
         # 'python -m pip install pip -U',

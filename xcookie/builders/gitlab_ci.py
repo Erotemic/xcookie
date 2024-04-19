@@ -264,6 +264,7 @@ def make_purepy_ci_jobs(self):
             '''))))
 
         # TODO: add mypy if typed.
+        # e.g. mypy_check_commands = common_ci.make_mypy_check_parts(self)
         # TODO: only install linting requirements if the file exists.
         lint_job.update(Yaml.loads(ub.codeblock(
             '''
