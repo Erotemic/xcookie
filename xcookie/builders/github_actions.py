@@ -659,6 +659,9 @@ def build_binpy_wheels_job(self):
 
 def get_supported_platform_info(self):
     os_list = []
+
+    # TODO: maybe allow pinning, or list out what the options are
+    # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
     if 'linux' in self.config['os']:
         os_list.append('ubuntu-latest')
     if 'osx' in self.config['os']:
@@ -838,8 +841,12 @@ def test_wheels_job(self, needs=None):
                     **platkw, **special_loose_test_env})
 
     for item in include:
+        # Available os names:
+        # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
             item['os'] = 'ubuntu-20.04'
+        if item['python-version'] == '3.6' and item['os'] == 'macOS-latest':
+            item['os'] = 'macos-13'
 
     condition = "! startsWith(github.event.ref, 'refs/heads/release')"
     job = Yaml.Dict({
