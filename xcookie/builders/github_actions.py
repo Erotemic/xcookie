@@ -229,7 +229,7 @@ class Actions:
         return cls.action({
             'name': 'Build binary wheels',
             # 'uses': 'pypa/cibuildwheel@v2.16.2',
-            'uses': 'pypa/cibuildwheel@v2.16.5',
+            'uses': 'pypa/cibuildwheel@v2.17.0',
         }, *args, **kwargs)
 
 
