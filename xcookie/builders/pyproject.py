@@ -37,7 +37,8 @@ def build_pyproject(self):
             # 'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
             'skip': "pp* *-musllinux_*",
             'build-verbosity': 1,
-            'test-requires': ["-r requirements/tests.txt"],
+            # 'test-requires': ["-r requirements/tests.txt"],
+            'test-extras': ["tests-strict", "runtime-strict"],
             'test-command': "python {project}/run_tests.py"
         })
 
