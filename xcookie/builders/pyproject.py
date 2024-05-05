@@ -31,6 +31,10 @@ def build_pyproject(self):
         for cpver in supported_cp_version:
             wheel_build_patterns.append(cpver + '-*')
 
+        test_extras = ["tests-strict", "runtime-strict"]
+        if 'cv2' in self.config['tags']:
+            test_extras += ["headless-strict"]
+
         pyproj_config['tool']['cibuildwheel'].update({
             'build': " ".join(wheel_build_patterns),
             'build-frontend': "build",
@@ -38,7 +42,7 @@ def build_pyproject(self):
             'skip': "pp* *-musllinux_*",
             'build-verbosity': 1,
             # 'test-requires': ["-r requirements/tests.txt"],
-            'test-extras': ["tests-strict", "runtime-strict"],
+            'test-extras': test_extras,
             'test-command': "python {project}/run_tests.py"
         })
 

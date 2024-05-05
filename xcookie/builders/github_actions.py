@@ -582,6 +582,11 @@ def build_binpy_wheels_job(self):
         the standard [tool.cibuildwheel] section in pyproject.toml and set
         explicitly here.
         '''), indent=8)
+
+    if 'osx' in self.config['os']:
+        # os_list.append('macos-14')
+        os_list.append('macos-13')
+
     matrix['os'] = os_list
 
     if 'win' in self.config['os']:
@@ -771,7 +776,7 @@ def test_wheels_job(self, needs=None):
     supported_platform_info = get_supported_platform_info(self)
 
     os_list = supported_platform_info['os_list']
-    pypy_versions = supported_platform_info['pypy_versions']
+
     install_extra_versions = supported_platform_info['install_extra_versions']
 
     # Map the min/full loose/strict terminology to specific extra packages
@@ -819,26 +824,30 @@ def test_wheels_job(self, needs=None):
                     'python-version': pyver, 'install-extras': extra,
                     **platkw, **special_strict_test_env})
 
-    for osname in platform_basis[1:]:
+    for platkw in platform_basis[1:]:
         for extra in install_extras.take(['minimal-loose']):
             for pyver in install_extra_versions['minimal-loose']:
                 include.append({
                     'python-version': pyver, 'install-extras': extra,
                     **platkw, **special_loose_test_env})
 
-    for osname in platform_basis:
+    for platkw in platform_basis:
         for extra in install_extras.take(['full-loose']):
             for pyver in install_extra_versions['full-loose']:
                 include.append({
                     'python-version': pyver, 'install-extras': extra,
                     **platkw, **special_loose_test_env})
 
-    for osname in platform_basis:
-        for extra in install_extras.take(['full-loose']):
-            for pyver in pypy_versions:
-                include.append({
-                    'python-version': pyver, 'install-extras': extra,
-                    **platkw, **special_loose_test_env})
+    # TODO: implement pypy support
+    # pypy_versions = supported_platform_info['pypy_versions']
+    # for platkw in platform_basis:
+    #     for extra in install_extras.take(['full-loose']):
+    #         for pyver in pypy_versions:
+    #             include.append({
+    #                 'python-version': pyver, 'install-extras': extra,
+    #                 **platkw, **special_loose_test_env})
+
+    assert not ub.find_duplicates(map(ub.hash_data, include))
 
     for item in include:
         # Available os names:
@@ -847,13 +856,15 @@ def test_wheels_job(self, needs=None):
             item['os'] = 'ubuntu-20.04'
         if item['python-version'] == '3.6' and item['os'] == 'macOS-latest':
             item['os'] = 'macos-13'
+        if item['python-version'] == '3.7' and item['os'] == 'macOS-latest':
+            item['os'] = 'macos-13'
 
     condition = "! startsWith(github.event.ref, 'refs/heads/release')"
     job = Yaml.Dict({
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
         'if': condition,
         'runs-on': '${{ matrix.os }}',
-        'needs': list(needs),
+        'needs': sorted(needs),
         'strategy': {
             'fail-fast': False,
             'matrix': Yaml.Dict({
@@ -1121,6 +1132,13 @@ def build_deploy(self, mode='live', needs=None):
             f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
         ]
 
+    if 'nosrcdist' not in self.tags:
+        sdist_wheel_steps = [
+            Actions.download_artifact({'name': 'Download sdist', 'with': {'name': 'sdist_wheels', 'path': wheelhouse_dpath}})
+        ]
+    else:
+        sdist_wheel_steps = []
+
     job = {
         'name': f"Uploading {mode.capitalize()} to PyPi",
         'runs-on': 'ubuntu-latest',
@@ -1129,7 +1147,7 @@ def build_deploy(self, mode='live', needs=None):
         'steps': [
             Actions.checkout(name='Checkout source'),
             Actions.download_artifact({'name': 'Download wheels', 'with': {'name': 'wheels', 'path': wheelhouse_dpath}}),
-            Actions.download_artifact({'name': 'Download sdist', 'with': {'name': 'sdist_wheels', 'path': wheelhouse_dpath}}),
+        ] + sdist_wheel_steps + [
             {'name': 'Show files to upload', 'shell': 'bash', 'run': f'ls -la {wheelhouse_dpath}'},
             # TODO: it might make sense to make this a script that is invoked
             {
