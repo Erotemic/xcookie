@@ -42,7 +42,7 @@ def build_readme(self):
     badges = {}
     remote_info = self.remote_info
     main_branch = 'main'
-    group = remote_info['group']
+    group = remote_info.get('group', None)
     repo_name = remote_info['repo_name']
 
     if 'binpy' in self.config['tags']:

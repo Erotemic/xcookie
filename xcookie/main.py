@@ -51,6 +51,22 @@ class SkipFile(Exception):
 # TODO: split up into a configuration that is saved to pyproject.toml and one
 # that is on only used when executing
 class XCookieConfig(scfg.Config):
+    """
+    The XCookie CLI
+    """
+    __epilog__ = """
+    Usage
+    -----
+    # Create this repo
+    python -m xcookie --repo_name=xcookie --repodir="$HOME"/code/xcookie --tags="erotemic,github,purepy"
+
+    # Create a new python repo
+    python -m xcookie --repo_name=cookiecutter_purepy --repodir="$HOME"/code/cookiecutter_purepy --tags="github,purepy"
+
+    # Create a new binary repo
+    python -m xcookie --repo_name=cookiecutter_binpy --repodir="$HOME"/code/cookiecutter_binpy --tags="github,binpy,gdal"
+
+    """
     default = {
         'repodir': scfg.Value('.', help='path to the new or existing repo', position=1),
 
@@ -302,7 +318,7 @@ class TemplateApplier:
     def apply(self):
         self.vcs_checks()
         self.copy_staged_files()
-        if self.config['rotate_secrets']:
+        if self.config['rotate_secrets'] and 'url' in self.remote_info:
             self.rotate_secrets()
         self.print_help_tips()
 
@@ -494,8 +510,11 @@ class TemplateApplier:
         print('self.remote_info = {}'.format(ub.repr2(self.remote_info, nl=1)))
         assert self.remote_info['type'] != 'unknown'
         self.remote_info['repo_name'] = self.config['repo_name']
-        self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name']])
-        self.remote_info['git_url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
+        try:
+            self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name']])
+            self.remote_info['git_url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
+        except KeyError:
+            ...
 
         self._build_template_registry()
         self.stage_files()
@@ -564,7 +583,8 @@ class TemplateApplier:
             git_dpath = self.repodir / '.git'
             if not git_dpath.exists():
                 queue.submit('git init')
-                queue.sync().submit(f'git remote add origin {self.remote_info["url"]}')
+                if 'url' in self.remote_info:
+                    queue.sync().submit(f'git remote add origin {self.remote_info["url"]}')
 
             if queue.jobs:
                 queue.rprint()
