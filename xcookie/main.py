@@ -1462,6 +1462,7 @@ class GitURL(str):
             'host': 'foo.bar',
             'group': 'user',
             'repo_name': 'repo.git',
+            'user': None,
             'protocol': 'https',
             'url': 'https://foo.bar/user/repo.git',
         }
@@ -1469,9 +1470,11 @@ class GitURL(str):
             'host': 'foo.bar',
             'group': 'group',
             'repo_name': 'repo.git',
+            'user': 'git',
             'protocol': 'git',
             'url': 'git@foo.bar:group/repo.git',
         }
+
     """
 
     def __init__(self, data):
