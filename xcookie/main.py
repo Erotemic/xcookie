@@ -310,7 +310,7 @@ class XCookieConfig(scfg.DataConfig):
 
         if self['ci_pypy_versions'] == 'auto':
             if 'purepy' in self['tags']:
-                self['ci_pypy_versions'] = ['3.7']
+                self['ci_pypy_versions'] = ['3.9']
             else:
                 self['ci_pypy_versions'] = []
 
