@@ -8,16 +8,25 @@ class Actions:
     Help build Github Action JSON objects
 
     Example:
-        from xcookie.builders.github_actions import Actions
-        import types
-        for attr_name in dir(Actions):
-            if not attr_name.startswith('_'):
-                attr = getattr(Actions, attr_name)
-                if isinstance(attr, types.MethodType):
-                    print(attr_name)
-                    action = attr()
+        >>> from xcookie.builders.github_actions import Actions
+        >>> import types
+        >>> for attr_name in dir(Actions):
+        >>>     if not attr_name.startswith('_'):
+        >>>         attr = getattr(Actions, attr_name)
+        >>>         if isinstance(attr, types.MethodType):
+        >>>             print(attr_name)
+        >>>             action = attr()
 
-        ...
+    Example:
+        >>> action = Actions.codecov_action(Yaml.coerce(
+            '''
+            name: Codecov Upload
+            with:
+              file: ./coverage.xml
+              token: ${{ secrets.CODECOV_TOKEN }}
+            '''))
+        >>> print(type(action))
+        >>> print(f'action = {ub.urepr(action, nl=1)}')
     """
     action_versions = {
         'checkout': 'actions/checkout@v3',
@@ -39,6 +48,7 @@ class Actions:
         # List all actions
         # https://api.github.com/repos/pypa/cibuildwheel/releases/latest
         import requests
+        update_lines = []
         for attr in Actions._available_action_methods():
             action = attr()
             if 'uses' in action:
@@ -48,13 +58,18 @@ class Actions:
                 data = resp.json()
                 latest = data['tag_name']
                 if current != latest:
-                    print(f'Update: {suffix} from {current} to {latest}')
+                    update_line = (f'Update: {suffix} from {current} to {latest}')
+                    update_lines.append(update_line)
+                    print(update_line)
                     print('data = {}'.format(ub.urepr(data, nl=1)))
+        print('\n'.join(update_lines))
 
     @classmethod
     def action(cls, *args, **kwargs):
         """
-        The generic action
+        The generic action.
+
+        TODO: support commented YAML maps
         """
         action = ub.udict(kwargs.copy())
         for _ in args:
@@ -177,7 +192,7 @@ class Actions:
         # Emulate aarch64 ppc64le s390x under linux
         return cls.action({
             'name': 'Set up QEMU',
-            'uses': 'docker/setup-qemu-action@v3',
+            'uses': 'docker/setup-qemu-action@v3.0.0',
         }, *args, **kwargs)
 
     @classmethod
@@ -643,6 +658,19 @@ def build_binpy_wheels_job(self):
             }
         }),
         Actions.combine_coverage(),
+        # https://github.com/github/docs/issues/6861
+        Actions.codecov_action(Yaml.coerce(
+            '''
+            name: Codecov Upload
+            env:
+              HAVE_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
+            # Only upload coverage if we have the token
+            if: ${{ env.HAVE_PERSONAL_TOKEN == 'true' }}
+            with:
+              file: ./coverage.xml
+              token: ${{ secrets.CODECOV_TOKEN }}
+            ''')),
+
         Actions.codecov_action({
             'name': 'Codecov Upload',
             'with': {
