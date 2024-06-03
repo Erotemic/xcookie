@@ -1,2 +1,4 @@
 # Add requirements here, use the script for help 
 # xdev availpkg pygments
+
+python-gitlab>=3.0
