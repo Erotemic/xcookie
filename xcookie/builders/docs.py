@@ -1,3 +1,6 @@
+"""
+Template code for building docs includeing conf.py
+"""
 import ubelt as ub
 
 
@@ -43,9 +46,9 @@ class DocsBuilder:
             exclude_pattern = '_tokenize.py'
 
         if exclude_pattern is None:
-            invocation = f'sphinx-apidoc --private --separate -f -o {docs_outdir} {mod_abspath}'
+            invocation = f'sphinx-apidoc --private --separate --force --output-dir {docs_outdir} {mod_abspath}'
         else:
-            invocation = f'sphinx-apidoc --private --separate -f -o {docs_outdir} {mod_abspath} \'{exclude_pattern}\''
+            invocation = f'sphinx-apidoc --private --separate --force --output-dir {docs_outdir} {mod_abspath} \'{exclude_pattern}\''
         return invocation
 
 

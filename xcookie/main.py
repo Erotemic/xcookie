@@ -75,6 +75,18 @@ class SkipFile(Exception):
 # TODO: split up into a configuration that is saved to pyproject.toml and one
 # that is on only used when executing
 class XCookieConfig(scfg.DataConfig):
+    """
+    The XCookie CLI
+    """
+    __epilog__ = """
+    Usage
+    -----
+    # Create a new python repo
+    xcookie --repo_name=cookiecutter_purepy --repodir="$HOME"/code/cookiecutter_purepy --tags="github,purepy"
+
+    # Create a new binary repo
+    xcookie --repo_name=cookiecutter_binpy --repodir="$HOME"/code/cookiecutter_binpy --tags="github,binpy,gdal"
+    """
     __default__ = {
         'repodir': scfg.Value('.', help='path to the new or existing repo', position=1),
 
@@ -266,7 +278,9 @@ class XCookieConfig(scfg.DataConfig):
                 self['author_email'] = ub.cmd('git config user.email')['out'].strip()
         if self['version'] is None:
             # TODO: read from __init__.py
-            self['version'] = '{mod_dpath}/__init__.py::__version__'
+            # self['version'] = '{mod_dpath}/__init__.py::__version__'
+            self['version'] = '0.0.1'
+
         if self['description'] is None:
             self['description'] = 'The {} module'.format(self['mod_name'])
 
@@ -296,7 +310,7 @@ class XCookieConfig(scfg.DataConfig):
 
         if self['ci_pypy_versions'] == 'auto':
             if 'purepy' in self['tags']:
-                self['ci_pypy_versions'] = ['3.7']
+                self['ci_pypy_versions'] = ['3.9']
             else:
                 self['ci_pypy_versions'] = []
 
@@ -308,6 +322,7 @@ class XCookieConfig(scfg.DataConfig):
             except Exception:
                 raise
             return disk_config
+        return {}
 
     def _load_xcookie_pyproject_settings(self):
         disk_config = self._load_pyproject_config()
@@ -1447,6 +1462,7 @@ class GitURL(str):
             'host': 'foo.bar',
             'group': 'user',
             'repo_name': 'repo.git',
+            'user': None,
             'protocol': 'https',
             'url': 'https://foo.bar/user/repo.git',
         }
@@ -1454,9 +1470,11 @@ class GitURL(str):
             'host': 'foo.bar',
             'group': 'group',
             'repo_name': 'repo.git',
+            'user': 'git',
             'protocol': 'git',
             'url': 'git@foo.bar:group/repo.git',
         }
+
     """
 
     def __init__(self, data):
