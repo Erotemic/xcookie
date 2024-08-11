@@ -99,6 +99,15 @@ def make_install_and_test_wheel_parts(self,
         'echo "$WHEEL_FPATH=WHEEL_FPATH"',
         'echo "$INSTALL_EXTRAS=INSTALL_EXTRAS"',
         'echo "$MOD_VERSION=MOD_VERSION"',
+
+        # This helps but doesn't solve the problem.
+        # https://github.com/Erotemic/xdoctest/pull/158#discussion_r1697092781
+        # 'echo "Downloading dependencies from pypi"',
+        # f'pip download "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" --dest wheeldownload',
+        # f'echo "Overwriting pypi {self.mod_name} wheel"',
+        # 'cp wheelhouse/* wheeldownload/',
+        # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
+
         f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
         'echo "Install finished."',
     ]
