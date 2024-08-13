@@ -91,7 +91,7 @@ class Actions:
     def setup_python(cls, *args, **kwargs):
         return cls.action({
             'name': 'Setup Python',
-            'uses': 'actions/setup-python@v5.0.0'
+            'uses': 'actions/setup-python@v5.1.1'
         }, *args, **kwargs)
 
     @classmethod
