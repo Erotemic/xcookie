@@ -89,7 +89,7 @@ def make_purepy_ci_jobs(self):
         stages.append('lint')
     stages.append('build')
     if enable_gpg:
-        body['stages'].append('gpgsign')
+        stages.append('gpgsign')
     stages.append('test')
 
     # Broken: needs to be fixed
@@ -296,7 +296,7 @@ def make_purepy_ci_jobs(self):
             cpver = 'cp' + pyver.replace('.', '')
             if cpver in python_images:
                 swenv_key = f'{cpver}-{opsys}-{arch}'  # software environment key
-                build_name = f'build/wheel/{swenv_key}'
+                build_name = f'build/{swenv_key}'
                 build_names.append(build_name)
 
                 build_job = {
@@ -307,7 +307,7 @@ def make_purepy_ci_jobs(self):
                 jobs[build_name] = build_job
 
                 for extra_key, common_test_template in test_templates.items():
-                    test_name = f'test/wheel/{extra_key}/{swenv_key}'
+                    test_name = f'test/{extra_key}/{swenv_key}'
                     test_job = {
                         'image': python_images[cpver],
                         'needs': [
