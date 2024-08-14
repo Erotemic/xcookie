@@ -20,6 +20,21 @@ def make_mypy_check_parts(self):
     return commands
 
 
+def make_build_sdist_parts(self, wheelhouse_dpath='wheelhouse'):
+    commands = [
+        # 'python -m pip install pip -U',
+        'python -m pip install setuptools>=0.8 wheel build twine',
+        f'python -m build --sdist --outdir {wheelhouse_dpath}',
+        f'python -m twine check ./{wheelhouse_dpath}/{self.mod_name}*.tar.gz',
+    ]
+
+    build_parts = {
+        'commands': commands,
+        'artifact': f"./{wheelhouse_dpath}/{self.mod_name}*.tar.gz"
+    }
+    return build_parts
+
+
 def make_build_wheel_parts(self, wheelhouse_dpath='wheelhouse'):
     commands = [
         # 'python -m pip install pip -U',

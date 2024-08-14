@@ -8,10 +8,14 @@ def build_gitlab_ci(self):
         >>> from xcookie.builders.gitlab_ci import *  # NOQA
         >>> from xcookie.main import XCookieConfig
         >>> from xcookie.main import TemplateApplier
-        >>> config = XCookieConfig(tags=['purepy'])
+        >>> config = XCookieConfig(tags=['purepy'], repo_name='mymod')
+        >>> config['enable_gpg'] = False
+        >>> config['linter'] = False
+        >>> config['test_variants'] = ['full-loose']
+        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-1:]
         >>> self = TemplateApplier(config)
         >>> text = build_gitlab_ci(self)
-        >>> print(text)
+        >>> print(ub.highlight_code(text, 'yaml'))
     """
     if 'purepy' in self.tags:
         return make_purepy_ci_jobs(self)
@@ -84,6 +88,8 @@ def make_purepy_ci_jobs(self):
     if enable_lint:
         stages.append('lint')
     stages.append('build')
+    if enable_gpg:
+        body['stages'].append('gpgsign')
     stages.append('test')
 
     # Broken: needs to be fixed
@@ -128,24 +134,50 @@ def make_purepy_ci_jobs(self):
         body['.common_template']['tags'].append('kitware-python-stack')
 
     wheelhouse_dpath = 'dist'
-    build_wheel_parts = common_ci.make_build_wheel_parts(self, wheelhouse_dpath)
-    build_template = {
-        'stage': 'build',
-        'before_script': [
-            'python -V  # Print out python version for debugging',
-            'df -h',
-        ],
-        'script': build_wheel_parts['commands'],
-        'artifacts': {
-            'paths': [
-                build_wheel_parts['artifact'],
-            ]
-        },
-    }
-    build_template = CommentedMap(build_template)
-    build_template.yaml_set_anchor('build_template')
-    body['.build_template'] = build_template
-    build_template.add_yaml_merge([(0, common_template)])
+
+    enable_sdist = True
+    if enable_sdist:
+        # Make the sdist build template
+        build_parts = common_ci.make_build_sdist_parts(self, wheelhouse_dpath)
+        build_sdist_template = {
+            'stage': 'build',
+            # 'before_script': [
+            #     'python -V  # Print out python version for debugging',
+            #     'df -h',
+            # ],
+            'script': build_parts['commands'],
+            'artifacts': {
+                'paths': [
+                    build_parts['artifact'],
+                ]
+            },
+        }
+        build_sdist_template = CommentedMap(build_sdist_template)
+        build_sdist_template.yaml_set_anchor('build_sdist_template')
+        body['.build_sdist_template'] = build_sdist_template
+        build_sdist_template.add_yaml_merge([(0, common_template)])
+
+    # Make the wheel build template
+    enable_wheel = True
+    if enable_wheel:
+        build_parts = common_ci.make_build_wheel_parts(self, wheelhouse_dpath)
+        build_wheel_template = {
+            'stage': 'build',
+            'before_script': [
+                'python -V  # Print out python version for debugging',
+                'df -h',
+            ],
+            'script': build_parts['commands'],
+            'artifacts': {
+                'paths': [
+                    build_parts['artifact'],
+                ]
+            },
+        }
+        build_wheel_template = CommentedMap(build_wheel_template)
+        build_wheel_template.yaml_set_anchor('build_wheel_template')
+        body['.build_wheel_template'] = build_wheel_template
+        build_wheel_template.add_yaml_merge([(0, common_template)])
 
     common_test_template = {
         'stage': 'test',
@@ -233,7 +265,7 @@ def make_purepy_ci_jobs(self):
                 'image': python_images[cpver],
             }
             build_job = CommentedMap(build_job)
-            build_job.add_yaml_merge([(0, build_template)])
+            build_job.add_yaml_merge([(0, build_wheel_template)])
             jobs[build_name] = build_job
 
             for extra_key, common_test_template in test_templates.items():
@@ -253,208 +285,17 @@ def make_purepy_ci_jobs(self):
     deploy_image = python_images['cp311']
 
     if enable_lint:
-        lint_job = {}
-        lint_job.update(ub.udict(Yaml.loads(ub.codeblock(
-            f'''
-            image:
-                {deploy_image}
-
-            stage:
-                lint
-            '''))))
-
-        # TODO: add mypy if typed.
-        # e.g. mypy_check_commands = common_ci.make_mypy_check_parts(self)
-        # TODO: only install linting requirements if the file exists.
-        lint_job.update(Yaml.loads(ub.codeblock(
-            '''
-            before_script:
-                - df -h
-            script:
-                - pip install -r requirements/linting.txt
-                - ./run_linter.sh
-            ''')))
-
-        lint_job = CommentedMap(lint_job)
-        lint_job.add_yaml_merge([(0, common_template)])
-
-        lint_job['allow_failure'] = True
-
+        lint_job = build_lint_job(common_template, deploy_image)
         body['lint'] = lint_job
 
     if enable_gpg:
-        gpgsign_job = {}
-        gpgsign_job.update(ub.udict(Yaml.loads(ub.codeblock(
-            f'''
-            image:
-                {deploy_image}
-
-            stage:
-                gpgsign
-
-            artifacts:
-                paths:
-                    - {wheelhouse_dpath}/*.asc
-                    - {wheelhouse_dpath}/*.whl
-            only:
-                refs:
-                    # Gitlab will only expose protected variables on protected branches
-                    # (which I've set to be main and release), so only run this stage
-                    # there.
-                    - master
-                    - main
-                    - release
-            '''))))
-
+        gpgsign_job = build_gpg_job(common_template, deploy_image, wheelhouse_dpath)
         gpgsign_job['needs'] = [{'job': build_name, 'artifacts': True} for build_name in build_names]
-
-        gpgsign_job.update(Yaml.loads(ub.codeblock(
-            '''
-            script:
-                - ls ''' + wheelhouse_dpath + '''
-                - export GPG_EXECUTABLE=gpg
-                - export GPG_KEYID=$(cat dev/public_gpg_key)
-                - echo "GPG_KEYID = $GPG_KEYID"
-                # Decrypt and import GPG Keys / trust
-                # note the variable pointed to by VARNAME_CI_SECRET is a protected variables only available on main and release branch
-                - source dev/secrets_configuration.sh
-                - CI_SECRET=${!VARNAME_CI_SECRET}
-                - $GPG_EXECUTABLE --version
-                - openssl version
-                - $GPG_EXECUTABLE --list-keys
-                # note CI_KITWARE_SECRET is a protected variables only available on main and release branch
-                - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
-                - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
-                - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
-                - GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
-            ''')))
-        gpgsign_job['script'].append(
-            Yaml.CodeBlock(
-                '''
-                WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
-                WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
-                echo "$WHEEL_PATHS_STR"
-                for WHEEL_PATH in "${WHEEL_PATHS[@]}"
-                do
-                    echo "------"
-                    echo "WHEEL_PATH = $WHEEL_PATH"
-                    $GPG_SIGN_CMD --output $WHEEL_PATH.asc $WHEEL_PATH
-                    $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH  || echo "hack, the first run of gpg very fails"
-                    $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH
-                done
-                '''
-            )
-        )
-        gpgsign_job['script'].append(f'ls {wheelhouse_dpath}')
-
-        gpgsign_job = CommentedMap(gpgsign_job)
-        gpgsign_job.add_yaml_merge([(0, common_template)])
-        body['stages'].append('gpgsign')
         body['gpgsign/wheels'] = gpgsign_job
-
-        enable_otc = True
-        if enable_otc:
-            # Use an open timestamp to tag when the signature and wheels were
-            # created
-            gpgsign_job['artifacts']['paths'].append(f'{wheelhouse_dpath}/*.ots')
-            gpgsign_job['script'].append('python -m pip install opentimestamps-client')
-            gpgsign_job['script'].append(f'ots stamp {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.asc')
 
     deploy = True
     if deploy:
-        deploy_job = {}
-        deploy_job.update(ub.udict(Yaml.loads(ub.codeblock(
-            f'''
-            image:
-                {deploy_image}
-
-            stage:
-                deploy
-
-            only:
-                refs:
-                    - release
-            '''))))
-        deploy_script = [
-            'pip install pyopenssl ndg-httpsclient pyasn1 requests[security] twine -U',
-            f'ls {wheelhouse_dpath}',
-        ]
-        deploy_script += [
-            Yaml.CodeBlock(
-                '''
-                WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
-                WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
-                source dev/secrets_configuration.sh
-                TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}
-                TWINE_USERNAME=${!VARNAME_TWINE_USERNAME}
-                echo "$WHEEL_PATHS_STR"
-                for WHEEL_PATH in "${WHEEL_PATHS[@]}"
-                do
-                    twine check $WHEEL_PATH.asc $WHEEL_PATH
-                    twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH.asc $WHEEL_PATH || echo "upload already exists"
-                done
-                ''')
-        ]
-        deploy_script += [
-            Yaml.CodeBlock(
-                r'''
-                # Have the server git-tag the release and push the tags
-                export VERSION=$(python -c "import setup; print(setup.VERSION)")
-                # do sed twice to handle the case of https clone with and without a read token
-                URL_HOST=$(git remote get-url origin | sed -e 's|https\?://.*@||g' | sed -e 's|https\?://||g' | sed -e 's|git@||g' | sed -e 's|:|/|g')
-                source dev/secrets_configuration.sh
-                CI_SECRET=${!VARNAME_CI_SECRET}
-                PUSH_TOKEN=${!VARNAME_PUSH_TOKEN}
-                echo "URL_HOST = $URL_HOST"
-                # A git config user name and email is required. Set if needed.
-                if [[ "$(git config user.email)" == "" ]]; then
-                    git config user.email "ci@gitlab.org.com"
-                    git config user.name "Gitlab-CI"
-                fi
-                TAG_NAME="v${VERSION}"
-                echo "TAG_NAME = $TAG_NAME"
-                if [ $(git tag -l "$TAG_NAME") ]; then
-                    echo "Tag already exists"
-                else
-                    # if we messed up we can delete the tag
-                    # git push origin :refs/tags/$TAG_NAME
-                    # and then tag with -f
-                    git tag $TAG_NAME -m "tarball tag $VERSION"
-                    git push --tags "https://git-push-token:${PUSH_TOKEN}@${URL_HOST}"
-                fi
-                ''')
-        ]
-
-        PUBLISH_ARTIFACTS = 1
-        if PUBLISH_ARTIFACTS:
-            # Add artifacts to the package registry
-            deploy_script += [
-                Yaml.CodeBlock(
-                    fr'''
-                    # https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
-                    echo "CI_PROJECT_URL=$CI_PROJECT_URL"
-                    echo "CI_PROJECT_ID=$CI_PROJECT_ID"
-                    echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
-                    echo "CI_PROJECT_NAMESPACE=$CI_PROJECT_NAMESPACE"
-                    echo "CI_API_V4_URL=$CI_API_V4_URL"
-
-                    export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
-                    echo "PROJECT_VERSION=$PROJECT_VERSION"
-
-                    # --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" \
-                    for FPATH in "{wheelhouse_dpath}"/*; do
-                        FNAME=$(basename $FPATH)
-                        echo $FNAME
-                        curl \
-                            --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-                            --upload-file $FPATH \
-                            "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$CI_PROJECT_NAME/$PROJECT_VERSION/$FNAME"
-                    done
-                    ''')
-            ]
-        deploy_job['script'] = deploy_script
-        deploy_job = CommentedMap(deploy_job)
-        deploy_job.add_yaml_merge([(0, common_template)])
+        deploy_job = build_deploy_job(common_template, deploy_image, wheelhouse_dpath)
         body['stages'].append('deploy')
         body['deploy/wheels'] = deploy_job
 
@@ -474,3 +315,215 @@ def make_purepy_ci_jobs(self):
     footer = '# end'
     text = header + '\n\n' + body_text + '\n\n' + footer
     return text
+
+
+def build_lint_job(common_template, deploy_image):
+    from xcookie.util_yaml import Yaml
+    from ruamel.yaml.comments import CommentedMap
+    lint_job = {}
+    lint_job.update(ub.udict(Yaml.loads(ub.codeblock(
+        f'''
+        image:
+            {deploy_image}
+
+        stage:
+            lint
+        '''))))
+
+    # TODO: add mypy if typed.
+    # e.g. mypy_check_commands = common_ci.make_mypy_check_parts(self)
+    # TODO: only install linting requirements if the file exists.
+    lint_job.update(Yaml.loads(ub.codeblock(
+        '''
+        before_script:
+            - df -h
+        script:
+            - pip install -r requirements/linting.txt
+            - ./run_linter.sh
+        ''')))
+
+    lint_job = CommentedMap(lint_job)
+    lint_job.add_yaml_merge([(0, common_template)])
+
+    lint_job['allow_failure'] = True
+    return lint_job
+
+
+def build_gpg_job(common_template, deploy_image, wheelhouse_dpath):
+    # import ruamel.yaml
+    from ruamel.yaml.comments import CommentedMap
+    from xcookie.util_yaml import Yaml
+    gpgsign_job = {}
+    gpgsign_job.update(ub.udict(Yaml.loads(ub.codeblock(
+        f'''
+        image:
+            {deploy_image}
+
+        stage:
+            gpgsign
+
+        artifacts:
+            paths:
+                - {wheelhouse_dpath}/*.asc
+                - {wheelhouse_dpath}/*.whl
+        only:
+            refs:
+                # Gitlab will only expose protected variables on protected branches
+                # (which I've set to be main and release), so only run this stage
+                # there.
+                - master
+                - main
+                - release
+        '''))))
+
+    gpgsign_job.update(Yaml.loads(ub.codeblock(
+        '''
+        script:
+            - ls ''' + wheelhouse_dpath + '''
+            - export GPG_EXECUTABLE=gpg
+            - export GPG_KEYID=$(cat dev/public_gpg_key)
+            - echo "GPG_KEYID = $GPG_KEYID"
+            # Decrypt and import GPG Keys / trust
+            # note the variable pointed to by VARNAME_CI_SECRET is a protected variables only available on main and release branch
+            - source dev/secrets_configuration.sh
+            - CI_SECRET=${!VARNAME_CI_SECRET}
+            - $GPG_EXECUTABLE --version
+            - openssl version
+            - $GPG_EXECUTABLE --list-keys
+            # note CI_KITWARE_SECRET is a protected variables only available on main and release branch
+            - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
+            - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
+            - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
+            - GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
+        ''')))
+    gpgsign_job['script'].append(
+        Yaml.CodeBlock(
+            '''
+            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
+            WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
+            echo "$WHEEL_PATHS_STR"
+            for WHEEL_PATH in "${WHEEL_PATHS[@]}"
+            do
+                echo "------"
+                echo "WHEEL_PATH = $WHEEL_PATH"
+                $GPG_SIGN_CMD --output $WHEEL_PATH.asc $WHEEL_PATH
+                $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH  || echo "hack, the first run of gpg very fails"
+                $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH
+            done
+            '''
+        )
+    )
+    gpgsign_job['script'].append(f'ls {wheelhouse_dpath}')
+
+    gpgsign_job = CommentedMap(gpgsign_job)
+    gpgsign_job.add_yaml_merge([(0, common_template)])
+
+    enable_otc = True
+    if enable_otc:
+        # Use an open timestamp to tag when the signature and wheels were
+        # created
+        gpgsign_job['artifacts']['paths'].append(f'{wheelhouse_dpath}/*.ots')
+        gpgsign_job['script'].append('python -m pip install opentimestamps-client')
+        gpgsign_job['script'].append(f'ots stamp {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.asc')
+    return gpgsign_job
+
+
+def build_deploy_job(common_template, deploy_image, wheelhouse_dpath):
+    # import ruamel.yaml
+    from ruamel.yaml.comments import CommentedMap
+    from xcookie.util_yaml import Yaml
+
+    deploy_job = {}
+    deploy_job.update(ub.udict(Yaml.loads(ub.codeblock(
+        f'''
+        image:
+            {deploy_image}
+
+        stage:
+            deploy
+
+        only:
+            refs:
+                - release
+        '''))))
+    deploy_script = [
+        'pip install pyopenssl ndg-httpsclient pyasn1 requests[security] twine -U',
+        f'ls {wheelhouse_dpath}',
+    ]
+    deploy_script += [
+        Yaml.CodeBlock(
+            '''
+            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
+            WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
+            source dev/secrets_configuration.sh
+            TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}
+            TWINE_USERNAME=${!VARNAME_TWINE_USERNAME}
+            echo "$WHEEL_PATHS_STR"
+            for WHEEL_PATH in "${WHEEL_PATHS[@]}"
+            do
+                twine check $WHEEL_PATH.asc $WHEEL_PATH
+                twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH.asc $WHEEL_PATH || echo "upload already exists"
+            done
+            ''')
+    ]
+    deploy_script += [
+        Yaml.CodeBlock(
+            r'''
+            # Have the server git-tag the release and push the tags
+            export VERSION=$(python -c "import setup; print(setup.VERSION)")
+            # do sed twice to handle the case of https clone with and without a read token
+            URL_HOST=$(git remote get-url origin | sed -e 's|https\?://.*@||g' | sed -e 's|https\?://||g' | sed -e 's|git@||g' | sed -e 's|:|/|g')
+            source dev/secrets_configuration.sh
+            CI_SECRET=${!VARNAME_CI_SECRET}
+            PUSH_TOKEN=${!VARNAME_PUSH_TOKEN}
+            echo "URL_HOST = $URL_HOST"
+            # A git config user name and email is required. Set if needed.
+            if [[ "$(git config user.email)" == "" ]]; then
+                git config user.email "ci@gitlab.org.com"
+                git config user.name "Gitlab-CI"
+            fi
+            TAG_NAME="v${VERSION}"
+            echo "TAG_NAME = $TAG_NAME"
+            if [ $(git tag -l "$TAG_NAME") ]; then
+                echo "Tag already exists"
+            else
+                # if we messed up we can delete the tag
+                # git push origin :refs/tags/$TAG_NAME
+                # and then tag with -f
+                git tag $TAG_NAME -m "tarball tag $VERSION"
+                git push --tags "https://git-push-token:${PUSH_TOKEN}@${URL_HOST}"
+            fi
+            ''')
+    ]
+
+    PUBLISH_ARTIFACTS = 1
+    if PUBLISH_ARTIFACTS:
+        # Add artifacts to the package registry
+        deploy_script += [
+            Yaml.CodeBlock(
+                fr'''
+                # https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
+                echo "CI_PROJECT_URL=$CI_PROJECT_URL"
+                echo "CI_PROJECT_ID=$CI_PROJECT_ID"
+                echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
+                echo "CI_PROJECT_NAMESPACE=$CI_PROJECT_NAMESPACE"
+                echo "CI_API_V4_URL=$CI_API_V4_URL"
+
+                export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+                echo "PROJECT_VERSION=$PROJECT_VERSION"
+
+                # --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" \
+                for FPATH in "{wheelhouse_dpath}"/*; do
+                    FNAME=$(basename $FPATH)
+                    echo $FNAME
+                    curl \
+                        --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+                        --upload-file $FPATH \
+                        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$CI_PROJECT_NAME/$PROJECT_VERSION/$FNAME"
+                done
+                ''')
+        ]
+    deploy_job['script'] = deploy_script
+    deploy_job = CommentedMap(deploy_job)
+    deploy_job.add_yaml_merge([(0, common_template)])
+    return deploy_job
