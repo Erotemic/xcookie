@@ -200,10 +200,13 @@ if __name__ == '__main__':
     setupkw_parts['python_requires'] = f"'>={min_python}'"
     setupkw_parts['classifiers'] = f'{classifier_text}'
 
+    package_data = {}
+    package_data[''] = ['requirements/*.txt']
     if self.config['typed']:
-        setupkw_parts['package_data'] = {
-            self.mod_name: ['py.typed', '*.pyi'],
-        }
+        package_data[self.mod_name] = ['py.typed', '*.pyi']
+
+    if package_data:
+        setupkw_parts['package_data'] = package_data
 
     if self.config['rel_mod_parent_dpath'] != '.':
         # https://codefellows.github.io/sea-python-401d4/lectures/python_packaging_1.html

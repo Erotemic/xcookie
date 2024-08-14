@@ -68,13 +68,34 @@ def make_install_and_test_wheel_parts(self,
 
     # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
     # get_modname_bash = f'python -c "{get_modname_python}"'
-
-    get_wheel_fpath_python = Yaml.CodeBlock(f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('{self.mod_name}*.whl'))[-1]).replace(chr(92), chr(47)))")
     # get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('{self.mod_name}*.whl'))[-1]).replace(r'\\', '/'))"
-    get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
 
-    get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
-    get_mod_version_bash = f'python -c "{get_mod_version_python}"'
+    # get_wheel_fpath_python = Yaml.CodeBlock(f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('{self.mod_name}*.whl'))[-1]).replace(chr(92), chr(47)))")
+    # get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
+    # get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
+    # get_mod_version_bash = f'python -c "{get_mod_version_python}"'
+
+    import ubelt as ub
+    get_wheel_fpath_bash = ub.codeblock(
+        f'''
+        python -c "if 1:
+            import pathlib
+            dist_dpath = pathlib.Path('{wheelhouse_dpath}')
+            candidates = list(dist_dpath.glob('{self.mod_name}*.whl'))
+            candidates += list(dist_dpath.glob('{self.mod_name}*.tar.gz'))
+            fpath = sorted(candidates)[-1]
+            print(str(fpath).replace(chr(92), chr(47)))
+        "
+        ''')
+    get_mod_version_bash = ub.codeblock(
+        '''
+        python -c "if 1:
+            from pkginfo import Wheel, SDist
+            fpath = '$WHEEL_FPATH'
+            cls = Wheel if fpath.endswith('.whl') else SDist
+            print(cls(fpath).version)
+        "
+        ''')
 
     # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath(f'{self.mod_name}'))"
     get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
@@ -111,9 +132,9 @@ def make_install_and_test_wheel_parts(self,
         f'export MOD_VERSION=$({get_mod_version_bash})',
         # 'echo "MOD_VERSION=$MOD_VERSION"',
     ] + special_install_lines + [
-        'echo "$WHEEL_FPATH=WHEEL_FPATH"',
-        'echo "$INSTALL_EXTRAS=INSTALL_EXTRAS"',
-        'echo "$MOD_VERSION=MOD_VERSION"',
+        'echo "WHEEL_FPATH=$WHEEL_FPATH"',
+        'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
+        'echo "MOD_VERSION=$MOD_VERSION"',
 
         # This helps but doesn't solve the problem.
         # https://github.com/Erotemic/xdoctest/pull/158#discussion_r1697092781
