@@ -250,19 +250,21 @@ class Actions:
 
 def build_github_actions(self):
     """
-    cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.lint
-    cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.build_and_test_sdist
-    cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.deploy
-    cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .
+    Ignore:
+        cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.lint
+        cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.build_and_test_sdist
+        cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.deploy
+        cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .
 
     Example:
         >>> from xcookie.builders.github_actions import *  # NOQA
         >>> from xcookie.main import XCookieConfig
         >>> from xcookie.main import TemplateApplier
-        >>> config = XCookieConfig(tags=['purepy'])
+        >>> config = XCookieConfig(tags=['purepy'], repo_name='mymod')
+        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-1:]
         >>> self = TemplateApplier(config)
         >>> text = build_github_actions(self)
-        >>> print(text)
+        >>> print(ub.highlight_code(text, 'yaml'))
     """
     jobs = Yaml.Dict({})
     if self.config.linter:
@@ -465,6 +467,9 @@ def build_and_test_sdist_job(self):
     supported_platform_info = get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     wheelhouse_dpath = 'wheelhouse'
+
+    build_parts = common_ci.make_build_sdist_parts(self, wheelhouse_dpath)
+
     job = {
         'name': 'Build sdist',
         'runs-on': 'ubuntu-latest',
@@ -487,13 +492,7 @@ def build_and_test_sdist_job(self):
                 'name': 'Build sdist',
                 # "run": "python setup.py sdist\n"
                 'shell': 'bash',
-                'run': [
-                    # "python -m pip install setuptools>=0.8 wheel",
-                    # "python -m pip wheel --wheel-dir wheelhouse .",
-                    'python -m pip install pip -U',
-                    'python -m pip install setuptools>=0.8 wheel build',
-                    f'python -m build --sdist --outdir {wheelhouse_dpath}',
-                ]
+                'run': build_parts['commands'],
             },
             {
                 'name': 'Install sdist',
@@ -551,7 +550,7 @@ def build_and_test_sdist_job(self):
                 'name': 'Upload sdist artifact',
                 'with': {
                     'name': 'sdist_wheels',
-                    'path': f"{wheelhouse_dpath}/*.tar.gz"
+                    'path': build_parts['artifact']
                 }
             })
         ]
@@ -771,7 +770,7 @@ def build_purewheel_job(self):
         },
         'steps': None,
     }
-    build_wheel_parts = common_ci.make_build_wheel_parts(self, wheelhouse_dpath)
+    build_parts = common_ci.make_build_wheel_parts(self, wheelhouse_dpath)
     job['steps'] = [
         Actions.checkout(),
         Actions.setup_qemu(sensible=True),
@@ -781,7 +780,7 @@ def build_purewheel_job(self):
         {
             'name': 'Build pure wheel',
             'shell': 'bash',
-            'run': build_wheel_parts['commands'],
+            'run': build_parts['commands'],
         },
         {
             'name': 'Show built files',
@@ -792,7 +791,7 @@ def build_purewheel_job(self):
             'name': 'Upload wheels artifact',
             'with': {
                 'name': 'wheels',
-                'path': build_wheel_parts['artifact'],
+                'path': build_parts['artifact'],
             }
         })
     ]
