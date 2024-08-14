@@ -400,6 +400,7 @@ def build_gpg_job(common_template, deploy_image, wheelhouse_dpath):
         artifacts:
             paths:
                 - {wheelhouse_dpath}/*.asc
+                - {wheelhouse_dpath}/*.tar.gz
                 - {wheelhouse_dpath}/*.whl
         only:
             refs:
@@ -434,7 +435,7 @@ def build_gpg_job(common_template, deploy_image, wheelhouse_dpath):
     gpgsign_job['script'].append(
         Yaml.CodeBlock(
             '''
-            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
+            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
             WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
             echo "$WHEEL_PATHS_STR"
             for WHEEL_PATH in "${WHEEL_PATHS[@]}"
@@ -459,7 +460,7 @@ def build_gpg_job(common_template, deploy_image, wheelhouse_dpath):
         # created
         gpgsign_job['artifacts']['paths'].append(f'{wheelhouse_dpath}/*.ots')
         gpgsign_job['script'].append('python -m pip install opentimestamps-client')
-        gpgsign_job['script'].append(f'ots stamp {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.asc')
+        gpgsign_job['script'].append(f'ots stamp {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.asc')
     return gpgsign_job
 
 
@@ -488,7 +489,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath):
     deploy_script += [
         Yaml.CodeBlock(
             '''
-            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl)
+            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
             WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
             source dev/secrets_configuration.sh
             TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}
@@ -497,7 +498,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath):
             for WHEEL_PATH in "${WHEEL_PATHS[@]}"
             do
                 twine check $WHEEL_PATH.asc $WHEEL_PATH
-                twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH.asc $WHEEL_PATH || echo "upload already exists"
+                twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH || echo "upload already exists"
             done
             ''')
     ]
