@@ -211,15 +211,14 @@ def make_purepy_ci_jobs(self):
     if 'cv2' in self.tags:
         loose_cv2 = ',headless'
         strict_cv2 = ',headless-strict'
-    install_extras = ub.udict({
+    all_install_extras = ub.udict({
         'minimal-loose'  : 'tests' + loose_cv2,
         'full-loose'     : 'tests,optional' + loose_cv2,
         'minimal-strict' : 'tests-strict,runtime-strict' + strict_cv2,
         'full-strict'    : 'tests-strict,runtime-strict,optional-strict' + strict_cv2,
     })
 
-    install_extras = ub.udict(install_extras) & self.config.test_variants
-
+    install_extras = ub.udict(all_install_extras) & self.config.test_variants
     for extra_key, extra in install_extras.items():
         if 'gdal' in self.tags:
             special_install_lines = [
@@ -248,28 +247,35 @@ def make_purepy_ci_jobs(self):
         test_templates[extra_key] = test
 
     python_images = KNOWN_CPYTHON_DOCKER_IMAGES
+    deploy_image = python_images['cp311']
 
     build_names = []
 
-    jobs = {}
-    opsys = 'linux'
-    arch = 'x86_64'
-    for pyver in self.config['ci_cpython_versions']:
+    if enable_sdist:
+        # Construct the explicit build / test job pairs
+        jobs = {}
+        opsys = 'linux'
+        arch = 'x86_64'
+        pyver = '3.11'
         cpver = 'cp' + pyver.replace('.', '')
-        if cpver in python_images:
+        build_name = 'build/sdist'
+        build_names.append(build_name)
+        build_job = {
+            'image': python_images[cpver],
+        }
+        build_job = CommentedMap(build_job)
+        build_job.add_yaml_merge([(0, build_sdist_template)])
+        jobs[build_name] = build_job
+
+        sdist_test_python_versions = [pyver]
+        sdist_extra_keys = [ub.peek(install_extras)]
+        for pyver in sdist_test_python_versions:
+            cpver = 'cp' + pyver.replace('.', '')
+            assert cpver in python_images
             swenv_key = f'{cpver}-{opsys}-{arch}'  # software environment key
-            build_name = f'build/{swenv_key}'
-            build_names.append(build_name)
-
-            build_job = {
-                'image': python_images[cpver],
-            }
-            build_job = CommentedMap(build_job)
-            build_job.add_yaml_merge([(0, build_wheel_template)])
-            jobs[build_name] = build_job
-
-            for extra_key, common_test_template in test_templates.items():
-                test_name = f'test/{extra_key}/{swenv_key}'
+            for extra_key in sdist_extra_keys:
+                common_test_template = test_templates[extra_key]
+                test_name = f'test/sdist/{extra_key}/{swenv_key}'
                 test_job = {
                     'image': python_images[cpver],
                     'needs': [
@@ -279,10 +285,39 @@ def make_purepy_ci_jobs(self):
                 test_job = CommentedMap(test_job)
                 test_job.add_yaml_merge([(0, common_test_template)])
                 jobs[test_name] = test_job
+        body.update(jobs)
 
-    body.update(jobs)
+    if enable_wheel:
+        # Construct the explicit build / test job pairs
+        jobs = {}
+        opsys = 'linux'
+        arch = 'x86_64'
+        for pyver in self.config['ci_cpython_versions']:
+            cpver = 'cp' + pyver.replace('.', '')
+            if cpver in python_images:
+                swenv_key = f'{cpver}-{opsys}-{arch}'  # software environment key
+                build_name = f'build/wheel/{swenv_key}'
+                build_names.append(build_name)
 
-    deploy_image = python_images['cp311']
+                build_job = {
+                    'image': python_images[cpver],
+                }
+                build_job = CommentedMap(build_job)
+                build_job.add_yaml_merge([(0, build_wheel_template)])
+                jobs[build_name] = build_job
+
+                for extra_key, common_test_template in test_templates.items():
+                    test_name = f'test/wheel/{extra_key}/{swenv_key}'
+                    test_job = {
+                        'image': python_images[cpver],
+                        'needs': [
+                            build_name,
+                        ]
+                    }
+                    test_job = CommentedMap(test_job)
+                    test_job.add_yaml_merge([(0, common_test_template)])
+                    jobs[test_name] = test_job
+        body.update(jobs)
 
     if enable_lint:
         lint_job = build_lint_job(common_template, deploy_image)
