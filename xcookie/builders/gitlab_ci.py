@@ -328,9 +328,9 @@ def make_purepy_ci_jobs(self):
         gpgsign_job['needs'] = [{'job': build_name, 'artifacts': True} for build_name in build_names]
         body['gpgsign/wheels'] = gpgsign_job
 
-    deploy = True
+    deploy = self.config['deploy']
     if deploy:
-        deploy_job = build_deploy_job(common_template, deploy_image, wheelhouse_dpath)
+        deploy_job = build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self)
         body['stages'].append('deploy')
         body['deploy/wheels'] = deploy_job
 
@@ -464,7 +464,7 @@ def build_gpg_job(common_template, deploy_image, wheelhouse_dpath):
     return gpgsign_job
 
 
-def build_deploy_job(common_template, deploy_image, wheelhouse_dpath):
+def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
     # import ruamel.yaml
     from ruamel.yaml.comments import CommentedMap
     from xcookie.util_yaml import Yaml
@@ -486,54 +486,56 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath):
         'pip install pyopenssl ndg-httpsclient pyasn1 requests[security] twine -U',
         f'ls {wheelhouse_dpath}',
     ]
-    deploy_script += [
-        Yaml.CodeBlock(
-            '''
-            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
-            WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
-            source dev/secrets_configuration.sh
-            TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}
-            TWINE_USERNAME=${!VARNAME_TWINE_USERNAME}
-            echo "$WHEEL_PATHS_STR"
-            for WHEEL_PATH in "${WHEEL_PATHS[@]}"
-            do
-                twine check $WHEEL_PATH.asc $WHEEL_PATH
-                twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH || echo "upload already exists"
-            done
-            ''')
-    ]
-    deploy_script += [
-        Yaml.CodeBlock(
-            r'''
-            # Have the server git-tag the release and push the tags
-            export VERSION=$(python -c "import setup; print(setup.VERSION)")
-            # do sed twice to handle the case of https clone with and without a read token
-            URL_HOST=$(git remote get-url origin | sed -e 's|https\?://.*@||g' | sed -e 's|https\?://||g' | sed -e 's|git@||g' | sed -e 's|:|/|g')
-            source dev/secrets_configuration.sh
-            CI_SECRET=${!VARNAME_CI_SECRET}
-            PUSH_TOKEN=${!VARNAME_PUSH_TOKEN}
-            echo "URL_HOST = $URL_HOST"
-            # A git config user name and email is required. Set if needed.
-            if [[ "$(git config user.email)" == "" ]]; then
-                git config user.email "ci@gitlab.org.com"
-                git config user.name "Gitlab-CI"
-            fi
-            TAG_NAME="v${VERSION}"
-            echo "TAG_NAME = $TAG_NAME"
-            if [ $(git tag -l "$TAG_NAME") ]; then
-                echo "Tag already exists"
-            else
-                # if we messed up we can delete the tag
-                # git push origin :refs/tags/$TAG_NAME
-                # and then tag with -f
-                git tag $TAG_NAME -m "tarball tag $VERSION"
-                git push --tags "https://git-push-token:${PUSH_TOKEN}@${URL_HOST}"
-            fi
-            ''')
-    ]
+    if self.config['deploy_pypi']:
+        deploy_script += [
+            Yaml.CodeBlock(
+                '''
+                WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
+                WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
+                source dev/secrets_configuration.sh
+                TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}
+                TWINE_USERNAME=${!VARNAME_TWINE_USERNAME}
+                echo "$WHEEL_PATHS_STR"
+                for WHEEL_PATH in "${WHEEL_PATHS[@]}"
+                do
+                    twine check $WHEEL_PATH.asc $WHEEL_PATH
+                    twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH || echo "upload already exists"
+                done
+                ''')
+        ]
 
-    PUBLISH_ARTIFACTS = 1
-    if PUBLISH_ARTIFACTS:
+    if self.config['deploy_tags']:
+        deploy_script += [
+            Yaml.CodeBlock(
+                r'''
+                # Have the server git-tag the release and push the tags
+                export VERSION=$(python -c "import setup; print(setup.VERSION)")
+                # do sed twice to handle the case of https clone with and without a read token
+                URL_HOST=$(git remote get-url origin | sed -e 's|https\?://.*@||g' | sed -e 's|https\?://||g' | sed -e 's|git@||g' | sed -e 's|:|/|g')
+                source dev/secrets_configuration.sh
+                CI_SECRET=${!VARNAME_CI_SECRET}
+                PUSH_TOKEN=${!VARNAME_PUSH_TOKEN}
+                echo "URL_HOST = $URL_HOST"
+                # A git config user name and email is required. Set if needed.
+                if [[ "$(git config user.email)" == "" ]]; then
+                    git config user.email "ci@gitlab.org.com"
+                    git config user.name "Gitlab-CI"
+                fi
+                TAG_NAME="v${VERSION}"
+                echo "TAG_NAME = $TAG_NAME"
+                if [ $(git tag -l "$TAG_NAME") ]; then
+                    echo "Tag already exists"
+                else
+                    # if we messed up we can delete the tag
+                    # git push origin :refs/tags/$TAG_NAME
+                    # and then tag with -f
+                    git tag $TAG_NAME -m "tarball tag $VERSION"
+                    git push --tags "https://git-push-token:${PUSH_TOKEN}@${URL_HOST}"
+                fi
+                ''')
+        ]
+
+    if self.config['deploy_artifacts']:
         # Add artifacts to the package registry
         deploy_script += [
             Yaml.CodeBlock(
