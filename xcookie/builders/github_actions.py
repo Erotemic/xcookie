@@ -1142,9 +1142,10 @@ def build_deploy(self, mode='live', needs=None):
                 f'{wheelhouse_dpath}/*.ots'
             )
 
-        run += [
-            f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
-        ]
+        if self.config['deploy_pypi']:
+            run += [
+                f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
+            ]
         # pypi doesn't care about GPG keys anymore, but we can keep them as artifacts.
         # run += [
         #     ('DO_GPG=True GPG_KEYID=$GPG_KEYID TWINE_REPOSITORY_URL=${TWINE_REPOSITORY_URL} '
@@ -1153,11 +1154,12 @@ def build_deploy(self, mode='live', needs=None):
         #      './publish.sh'),
         # ]
     else:
-        run = [
-            # 'pip install requests[security] twine pyopenssl ndg-httpsclient pyasn1 -U',
-            'pip install urllib3 requests[security] twine -U',
-            f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
-        ]
+        if self.config['deploy_pypi']:
+            run = [
+                # 'pip install requests[security] twine pyopenssl ndg-httpsclient pyasn1 -U',
+                'pip install urllib3 requests[security] twine -U',
+                f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
+            ]
 
     if 'nosrcdist' not in self.tags:
         sdist_wheel_steps = [
@@ -1167,7 +1169,7 @@ def build_deploy(self, mode='live', needs=None):
         sdist_wheel_steps = []
 
     job = {
-        'name': f"Uploading {mode.capitalize()} to PyPi",
+        'name': f"Deploy {mode.capitalize()}",
         'runs-on': 'ubuntu-latest',
         'if': condition,
         'needs': list(needs),
