@@ -103,6 +103,11 @@ class XCookieConfig(scfg.DataConfig):
 
         'rotate_secrets': scfg.Value('auto', help='If True will execute secret rotation', isflag=True),
         'refresh_docs': scfg.Value('auto', help='If True will refresh the docs', isflag=True),
+        'deploy': scfg.Value(True, help='If False, disable all deployment', isflag=True),
+        'deploy_pypi': scfg.Value(True, help='If False, disable pypi deployment', isflag=True),
+        'deploy_tags': scfg.Value(True, help='If False, disable tags deployment', isflag=True),
+        'deploy_artifacts': scfg.Value(True, help='If False, disable github/gitlab deployment', isflag=True),
+        'deploy_gitlab': scfg.Value(True, help='If False, disable gitlab deployment', isflag=True),
 
         'os': scfg.Value('all', help='all or any of win,osx,linux'),
 
