@@ -509,7 +509,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
             Yaml.CodeBlock(
                 r'''
                 # Have the server git-tag the release and push the tags
-                export VERSION=$(python -c "import setup; print(setup.VERSION)")
+                export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
                 # do sed twice to handle the case of https clone with and without a read token
                 URL_HOST=$(git remote get-url origin | sed -e 's|https\?://.*@||g' | sed -e 's|https\?://||g' | sed -e 's|git@||g' | sed -e 's|:|/|g')
                 source dev/secrets_configuration.sh
@@ -521,7 +521,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
                     git config user.email "ci@gitlab.org.com"
                     git config user.name "Gitlab-CI"
                 fi
-                TAG_NAME="v${VERSION}"
+                TAG_NAME="v${PROJECT_VERSION}"
                 echo "TAG_NAME = $TAG_NAME"
                 if [ $(git tag -l "$TAG_NAME") ]; then
                     echo "Tag already exists"
@@ -529,7 +529,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
                     # if we messed up we can delete the tag
                     # git push origin :refs/tags/$TAG_NAME
                     # and then tag with -f
-                    git tag $TAG_NAME -m "tarball tag $VERSION"
+                    git tag $TAG_NAME -m "tarball tag $PROJECT_VERSION"
                     git push --tags "https://git-push-token:${PUSH_TOKEN}@${URL_HOST}"
                 fi
                 ''')
@@ -541,26 +541,111 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
             Yaml.CodeBlock(
                 fr'''
                 # https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
-                echo "CI_PROJECT_URL=$CI_PROJECT_URL"
                 echo "CI_PROJECT_ID=$CI_PROJECT_ID"
                 echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
-                echo "CI_PROJECT_NAMESPACE=$CI_PROJECT_NAMESPACE"
                 echo "CI_API_V4_URL=$CI_API_V4_URL"
 
                 export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
                 echo "PROJECT_VERSION=$PROJECT_VERSION"
 
                 # --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" \
+
+                # We will loop over all of the assets in the wheelhouse (i.e.
+                # dist) and upload them to a package registery. We also store
+                # the links to the artifacts so we can attach them to a release
+                # page.
+                PACKAGE_ARTIFACT_ARRAY=()
                 for FPATH in "{wheelhouse_dpath}"/*; do
                     FNAME=$(basename $FPATH)
                     echo $FNAME
+                    PACKAGE_URL="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$CI_PROJECT_NAME/$PROJECT_VERSION/$FNAME"
                     curl \
                         --header "JOB-TOKEN: $CI_JOB_TOKEN" \
                         --upload-file $FPATH \
-                        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$CI_PROJECT_NAME/$PROJECT_VERSION/$FNAME"
+                        "$PACKAGE_URL"
+                    PACKAGE_ARTIFACT_ARRAY+=("$PACKAGE_URL")
                 done
+
                 ''')
         ]
+
+        # Create a gitlab release, but only if deploy artifacts AND tags are
+        # also on.
+        # https://docs.gitlab.com/ee/api/releases/#create-a-release
+        if self.config['deploy_tags']:
+            if 0:
+                __note__ = r"""
+                    To populate the CI variables and test localy
+                    This logic is quick and dirty, could be cleaned up
+
+                    load_secrets
+                    export PRIVATE_GITLAB_TOKEN=$(git_token_for https://gitlab.kitware.com)
+                    echo "PRIVATE_GITLAB_TOKEN=$PRIVATE_GITLAB_TOKEN"
+                    DEPLOY_REMOTE=origin
+                    GROUP_NAME=$(git remote get-url "$DEPLOY_REMOTE" | cut -d ":" -f 2 | cut -d "/" -f 1)
+                    HOST=https://$(git remote get-url "$DEPLOY_REMOTE" | cut -d "/" -f 1 | cut -d "@" -f 2 | cut -d ":" -f 1)
+
+                    CI_PROJECT_NAME=$(git remote get-url "$DEPLOY_REMOTE" | cut -d "/" -f 2 | cut -d "." -f 1)
+                    CI_API_V4_URL=$HOST/api/v4
+
+                    # TODO: better use of gitlab python api
+                    TMP_DIR=$(mktemp -d -t ci-XXXXXXXXXX)
+                    curl --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" "$HOST/api/v4/groups" > "$TMP_DIR/all_group_info"
+                    GROUP_ID=$(cat "$TMP_DIR/all_group_info" | jq ". | map(select(.name==\"$GROUP_NAME\")) | .[0].id")
+                    curl --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" "$HOST/api/v4/groups/$GROUP_ID" > "$TMP_DIR/group_info"
+                    CI_PROJECT_ID=$(cat "$TMP_DIR/group_info" | jq ".projects | map(select(.name==\"$CI_PROJECT_NAME\")) | .[0].id")
+                    echo "CI_PROJECT_ID=$CI_PROJECT_ID"
+                    echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
+                    echo "CI_API_V4_URL=$CI_API_V4_URL"
+
+                    export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+
+                    # Building this dummy variable requires some wheels built in the local dir
+                    export PACKAGE_ARTIFACT_ARRAY=()
+                    for FPATH in "dist"/*; do
+                        FNAME=$(basename $FPATH)
+                        PACKAGE_URL="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$CI_PROJECT_NAME/$PROJECT_VERSION/$FNAME"
+                        echo "$PACKAGE_URL"
+                        PACKAGE_ARTIFACT_ARRAY+=("$PACKAGE_URL")
+                    done
+                """
+                __note__
+            deploy_script += [
+                Yaml.CodeBlock(
+                    r'''
+                    export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+                    echo "PROJECT_VERSION=$PROJECT_VERSION"
+                    TAG_NAME="v$PROJECT_VERSION"
+
+                    # Construct the JSON for assets to attach to the release
+                    RELEASE_ASSET_JSON_LINKS=()
+                    for ASSET_URL in "${PACKAGE_ARTIFACT_ARRAY[@]}"; do
+                        ASSET_FNAME=$(basename $ASSET_URL)
+                        RELEASE_ASSET_JSON_LINKS+=("{\"name\": \"$ASSET_FNAME\", \"url\": \"$ASSET_URL\"},")
+                    done
+                    _ASSET_LINK_JSON="${RELEASE_ASSET_JSON_LINKS[@]}"
+                    # remove the trailing comma
+                    ASSET_LINK_JSON=${_ASSET_LINK_JSON::-1}
+                    echo "ASSET_LINK_JSON=$ASSET_LINK_JSON"
+
+                    # Build json describing the release
+                    RELEASE_DATA_JSON="{
+                        \"name\": \"Version $PROJECT_VERSION\",
+                        \"description\": \"Automated release of $CI_PROJECT_NAME version $PROJECT_VERSION\",
+                        \"tag_name\": \"$TAG_NAME\",
+                        \"assets\": {\"links\": [$ASSET_LINK_JSON]}
+                    }"
+                    echo "$RELEASE_DATA_JSON"
+
+                    curl \
+                        --header 'Content-Type: application/json' \
+                        --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" \
+                        --data "$RELEASE_DATA_JSON" \
+                        --request POST \
+                        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
+                    ''')
+            ]
+
     deploy_job['script'] = deploy_script
     deploy_job = CommentedMap(deploy_job)
     deploy_job.add_yaml_merge([(0, common_template)])
