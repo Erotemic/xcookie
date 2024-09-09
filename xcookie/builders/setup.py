@@ -201,7 +201,16 @@ if __name__ == '__main__':
     setupkw_parts['classifiers'] = f'{classifier_text}'
 
     package_data = {}
-    package_data[''] = ['requirements/*.txt']
+    package_data[''] = [
+        'requirements/*.txt'
+    ]
+    package_data[f'{self.mod_name}.rc.requirements'] = [
+        'docs.txt',
+        'optional.txt',
+        'runtime.txt',
+        'tests.txt',
+    ]
+
     if self.config['typed']:
         package_data[self.mod_name] = ['py.typed', '*.pyi']
 

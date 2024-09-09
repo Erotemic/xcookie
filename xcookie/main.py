@@ -290,9 +290,12 @@ class XCookieConfig(scfg.DataConfig):
             self['description'] = 'The {} module'.format(self['mod_name'])
 
         if self['supported_python_versions'] == 'auto':
+            # FIXME: need to resolve after all other info is loaded
             from xcookie.constants import KNOWN_PYTHON_VERSIONS
             min_python = str(self['min_python']).lower()
             max_python = str(self['max_python']).lower()
+            print(f'min_python={min_python}')
+            print(f'max_python={max_python}')
 
             def satisfies_minmax(v):
                 v = Version(v)
@@ -308,6 +311,8 @@ class XCookieConfig(scfg.DataConfig):
 
             python_versions = [v for v in KNOWN_PYTHON_VERSIONS
                                if satisfies_minmax(v)]
+            print(f'KNOWN_PYTHON_VERSIONS={KNOWN_PYTHON_VERSIONS}')
+            print(f'python_versions={python_versions}')
             self['supported_python_versions'] = python_versions
 
         if self['ci_cpython_versions'] == 'auto':
