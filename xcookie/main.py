@@ -374,6 +374,18 @@ class XCookieConfig(scfg.DataConfig):
         return ans
 
     @classmethod
+    def load_from_cli_and_pyproject(cls, cmdline=0, **kwargs):
+        # We load the config multiple times to get the right defaults.
+        # ideally we should fix this up
+        config = XCookieConfig.cli(cmdline=cmdline, data=kwargs)
+        # config.__post_init__()
+        settings = config._load_xcookie_pyproject_settings()
+        if settings:
+            print(f'settings={settings}')
+            config = XCookieConfig.cli(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
+        return config
+
+    @classmethod
     def main(cls, cmdline=0, **kwargs):
         """
         Main entry point
@@ -397,12 +409,12 @@ class XCookieConfig(scfg.DataConfig):
             cmdline = 0
         """
         # We load the config multiple times to get the right defaults.
-        config = XCookieConfig.cli(cmdline=cmdline, data=kwargs)
-        # config.__post_init__()
-        settings = config._load_xcookie_pyproject_settings()
-        if settings:
-            print(f'settings={settings}')
-            config = XCookieConfig.cli(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
+        config = XCookieConfig.load_from_cli_and_pyproject(cmdline=cmdline, **kwargs)
+        # # config.__post_init__()
+        # settings = config._load_xcookie_pyproject_settings()
+        # if settings:
+        #     print(f'settings={settings}')
+        #     config = XCookieConfig.cli(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
         # config.__post_init__()
 
         # import xdev
