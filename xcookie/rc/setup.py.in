@@ -97,7 +97,7 @@ def parse_requirements(fname='requirements.txt', versions=False):
 
     Args:
         fname (str): path to requirements file
-        versions (bool | str, default=False):
+        versions (bool | str):
             If true include version specs.
             If strict, then pin to the minimum version.
 
