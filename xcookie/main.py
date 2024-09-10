@@ -294,8 +294,6 @@ class XCookieConfig(scfg.DataConfig):
             from xcookie.constants import KNOWN_PYTHON_VERSIONS
             min_python = str(self['min_python']).lower()
             max_python = str(self['max_python']).lower()
-            print(f'min_python={min_python}')
-            print(f'max_python={max_python}')
 
             def satisfies_minmax(v):
                 v = Version(v)
@@ -311,8 +309,6 @@ class XCookieConfig(scfg.DataConfig):
 
             python_versions = [v for v in KNOWN_PYTHON_VERSIONS
                                if satisfies_minmax(v)]
-            print(f'KNOWN_PYTHON_VERSIONS={KNOWN_PYTHON_VERSIONS}')
-            print(f'python_versions={python_versions}')
             self['supported_python_versions'] = python_versions
 
         if self['ci_cpython_versions'] == 'auto':
@@ -590,11 +586,11 @@ class TemplateApplier:
 
             # {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh', 'perms': 'x'},
 
-            {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt',  'dynamic': 'build_requirements'},
-            {'template': 0, 'overwrite': 1, 'fname': 'requirements/graphics.txt', 'tags': 'cv2'},
-            {'template': 0, 'overwrite': 1, 'fname': 'requirements/headless.txt', 'tags': 'cv2'},
-            {'template': 0, 'overwrite': 1, 'fname': 'requirements/gdal.txt', 'tags': 'gdal'},
-            {'template': 0, 'overwrite': 1, 'fname': 'requirements/gdal-strict.txt', 'tags': 'gdal'},
+            {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt',  'dynamic': 'build_requirements_txt'},
+            {'template': 1, 'overwrite': 1, 'fname': 'requirements/graphics.txt', 'tags': 'cv2', 'dynamic': 'build_cv2_graphics_requirements_txt'},
+            {'template': 1, 'overwrite': 1, 'fname': 'requirements/headless.txt', 'tags': 'cv2', 'dynamic': 'build_cv2_headless_requirements_txt'},
+            {'template': 1, 'overwrite': 1, 'fname': 'requirements/gdal.txt', 'tags': 'gdal', 'dynamic': 'build_gdal_requirements_txt'},
+
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
@@ -950,6 +946,8 @@ class TemplateApplier:
                     raise SkipFile('file was disabled')
                 try:
                     stage_fpath.write_text(text)
+                    if 'x' in info.get('perms', ''):
+                        stage_fpath.chmod('+x')
                 except Exception:
                     print(f'text={text}')
                     raise
@@ -1152,7 +1150,7 @@ class TemplateApplier:
         print('stats = {}'.format(ub.urepr(stats, nl=2)))
         return stats, tasks
 
-    def build_requirements(self):
+    def build_requirements_txt(self):
         # existing = (self.repodir / 'requirements').ls()
         candidate_all_requirements = [
             'requirements/runtime.txt',
@@ -1317,6 +1315,78 @@ class TemplateApplier:
     def build_docs_requirements(self):
         from xcookie.builders import docs
         return docs.build_docs_requirements(self)
+
+    def _build_special_requirements(self, variant, version_defaults, header_lines):
+        """
+        Example:
+            >>> from xcookie.main import *  # NOQA
+            >>> dpath = ub.Path.appdir('xcookie/tests/test-stage').delete().ensuredir()
+            >>> kwargs = {
+            >>>     'repodir': dpath / 'testrepo',
+            >>>     'tags': ['gitlab', 'kitware', 'purepy', 'cv2'],
+            >>>     'rotate_secrets': False,
+            >>>     'is_new': False,
+            >>>     'min_python': '3.9',
+            >>>     'max_python': '3.12',
+            >>>     'interactive': False,
+            >>> }
+            >>> config = XCookieConfig.cli(cmdline=0, data=kwargs)
+            >>> print('config = {}'.format(ub.urepr(dict(config), nl=1)))
+            >>> self = TemplateApplier(config)
+            >>> print(chr(10) + 'headless.txt')
+            >>> print(self.build_cv2_headless_requirements_txt())
+            >>> print(chr(10) + 'gdal.txt')
+            >>> print(self.build_gdal_requirements_txt())
+        """
+        req_lines = ['# Generated dynamically via: ~/code/xcookie/xcookie/main.py::TemplateApplier._build_special_requirements']
+        req_lines.extend(header_lines)
+        max_pyver = Version(self.config['max_python'] or '4.0')
+        min_pyver = Version(self.config['min_python'])
+
+        for row in version_defaults:
+            lt = row['pyver_lt']
+            # lt = min(row['pyver_lt'], max_pyver) # FIXME, exclusive vs inclusive
+            ge = max(row['pyver_ge'], min_pyver)
+            skip = row['pyver_ge'] > max_pyver
+            skip |= row['pyver_lt'] < min_pyver
+            # print(lt, ge, skip, min_pyver, max_pyver, row)
+            if not skip:
+                req_lines.append(f'{variant}{row["version"]} ; python_version < {lt} and python_version >= {ge}')
+        req_text = '\n'.join(req_lines)
+        return req_text
+
+    def _build_cv2_requirements(self, variant):
+        header_lines = [
+            f'# xdev availpkg {variant}',
+            '# --prefer-binary',
+        ]
+        version_defaults = [
+            {'version': '>=4.5.4.58', 'pyver_ge': Version('3.10'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.4.15.55', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.9')},
+            {'version': '>=3.4.2.16', 'pyver_ge': Version('2.7'), 'pyver_lt': Version('3.6')},
+        ]
+        return self._build_special_requirements(variant, version_defaults, header_lines)
+
+    def build_cv2_headless_requirements_txt(self):
+        variant = 'opencv-python-headless'
+        return self._build_cv2_requirements(variant)
+
+    def build_cv2_graphics_requirements_txt(self):
+        variant = 'opencv-python'
+        return self._build_cv2_requirements(variant)
+
+    def build_gdal_requirements_txt(self):
+        # TODO: make more dynamic
+        variant = 'GDAL'
+        header_lines = [
+            '--find-links https://girder.github.io/large_image_wheels',
+        ]
+        version_defaults = [
+            {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.5.2', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.12')},
+            {'version': '>=3.4.1', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
+        ]
+        return self._build_special_requirements(variant, version_defaults, header_lines)
 
     def build_run_doctests(self):
         return ub.codeblock(

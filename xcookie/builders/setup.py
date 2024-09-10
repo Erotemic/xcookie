@@ -108,14 +108,13 @@ def build_setup(self):
 
     extras = ['runtime', 'tests', 'optional']
 
-    parts.append(ub.identity(
+    parts.append(ub.codeblock(
         '''
-if __name__ == '__main__':
-    setupkw = {}
+        if __name__ == '__main__':
+            setupkw = {}
 
-    setupkw['install_requires'] = parse_requirements('requirements/runtime.txt', versions='loose')
-    setupkw['extras_require'] = {
-
+            setupkw['install_requires'] = parse_requirements('requirements/runtime.txt', versions='loose')
+            setupkw['extras_require'] = {
         '''))
     # 'all': parse_requirements('requirements.txt', versions='loose'),
     # 'tests': parse_requirements('requirements/tests.txt', versions='loose'),
@@ -201,15 +200,16 @@ if __name__ == '__main__':
     setupkw_parts['classifiers'] = f'{classifier_text}'
 
     package_data = {}
+
     package_data[''] = [
         'requirements/*.txt'
     ]
-    package_data[f'{self.mod_name}.rc.requirements'] = [
-        'docs.txt',
-        'optional.txt',
-        'runtime.txt',
-        'tests.txt',
-    ]
+    # HACK: need to determine if we have the modname.rc structure or not
+    # for now just check if it exists, which wont work the first time.
+    has_rc_requirements = (self.mod_dpath / 'rc/requirements').exists()
+    if has_rc_requirements:
+        setupkw_parts['include_package_data'] = True
+        package_data[f'{self.mod_name}.rc.requirements'] = ['*.txt']
 
     if self.config['typed']:
         package_data[self.mod_name] = ['py.typed', '*.pyi']
