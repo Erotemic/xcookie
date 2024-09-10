@@ -186,7 +186,8 @@ def parse_requirements(fname='requirements.txt', versions=False):
                     if plat_deps is not None:
                         parts.append(';' + plat_deps)
                 item = ''.join(parts)
-                yield item
+                if item:
+                    yield item
 
     packages = list(gen_packages_items())
     return packages

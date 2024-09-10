@@ -548,19 +548,25 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
                 export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
                 echo "PROJECT_VERSION=$PROJECT_VERSION"
 
-                # --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" \
+                # If running on CI use CI authentication, otherwise
+                # assume we developer authentication available.
+                if [[ -z "$CI_JOB_TOKEN" ]]; then
+                    AUTH_HEADER="PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN"
+                else
+                    AUTH_HEADER="JOB-TOKEN: $CI_JOB_TOKEN"
+                fi
 
-                # We will loop over all of the assets in the wheelhouse (i.e.
-                # dist) and upload them to a package registery. We also store
-                # the links to the artifacts so we can attach them to a release
+                # Loop over all of the assets in the wheelhouse (i.e.  dist)
+                # and upload them to a package registery. We also store the
+                # links to the artifacts so we can attach them to a release
                 # page.
                 PACKAGE_ARTIFACT_ARRAY=()
                 for FPATH in "{wheelhouse_dpath}"/*; do
                     FNAME=$(basename $FPATH)
-                    echo $FNAME
+                    echo "Upload artifact: $FNAME"
                     PACKAGE_URL="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$CI_PROJECT_NAME/$PROJECT_VERSION/$FNAME"
                     curl \
-                        --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+                        --header "$AUTH_HEADER" \
                         --upload-file $FPATH \
                         "$PACKAGE_URL"
                     PACKAGE_ARTIFACT_ARRAY+=("$PACKAGE_URL")
@@ -600,14 +606,19 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
 
                     export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
 
-                    # Building this dummy variable requires some wheels built in the local dir
+                    # Building this dummy variable requires some wheels built
+                    # in the local dir, the next step wont use them directly
+                    # it will just use their names, and only point to the ones
+                    # in the package registry.
+                    DO_UPLOAD=0 DO_TAG=0 ./publish.sh
+
                     export PACKAGE_ARTIFACT_ARRAY=()
                     for FPATH in "dist"/*; do
                         FNAME=$(basename $FPATH)
                         PACKAGE_URL="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$CI_PROJECT_NAME/$PROJECT_VERSION/$FNAME"
-                        echo "$PACKAGE_URL"
                         PACKAGE_ARTIFACT_ARRAY+=("$PACKAGE_URL")
                     done
+                    echo "PACKAGE_ARTIFACT_ARRAY=${PACKAGE_ARTIFACT_ARRAY[@]}"
                 """
                 __note__
             deploy_script += [
@@ -637,9 +648,17 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
                     }"
                     echo "$RELEASE_DATA_JSON"
 
+                    # If running on CI use CI authentication, otherwise
+                    # assume we developer authentication available.
+                    if [[ -z "${CI_JOB_TOKEN}" ]]; then
+                        AUTH_HEADER="PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN"
+                    else
+                        AUTH_HEADER="JOB-TOKEN: $CI_JOB_TOKEN"
+                    fi
+
                     curl \
                         --header 'Content-Type: application/json' \
-                        --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" \
+                        --header "$AUTH_HEADER" \
                         --data "$RELEASE_DATA_JSON" \
                         --request POST \
                         "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
