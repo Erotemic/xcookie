@@ -1349,9 +1349,9 @@ class TemplateApplier:
             ge = max(row['pyver_ge'], min_pyver)
             skip = row['pyver_ge'] > max_pyver
             skip |= row['pyver_lt'] < min_pyver
-            # print(lt, ge, skip, min_pyver, max_pyver, row)
+            print(lt, ge, skip, min_pyver, max_pyver, row)
             if not skip:
-                req_lines.append(f'{variant}{row["version"]} ; python_version < {lt} and python_version >= {ge}')
+                req_lines.append(f"{variant}{row['version']} ; python_version < '{lt}' and python_version >= '{ge}'")
         req_text = '\n'.join(req_lines)
         return req_text
 
@@ -1361,9 +1361,11 @@ class TemplateApplier:
             '# --prefer-binary',
         ]
         version_defaults = [
-            {'version': '>=4.5.4.58', 'pyver_ge': Version('3.10'), 'pyver_lt': Version('4.0')},
-            {'version': '>=3.4.15.55', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.9')},
-            {'version': '>=3.4.2.16', 'pyver_ge': Version('2.7'), 'pyver_lt': Version('3.6')},
+            {'version': '>=4.5.5.64', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('4.0')},
+            {'version': '>=4.5.4.58', 'pyver_ge': Version('3.10'), 'pyver_lt': Version('3.11')},
+            {'version': '>=3.4.15.55', 'pyver_ge': Version('3.7'), 'pyver_lt': Version('3.10')},
+            {'version': '>=3.4.13.47', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.7')},
+            {'version': '>=3.4.2.16', 'pyver_ge': Version('2.7'), 'pyver_lt': Version('3.5')},
         ]
         return self._build_special_requirements(variant, version_defaults, header_lines)
 
@@ -1544,6 +1546,8 @@ class GitURL(str):
     """
     Represents a url to a git repo and can parse info about / modify the
     protocol
+
+    TODO: can use git-well as a helper here.
 
     Example:
         >>> from git_well.git_remote_protocol import *  # NOQA
