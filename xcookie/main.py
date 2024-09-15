@@ -626,7 +626,7 @@ class TemplateApplier:
         ]
 
         # The user specified some files to not overwrite by default
-        skip_overwrite = set(self.config['skip_overwrite'])
+        skip_overwrite = set(self.config['skip_overwrite'] or [])
         if skip_overwrite:
             for item in self.template_infos:
                 if item['fname'] in skip_overwrite:
