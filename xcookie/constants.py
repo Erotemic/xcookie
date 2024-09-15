@@ -1,6 +1,6 @@
 KNOWN_PYTHON_VERSIONS = [
     '2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', '3.12',
-    # '3.13',
+    '3.13',
 ]
 
 DEV_PYTHON_VERSIONS = [
@@ -10,7 +10,7 @@ DEV_PYTHON_VERSIONS = [
 
 KNOWN_CPYTHON_DOCKER_IMAGES = {
     # TODO allow rc?
-    # 'cp313': 'python:3.13.0rc2',
+    'cp313': 'python:3.13.0rc2',
     'cp312': 'python:3.12',
     'cp311': 'python:3.11',
     'cp310': 'python:3.10',
@@ -19,3 +19,24 @@ KNOWN_CPYTHON_DOCKER_IMAGES = {
     'cp37': 'python:3.7',
     'cp36': 'python:3.6',
 }
+
+# Github Actions supported versions
+# https://github.com/actions/python-versions
+# https://github.com/actions/python-versions/blob/main/versions-manifest.json
+
+# TODO: make a table of details about each version
+# https://devguide.python.org/versions/
+KNOWN_PYTHON_VERSION_INFO = [
+    {'version': '3.14', 'end_of_life': '2030-10'},
+    {'version': '3.13', 'end_of_life': '2029-10', 'github_action_version': '3.13.0-rc.2', 'is_prerelease': True},
+    {'version': '3.12', 'end_of_life': '2028-10'},
+    {'version': '3.11', 'end_of_life': '2027-10'},
+    {'version': '3.10', 'end_of_life': '2026-10'},
+    {'version': '3.9', 'end_of_life': '2025-10'},
+    {'version': '3.8', 'end_of_life': '2024-10'},
+    {'version': '3.7', 'end_of_life': '2023-06-27'},
+    {'version': '3.6', 'end_of_life': '2021-12-23'},
+    {'version': '3.5', 'end_of_life': '2020-09-30'},
+    {'version': '3.4', 'end_of_life': '2019-03-18'},
+    {'version': '2.7', 'end_of_life': '2020-01-01'},
+]

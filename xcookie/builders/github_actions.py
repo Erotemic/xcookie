@@ -131,7 +131,7 @@ class Actions:
     @classmethod
     def upload_artifact(cls, *args, **kwargs):
         return cls.action({
-            'uses': 'actions/upload-artifact@v4.3.1'
+            'uses': 'actions/upload-artifact@v4.4.0'
             # Rollback to 3.x due to
             # https://github.com/actions/upload-artifact/issues/478
             # todo: migrate
@@ -142,7 +142,7 @@ class Actions:
     @classmethod
     def download_artifact(cls, *args, **kwargs):
         return cls.action({
-            'uses': 'actions/download-artifact@v4.1.2',
+            'uses': 'actions/download-artifact@v4.1.8',
             # 'uses': 'actions/download-artifact@v2.1.1',
         }, *args, **kwargs)
 
@@ -719,6 +719,26 @@ def get_supported_platform_info(self):
     # Choose which Python version will be the "main" one we use for version
     # agnostic jobs.
     main_python_version = supported_py_versions[-1]
+    from xcookie import constants
+    # import kwutil
+    INFO_LUT = {row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO}
+    for pyver in supported_py_versions[::-1]:
+        info = INFO_LUT[pyver]
+        if info.get('is_prerelease'):
+            continue
+        main_python_version = pyver
+        break
+
+    # TODO: find a nicer way to codify the idea that the supported python
+    # version needs to map to something github actions knows about, which could
+    # be a prerelease version.
+    cpython_versions_non34_ = []
+    for pyver in cpython_versions_non34:
+        info = INFO_LUT[pyver]
+        if 'github_action_version' in info:
+            pyver = info['github_action_version']
+        cpython_versions_non34_.append(pyver)
+    cpython_versions_non34 = cpython_versions_non34_
 
     extras_versions_templates = {
         'full-loose': self.config['ci_versions_full_loose'],
