@@ -131,19 +131,19 @@ class Actions:
     @classmethod
     def upload_artifact(cls, *args, **kwargs):
         return cls.action({
-            # 'uses': 'actions/upload-artifact@v4.3.1'
+            'uses': 'actions/upload-artifact@v4.3.1'
             # Rollback to 3.x due to
             # https://github.com/actions/upload-artifact/issues/478
             # todo: migrate
             # https://github.com/actions/upload-artifact/blob/main/docs/MIGRATION.md#multiple-uploads-to-the-same-named-artifact
-            'uses': 'actions/upload-artifact@v3.1.3'
+            # 'uses': 'actions/upload-artifact@v3.1.3'
         }, *args, **kwargs)
 
     @classmethod
     def download_artifact(cls, *args, **kwargs):
         return cls.action({
-            # 'uses': 'actions/download-artifact@v4.1.2',
-            'uses': 'actions/download-artifact@v2.1.1',
+            'uses': 'actions/download-artifact@v4.1.2',
+            # 'uses': 'actions/download-artifact@v2.1.1',
         }, *args, **kwargs)
 
     @classmethod
@@ -244,7 +244,8 @@ class Actions:
         return cls.action({
             'name': 'Build binary wheels',
             # 'uses': 'pypa/cibuildwheel@v2.16.2',
-            'uses': 'pypa/cibuildwheel@v2.17.0',
+            # 'uses': 'pypa/cibuildwheel@v2.17.0',
+            'uses': 'pypa/cibuildwheel@v2.21.0',
         }, *args, **kwargs)
 
 
@@ -680,7 +681,7 @@ def build_binpy_wheels_job(self):
         Actions.upload_artifact({
             'name': 'Upload wheels artifact',
             'with': {
-                'name': 'wheels',
+                'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
                 'path': f"./wheelhouse/{self.mod_name}*.whl"
             }
         })
@@ -790,7 +791,8 @@ def build_purewheel_job(self):
         Actions.upload_artifact({
             'name': 'Upload wheels artifact',
             'with': {
-                'name': 'wheels',
+                # 'name': 'wheels',
+                'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
                 'path': build_parts['artifact'],
             }
         })
@@ -961,7 +963,14 @@ def test_wheels_job(self, needs=None):
     action_steps += [
         Actions.setup_qemu(sensible=True),
         Actions.setup_python({'with': {'python-version': '${{ matrix.python-version }}'}}),
-        Actions.download_artifact({'name': 'Download wheels', 'with': {'name': 'wheels', 'path': 'wheelhouse'}}),
+        Actions.download_artifact({
+            'name': 'Download wheels',
+            'with': {
+                # 'name': 'wheels',
+                'pattern': 'wheels-*',
+                'merge-multiple': True,
+                'path': 'wheelhouse'
+            }}),
     ]
 
     workspace_dname = 'testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}'
@@ -1163,7 +1172,12 @@ def build_deploy(self, mode='live', needs=None):
 
     if 'nosrcdist' not in self.tags:
         sdist_wheel_steps = [
-            Actions.download_artifact({'name': 'Download sdist', 'with': {'name': 'sdist_wheels', 'path': wheelhouse_dpath}})
+            Actions.download_artifact({
+                'name': 'Download sdist',
+                'with': {
+                    'name': 'sdist_wheels',
+                    'path': wheelhouse_dpath
+                }})
         ]
     else:
         sdist_wheel_steps = []
@@ -1175,7 +1189,14 @@ def build_deploy(self, mode='live', needs=None):
         'needs': list(needs),
         'steps': [
             Actions.checkout(name='Checkout source'),
-            Actions.download_artifact({'name': 'Download wheels', 'with': {'name': 'wheels', 'path': wheelhouse_dpath}}),
+            Actions.download_artifact({
+                'name': 'Download wheels',
+                'with': {
+                    # 'name': 'wheels',
+                    'pattern': 'wheels-*',
+                    'merge-multiple': True,
+                    'path': wheelhouse_dpath
+                }}),
         ] + sdist_wheel_steps + [
             {'name': 'Show files to upload', 'shell': 'bash', 'run': f'ls -la {wheelhouse_dpath}'},
             # TODO: it might make sense to make this a script that is invoked
@@ -1287,7 +1308,10 @@ def build_github_release(self, needs=None):
         'needs': list(needs),
         'steps': [
             Actions.checkout(name='Checkout source'),
-            Actions.download_artifact({'name': 'Download artifacts', 'with': {'name': 'deploy_artifacts', 'path': 'wheelhouse'}}),
+            Actions.download_artifact({'name': 'Download artifacts', 'with': {
+                'name': 'deploy_artifacts',
+                'path': 'wheelhouse'
+            }}),
             {'name': 'Show files to release', 'shell': 'bash', 'run': 'ls -la wheelhouse'},
             write_release_notes_action,
             tag_action,

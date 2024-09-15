@@ -200,6 +200,8 @@ class XCookieConfig(scfg.DataConfig):
 
         'linter': scfg.Value(True, help=ub.paragraph('if true enables lint checks in CI')),
 
+        'skip_overwrite': scfg.Value(None, help=ub.paragraph('list of targets to not regenerate by default')),
+
         'render_doc_images': scfg.Value(False, help=ub.paragraph(
             '''
             if true, adds kwplot as a dependency to build docs and enable rendering images from doctests.
@@ -622,6 +624,14 @@ class TemplateApplier:
              'input_fname': rc.resource_fpath('run_tests.purepy.py.in')},
 
         ]
+
+        # The user specified some files to not overwrite by default
+        skip_overwrite = set(self.config['skip_overwrite'])
+        if skip_overwrite:
+            for item in self.template_infos:
+                if item['fname'] in skip_overwrite:
+                    item['overwrite'] = 0
+
         if 0:
             # Checker and help autopopulate
             template_contents = []
