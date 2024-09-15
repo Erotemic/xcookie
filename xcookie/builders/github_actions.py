@@ -598,9 +598,12 @@ def build_binpy_wheels_job(self):
         explicitly here.
         '''), indent=8)
 
-    if 'osx' in self.config['os']:
-        # os_list.append('macos-14')
-        os_list.append('macos-13')
+    # Seems like we dont need explicit macos-13
+    # and it could produce issues:
+    # https://github.com/pypa/gh-action-pypi-publish/issues/215
+    # if 'osx' in self.config['os']:
+    #     # os_list.append('macos-14')
+    #     os_list.append('macos-13')
 
     matrix['os'] = os_list
 
@@ -713,6 +716,10 @@ def get_supported_platform_info(self):
     if len(supported_py_versions) == 0:
         raise Exception('no supported python versions?')
 
+    # Choose which Python version will be the "main" one we use for version
+    # agnostic jobs.
+    main_python_version = supported_py_versions[-1]
+
     extras_versions_templates = {
         'full-loose': self.config['ci_versions_full_loose'],
         'full-strict': self.config['ci_versions_full_strict'],
@@ -739,10 +746,7 @@ def get_supported_platform_info(self):
         'pypy_versions': pypy_versions,
         'min_python_version': supported_py_versions[0],
         'max_python_version': supported_py_versions[-1],
-        # Choose which Python version will be the "main" one we use for version
-        # agnostic jobs.
-        # 'main_python_version': supported_py_versions[-2:][0],
-        'main_python_version': supported_py_versions[-1],
+        'main_python_version': main_python_version,
         'install_extra_versions': extras_versions,
     }
     return supported_platform_info
@@ -1182,37 +1186,45 @@ def build_deploy(self, mode='live', needs=None):
     else:
         sdist_wheel_steps = []
 
+    deploy_steps = [
+        Actions.checkout(name='Checkout source'),
+        Actions.download_artifact({
+            'name': 'Download wheels',
+            'with': {
+                # 'name': 'wheels',
+                'pattern': 'wheels-*',
+                'merge-multiple': True,
+                'path': wheelhouse_dpath
+            }}),
+    ]
+    deploy_steps += sdist_wheel_steps
+    deploy_steps += [
+        {
+            'name': 'Show files to upload',
+            'shell': 'bash',
+            'run': f'ls -la {wheelhouse_dpath}'
+        },
+        # TODO: it might make sense to make this a script that is invoked
+        {
+            'name': 'Sign and Publish' if self.config['enable_gpg'] else 'Publish',
+            'env': env,
+            'run': run,
+        },
+        Actions.upload_artifact({
+            'name': 'Upload deploy artifacts',
+            'with': {
+                'name': 'deploy_artifacts',
+                'path': chr(10).join(artifact_globs)
+            }
+        })
+    ]
+
     job = {
         'name': f"Deploy {mode.capitalize()}",
         'runs-on': 'ubuntu-latest',
         'if': condition,
-        'needs': list(needs),
-        'steps': [
-            Actions.checkout(name='Checkout source'),
-            Actions.download_artifact({
-                'name': 'Download wheels',
-                'with': {
-                    # 'name': 'wheels',
-                    'pattern': 'wheels-*',
-                    'merge-multiple': True,
-                    'path': wheelhouse_dpath
-                }}),
-        ] + sdist_wheel_steps + [
-            {'name': 'Show files to upload', 'shell': 'bash', 'run': f'ls -la {wheelhouse_dpath}'},
-            # TODO: it might make sense to make this a script that is invoked
-            {
-                'name': 'Sign and Publish' if self.config['enable_gpg'] else 'Publish',
-                'env': env,
-                'run': run,
-            },
-            Actions.upload_artifact({
-                'name': 'Upload deploy artifacts',
-                'with': {
-                    'name': 'deploy_artifacts',
-                    'path': chr(10).join(artifact_globs)
-                }
-            })
-        ]
+        'needs': sorted(needs),
+        'steps': deploy_steps,
     }
     return job
 
@@ -1228,7 +1240,7 @@ def build_deploy(self, mode='live', needs=None):
 #         'if': condition,
 #         'runs-on': 'ubuntu-latest',
 #         'permissions': {'contents': 'write'},
-#         'needs': list(needs),
+#         'needs': sorted(needs),
 #         'steps': [
 #             Actions.checkout(name='Checkout source'),
 #             Actions.download_artifact({'name': 'Download artifacts', 'with': {'name': 'deploy_artifacts', 'path': 'wheelhouse'}}),
@@ -1305,7 +1317,7 @@ def build_github_release(self, needs=None):
         'if': condition,
         'runs-on': 'ubuntu-latest',
         'permissions': {'contents': 'write'},
-        'needs': list(needs),
+        'needs': sorted(needs),
         'steps': [
             Actions.checkout(name='Checkout source'),
             Actions.download_artifact({'name': 'Download artifacts', 'with': {

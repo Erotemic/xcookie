@@ -200,7 +200,7 @@ class XCookieConfig(scfg.DataConfig):
 
         'linter': scfg.Value(True, help=ub.paragraph('if true enables lint checks in CI')),
 
-        'skip_overwrite': scfg.Value(None, help=ub.paragraph('list of targets to not regenerate by default')),
+        'skip_autogen': scfg.Value(None, help=ub.paragraph('list of targets to not auto-generate by default')),
 
         'render_doc_images': scfg.Value(False, help=ub.paragraph(
             '''
@@ -626,11 +626,12 @@ class TemplateApplier:
         ]
 
         # The user specified some files to not overwrite by default
-        skip_overwrite = set(self.config['skip_overwrite'] or [])
-        if skip_overwrite:
+        skip_autogen = set(self.config['skip_autogen'] or [])
+        if skip_autogen:
             for item in self.template_infos:
-                if item['fname'] in skip_overwrite:
+                if item['fname'] in skip_autogen:
                     item['overwrite'] = 0
+                    item['skip'] = 1
 
         if 0:
             # Checker and help autopopulate
@@ -1107,6 +1108,8 @@ class TemplateApplier:
         for info in self.staging_infos:
             stage_fpath = info['stage_fpath']
             repo_fpath = info['repo_fpath']
+            if info.get('skip', False):
+                continue
             if not repo_fpath.exists():
                 if stage_fpath.is_dir():
                     tasks['mkdir'].append(repo_fpath)
