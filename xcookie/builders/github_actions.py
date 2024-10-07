@@ -572,7 +572,10 @@ def build_binpy_wheels_job(self):
     main_python_version = supported_platform_info['main_python_version']
 
     pyproj_config = self.config._load_pyproject_config()
-    explicit_skips = ' ' + pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('skip', '')
+    cibw_skip = pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('skip', '')
+    if isinstance(cibw_skip, list):
+        cibw_skip = ' '.join(cibw_skip)
+    explicit_skips = ' ' + cibw_skip
     print(f'explicit_skips={explicit_skips}')
 
     # Fixme: how to get this working again?
