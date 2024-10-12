@@ -10,7 +10,8 @@ DEV_PYTHON_VERSIONS = [
 
 KNOWN_CPYTHON_DOCKER_IMAGES = {
     # TODO allow rc?
-    'cp313': 'python:3.13.0rc2',
+    # 'cp314': 'python:3.14.0-alpha.0',
+    'cp313': 'python:3.13',
     'cp312': 'python:3.12',
     'cp311': 'python:3.11',
     'cp310': 'python:3.10',
@@ -27,8 +28,8 @@ KNOWN_CPYTHON_DOCKER_IMAGES = {
 # TODO: make a table of details about each version
 # https://devguide.python.org/versions/
 KNOWN_PYTHON_VERSION_INFO = [
-    {'version': '3.14', 'end_of_life': '2030-10'},
-    {'version': '3.13', 'end_of_life': '2029-10', 'github_action_version': '3.13.0-rc.2', 'is_prerelease': True},
+    {'version': '3.14', 'end_of_life': '2030-10', 'github_action_version': '3.14.0-alpha.0', 'is_prerelease': True},
+    {'version': '3.13', 'end_of_life': '2029-10'},
     {'version': '3.12', 'end_of_life': '2028-10'},
     {'version': '3.11', 'end_of_life': '2027-10'},
     {'version': '3.10', 'end_of_life': '2026-10'},
