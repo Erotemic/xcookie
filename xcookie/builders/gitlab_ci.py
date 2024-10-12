@@ -334,13 +334,19 @@ def make_purepy_ci_jobs(self):
         body['stages'].append('deploy')
         body['deploy/wheels'] = deploy_job
 
-    body_text = ruamel.yaml.round_trip_dump(body, Dumper=ruamel.yaml.RoundTripDumper)
+    # 0.17.32
+    # body_text = ruamel.yaml.round_trip_dump(body, Dumper=ruamel.yaml.RoundTripDumper)
+    # body = ruamel.yaml.round_trip_load(body_text)
 
-    body = ruamel.yaml.round_trip_load(body_text)
+    body_text = Yaml.dumps(body)
+    body = Yaml.loads(body_text)
+
     body['stages'].yaml_set_start_comment('TEMPLATES')
     # body.yaml_set_comment_before_after_key('stages', 'before test1 (top level)', after='before test2\n\n')
     # body.yaml_add_eol_comment('STAGE COMMENT', key='stages')
-    body_text = ruamel.yaml.round_trip_dump(body, Dumper=ruamel.yaml.RoundTripDumper)
+
+    # body_text = ruamel.yaml.round_trip_dump(body, Dumper=ruamel.yaml.RoundTripDumper)
+    body_text = Yaml.dumps(body)
 
     header = ub.codeblock(
         '''
