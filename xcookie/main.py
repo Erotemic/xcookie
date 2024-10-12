@@ -527,7 +527,10 @@ class TemplateApplier:
             # {'template': 1, 'overwrite': False, 'fname': '.circleci/config.yml'},
             # {'template': 1, 'overwrite': False, 'fname': '.travis.yml'},
 
-            {'template': 0, 'overwrite': 1, 'fname': 'dev/setup_secrets.sh', 'enabled': self.config['enable_gpg']},
+            {'template': 0, 'overwrite': 1, 'fname': 'dev/setup_secrets.sh',
+             'enabled': self.config['enable_gpg'],
+             'input_fname': rc.resource_fpath('setup_secrets.sh.in')
+             },
 
             {'template': 0, 'overwrite': 0, 'fname': '.gitignore'},
             # {'template': 1, 'overwrite': 1, 'fname': '.coveragerc'},
