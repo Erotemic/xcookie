@@ -101,7 +101,7 @@ class Actions:
             https://github.com/codecov/codecov-action
         """
         return cls.action({
-            'uses': 'codecov/codecov-action@v4.0.1'
+            'uses': 'codecov/codecov-action@v4.5.0'
         }, *args, **kwargs)
 
     @classmethod
