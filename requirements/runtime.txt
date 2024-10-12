@@ -22,8 +22,11 @@ black>=22.1.0    ;                            python_version >= '3.6.2'    # Pyt
 
 packaging>=21.3
 
-PyYAML>=6.0
-ruamel.yaml >= 0.17.21
+# PyYAML>=6.0
+# ruamel.yaml >= 0.17.21
+ruamel.yaml>=0.17.22
+PyYAML>=6.0.1     ; python_version < '4.0'  and python_version >= '3.12'    # Python 3.12+
+PyYAML>=6.0       ; python_version < '3.12'                                 # Python 3.6 - 3.11
 
 argcomplete>=1.0
 
