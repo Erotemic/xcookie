@@ -557,7 +557,8 @@ class TemplateApplier:
             # {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__main__.py'},
             {'source': 'dynamic', 'overwrite': 0, 'fname': 'tests/test_import.py'},
 
-            {'template': 0, 'overwrite': 1, 'fname': '.github/dependabot.yml', 'tags': 'github'},
+            # TODO: re-add using some input_path
+            # {'template': 0, 'overwrite': 1, 'fname': '.github/dependabot.yml', 'tags': 'github'},
 
             # {'template': 0, 'overwrite': 1,
             #  'tags': 'binpy,github',
