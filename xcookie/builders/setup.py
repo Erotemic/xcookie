@@ -24,7 +24,7 @@ def build_setup(self):
         elif p.startswith('### xcookie: -'):
             assert key in lut
         else:
-            assert key not in lut, f'{key=}'
+            assert key not in lut, f'key={key}'
             lut[key] = p
 
     parts = []

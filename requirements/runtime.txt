@@ -52,3 +52,5 @@ sphinx-autoapi>=1.8.4
 Pygments>=2.12.0
 myst_parser>=0.18.0
 sphinx-reredirects>=0.0.1
+
+tabulate>=0.9.0
