@@ -8,7 +8,7 @@ url = "https://github.com/Erotemic/xcookie"
 description = "The xcookie cookie-cutter Module"
 min_python = '3.7'
 # Reduce the CI load of this package, only test on old and new python versions
-ci_cpython_versions = ['3.7', '3.10']
+ci_cpython_versions = ['3.7', '3.10', '3.13']
 #ci_pypy_versions = 'auto'
 ci_pypy_versions = []
 typed=true
