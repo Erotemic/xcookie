@@ -532,7 +532,8 @@ class TemplateApplier:
              'input_fname': rc.resource_fpath('setup_secrets.sh.in')
              },
 
-            {'template': 0, 'overwrite': 0, 'fname': '.gitignore'},
+            {'template': 0, 'overwrite': 0, 'fname': '.gitignore',
+             'input_fname': rc.resource_fpath('gitignore.in') },
             # {'template': 1, 'overwrite': 1, 'fname': '.coveragerc'},
             {'template': 1, 'overwrite': 1, 'fname': '.readthedocs.yml',
              'dynamic': 'build_readthedocs' },
