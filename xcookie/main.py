@@ -609,7 +609,7 @@ class TemplateApplier:
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
 
-            {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x'},
+            {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x', 'input_fname': rc.resource_fpath('publish.sh.in')},
             {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh', 'perms': 'x', 'tags': 'binpy'},
             {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x',
              'dynamic': 'build_run_doctests',
