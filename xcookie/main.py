@@ -557,8 +557,8 @@ class TemplateApplier:
             # {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__main__.py'},
             {'source': 'dynamic', 'overwrite': 0, 'fname': 'tests/test_import.py'},
 
-            # TODO: re-add using some input_path
-            # {'template': 0, 'overwrite': 1, 'fname': '.github/dependabot.yml', 'tags': 'github'},
+            {'template': 0, 'overwrite': 1, 'fname': '.github/dependabot.yml', 'tags': 'github',
+             'input_fname': rc.resource_fpath('dependabot.yml.in')},
 
             # {'template': 0, 'overwrite': 1,
             #  'tags': 'binpy,github',
@@ -598,9 +598,9 @@ class TemplateApplier:
             {'template': 1, 'overwrite': 1, 'fname': 'requirements/headless.txt', 'tags': 'cv2', 'dynamic': 'build_cv2_headless_requirements_txt'},
             {'template': 1, 'overwrite': 1, 'fname': 'requirements/gdal.txt', 'tags': 'gdal', 'dynamic': 'build_gdal_requirements_txt'},
 
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt'},
+            {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt', 'dynamic': 'build_optional_requirements'},
+            {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt', 'dynamic': 'build_runtime_requirements'},
+            {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt', 'dynamic': 'build_tests_requirements'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt', 'dynamic': 'build_docs_requirements'},
             {'template': 1, 'overwrite': 1, 'fname': 'docs/source/conf.py', 'dynamic': 'build_docs_conf'},
             {'template': 1, 'overwrite': 1, 'fname': 'docs/Makefile'},
@@ -1333,6 +1333,60 @@ class TemplateApplier:
     def build_docs_requirements(self):
         from xcookie.builders import docs
         return docs.build_docs_requirements(self)
+
+    # TODO: generate better stub requirements based on common packages
+    def build_optional_requirements(self):
+        text = ub.codeblock(
+            """
+            """
+        )
+        return text
+
+    def build_runtime_requirements(self):
+        text = ub.codeblock(
+            """
+            """
+        )
+        return text
+
+    def build_tests_requirements(self):
+        text = ub.codeblock(
+            """
+            xdoctest >= 1.1.5
+            # Pin maximum pytest versions for older python versions
+            # TODO: determine what the actual minimum and maximum acceptable versions of
+            # pytest (that are also compatible with xdoctest) are for each legacy python
+            # major.minor version.
+            # See xdev availpkg
+            pytest>=6.2.5            ;                               python_version >= '3.10.0'  # Python 3.10+
+            pytest>=4.6.0            ; python_version < '3.10.0' and python_version >= '3.7.0'   # Python 3.7-3.9
+            pytest>=4.6.0            ; python_version < '3.7.0'  and python_version >= '3.6.0'   # Python 3.6
+            pytest>=4.6.0, <= 6.1.2  ; python_version < '3.6.0'  and python_version >= '3.5.0'   # Python 3.5
+            pytest>=4.6.0, <= 4.6.11 ; python_version < '3.5.0'  and python_version >= '3.4.0'   # Python 3.4
+            pytest>=4.6.0, <= 4.6.11 ; python_version < '2.8.0'  and python_version >= '2.7.0'   # Python 2.7
+
+            pytest-cov>=3.0.0           ;                               python_version >= '3.6.0'   # Python 3.6+
+            pytest-cov>=2.9.0           ; python_version < '3.6.0'  and python_version >= '3.5.0'   # Python 3.5
+            pytest-cov>=2.8.1           ; python_version < '3.5.0'  and python_version >= '3.4.0'   # Python 3.4
+            pytest-cov>=2.8.1           ; python_version < '2.8.0'  and python_version >= '2.7.0'   # Python 2.7
+
+            # xdev availpkg pytest-timeout
+            pytest-timeout>=1.4.2
+
+            # xdev availpkg xdoctest
+            # xdev availpkg coverage
+            coverage>=6.1.1     ;                            python_version >= '3.10'    # Python 3.10+
+            coverage>=5.3.1     ; python_version < '3.10' and python_version >= '3.9'    # Python 3.9
+            coverage>=6.1.1     ; python_version < '3.9' and python_version >= '3.8'    # Python 3.8
+            coverage>=6.1.1     ; python_version < '3.8' and python_version >= '3.7'    # Python 3.7
+            coverage>=6.1.1     ; python_version < '3.7' and python_version >= '3.6'    # Python 3.6
+            coverage>=5.3.1     ; python_version < '3.6' and python_version >= '3.5'    # Python 3.5
+            coverage>=4.3.4     ; python_version < '3.5' and python_version >= '3.4'    # Python 3.4
+            coverage>=5.3.1     ; python_version < '3.4' and python_version >= '2.7'    # Python 2.7
+            coverage>=4.5       ; python_version < '2.7' and python_version >= '2.6'    # Python 2.6
+            """
+        )
+        return text
 
     def _build_special_requirements(self, variant, version_defaults, header_lines):
         """
