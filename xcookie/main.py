@@ -603,8 +603,8 @@ class TemplateApplier:
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt', 'dynamic': 'build_tests_requirements'},
             {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt', 'dynamic': 'build_docs_requirements'},
             {'template': 1, 'overwrite': 1, 'fname': 'docs/source/conf.py', 'dynamic': 'build_docs_conf'},
-            {'template': 1, 'overwrite': 1, 'fname': 'docs/Makefile'},
-            {'template': 1, 'overwrite': 1, 'fname': 'docs/make.bat'},
+            {'template': 1, 'overwrite': 1, 'fname': 'docs/Makefile', 'input_fname': rc.resource_fpath('docs_makefile.in')},
+            {'template': 1, 'overwrite': 1, 'fname': 'docs/make.bat', 'input_fname': rc.resource_fpath('docs_make.bat.in')},
 
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
