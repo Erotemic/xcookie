@@ -193,7 +193,23 @@ jobs:
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
+        - python-version: '3.8'
+          install-extras: tests,optional
+          os: ubuntu-latest
+          arch: auto
+        - python-version: '3.9'
+          install-extras: tests,optional
+          os: ubuntu-latest
+          arch: auto
         - python-version: '3.10'
+          install-extras: tests,optional
+          os: ubuntu-latest
+          arch: auto
+        - python-version: '3.11'
+          install-extras: tests,optional
+          os: ubuntu-latest
+          arch: auto
+        - python-version: '3.12'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
@@ -205,7 +221,23 @@ jobs:
           install-extras: tests,optional
           os: macos-13
           arch: auto
+        - python-version: '3.8'
+          install-extras: tests,optional
+          os: macOS-latest
+          arch: auto
+        - python-version: '3.9'
+          install-extras: tests,optional
+          os: macOS-latest
+          arch: auto
         - python-version: '3.10'
+          install-extras: tests,optional
+          os: macOS-latest
+          arch: auto
+        - python-version: '3.11'
+          install-extras: tests,optional
+          os: macOS-latest
+          arch: auto
+        - python-version: '3.12'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
@@ -217,7 +249,23 @@ jobs:
           install-extras: tests,optional
           os: windows-latest
           arch: auto
+        - python-version: '3.8'
+          install-extras: tests,optional
+          os: windows-latest
+          arch: auto
+        - python-version: '3.9'
+          install-extras: tests,optional
+          os: windows-latest
+          arch: auto
         - python-version: '3.10'
+          install-extras: tests,optional
+          os: windows-latest
+          arch: auto
+        - python-version: '3.11'
+          install-extras: tests,optional
+          os: windows-latest
+          arch: auto
+        - python-version: '3.12'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
