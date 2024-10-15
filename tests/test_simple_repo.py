@@ -9,6 +9,11 @@ def test_simple_repo():
 
     """
     import ubelt as ub
+
+    if ub.WIN32:
+        import pytest
+        pytest.skip('requires bash')
+
     dpath = ub.Path.appdir('xcookie/tests/test-init/simple_repo')
     dpath.delete().ensuredir()
 
