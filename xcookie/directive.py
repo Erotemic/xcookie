@@ -308,7 +308,7 @@ class DirectiveExtractor:
     """
     def __init__(self, namespace, commands):
         self.commands = commands
-        self.namesapce = namespace
+        self.namespace = namespace
         directive_patterns = [
             namespace + r':\s*' + named('style2', '.*'),
         ]
