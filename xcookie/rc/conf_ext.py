@@ -188,7 +188,7 @@ class GoogleStyleDocstringProcessor:
 
             accum.append(line)
 
-        # Finialize the last section
+        # Finalize the last section
         accept()
 
         lines[:] = new_lines

@@ -1,5 +1,5 @@
 """
-Template code for building docs includeing conf.py
+Template code for building docs including conf.py
 """
 import ubelt as ub
 
@@ -376,7 +376,7 @@ def build_docs_conf(self):
             # 'xxhash': ('https://pypi.org/project/xxhash/', None),
             # 'pygments': ('https://pygments.org/docs/', None),
             # 'tqdm': ('https://tqdm.github.io/', None),
-            # Requries that the repo have objects.inv
+            # Requires that the repo have objects.inv
             'kwarray': ('https://kwarray.readthedocs.io/en/latest/', None),
             'kwimage': ('https://kwimage.readthedocs.io/en/latest/', None),
             # 'kwplot': ('https://kwplot.readthedocs.io/en/latest/', None),

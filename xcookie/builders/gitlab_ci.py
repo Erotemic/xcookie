@@ -563,7 +563,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
                 fi
 
                 # Loop over all of the assets in the wheelhouse (i.e.  dist)
-                # and upload them to a package registery. We also store the
+                # and upload them to a package registry. We also store the
                 # links to the artifacts so we can attach them to a release
                 # page.
                 PACKAGE_ARTIFACT_ARRAY=()
@@ -587,7 +587,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
         if self.config['deploy_tags']:
             if 0:
                 __note__ = r"""
-                    To populate the CI variables and test localy
+                    To populate the CI variables and test locally
                     This logic is quick and dirty, could be cleaned up
 
                     load_secrets

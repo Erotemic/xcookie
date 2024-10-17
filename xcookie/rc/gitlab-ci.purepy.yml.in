@@ -642,7 +642,7 @@ test_minimal_strict/cp36-cp36m-linux:
         IMAGE_NAME=$(cat .gitlab-ci.yml | yq -r '.".image_python3_10"')
         docker run -v $PWD:/io:ro -v $HOME/.cache/pip:/pip_cache -it $IMAGE_NAME bash
 
-        # Will need to chmod things afterwords
+        # Will need to chmod things afterwards
         export PIP_CACHE_DIR=/pip_cache
         echo $PIP_CACHE_DIR
         chmod -R o+rw $PIP_CACHE_DIR

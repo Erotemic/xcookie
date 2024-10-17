@@ -212,7 +212,7 @@ class XCookieConfig(scfg.DataConfig):
         'test_variants': scfg.Value([
             'full-loose', 'full-strict',
             'minimal-loose', 'minimal-strict'],
-            help='A list of which CI loose / strict / minimal / full varaints to use'),
+            help='A list of which CI loose / strict / minimal / full variants to use'),
 
         'use_vcs': scfg.Value('auto', help=ub.paragraph(
             '''
