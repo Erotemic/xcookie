@@ -141,7 +141,7 @@ class GitlabRemote:
             print('branch.merge_access_levels = {}'.format(ub.urepr(branch.merge_access_levels, nl=1)))
             print('branch.allow_force_push = {}'.format(ub.urepr(branch.allow_force_push, nl=1)))
         # if 0:
-        #         # API doesnt directly support this, hack it in
+        #         # API does not directly support this, hack it in
         #         post_data = {
         #             'name': branch.get_id(),
         #             'allowed_to_push': perm,

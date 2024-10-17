@@ -1,5 +1,5 @@
 """
-Common subroutines for consitency between gitlab-ci / github actions / etc...
+Common subroutines for consistency between gitlab-ci / github actions / etc...
 """
 
 
@@ -118,7 +118,7 @@ def make_install_and_test_wheel_parts(self,
         if isinstance(test_command, str):
             test_command = [Yaml.CodeBlock(test_command)]
 
-    # Note: export does not expose the enviornment variable to subsequent jobs.
+    # Note: export does not expose the environment variable to subsequent jobs.
     install_wheel_commands = [
         'echo "Finding the path to the wheel"',
         f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',

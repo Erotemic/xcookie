@@ -790,7 +790,7 @@ def build_purewheel_job(self):
             'fail-fast': False,
             'matrix': {
                 # Build on one of the platforms with the newest python version
-                # (it doesnt really matter)
+                # (it does not really matter)
                 'os': ['ubuntu-latest'],  # os_list[0:1],
                 'python-version': cpython_versions[-1:],
                 'arch': ['auto'],
