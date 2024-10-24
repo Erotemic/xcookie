@@ -1433,7 +1433,8 @@ class TemplateApplier:
             '# --prefer-binary',
         ]
         version_defaults = [
-            {'version': '>=4.5.5.64', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('4.0')},
+            {'version': '>=4.10.0.84', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},  # minimal for numpy 2.x
+            {'version': '>=4.5.5.64', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.13')},
             {'version': '>=4.5.4.58', 'pyver_ge': Version('3.10'), 'pyver_lt': Version('3.11')},
             {'version': '>=3.4.15.55', 'pyver_ge': Version('3.7'), 'pyver_lt': Version('3.10')},
             {'version': '>=3.4.13.47', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.7')},
@@ -1456,7 +1457,8 @@ class TemplateApplier:
             '--find-links https://girder.github.io/large_image_wheels',
         ]
         version_defaults = [
-            {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('3.13')},
             {'version': '>=3.5.2', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.12')},
             {'version': '>=3.4.1', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
         ]

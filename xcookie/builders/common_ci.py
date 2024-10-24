@@ -7,6 +7,7 @@ def make_mypy_check_parts(self):
     import ubelt as ub
 
     type_requirement_files = [
+        # TODO: get this location from the config
         'requirements/runtime.txt'
     ]
     req_files_text = ' '.join(type_requirement_files)

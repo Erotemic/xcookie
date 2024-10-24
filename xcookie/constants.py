@@ -4,7 +4,7 @@ KNOWN_PYTHON_VERSIONS = [
 ]
 
 DEV_PYTHON_VERSIONS = [
-    '3.13',
+    # '3.13',
 ]
 
 
