@@ -46,7 +46,7 @@ stages:
         - pwd
         - ls -al
         # NOTE: this requires that some mechanism exists in cibuildwheel to
-        # ignore this directory when it copys the repo into the container
+        # ignore this directory when it copies the repo into the container
         - mkdir -p ".cache/containers/vfs-storage/"
         # Configure podman options (specific to custom cibuildwheel fork)
         - |
@@ -619,7 +619,7 @@ deploy/wheels:
 
             IMAGE_NAME=gitlab.kitware.com:4567/computer-vision/ci-docker/gl-python:3.6
             docker run -v $PWD:/io:ro -v $HOME/.cache/pip:/pip_cache -it $IMAGE_NAME bash
-            # Will need to chmod things afterwords
+            # Will need to chmod things afterwards
             export PIP_CACHE_DIR=/pip_cache
             echo $PIP_CACHE_DIR
             chmod -R o+rw $PIP_CACHE_DIR

@@ -107,7 +107,7 @@ def parse_requirements(fname='requirements.txt', versions='loose'):
                 info['package'] = line.split('#egg=')[1]
             else:
                 if '--find-links' in line:
-                    # setuptools doesnt seem to handle find links
+                    # setuptools does not seem to handle find links
                     line = line.split('--find-links')[0]
                 if ';' in line:
                     pkgpart, platpart = line.split(';')

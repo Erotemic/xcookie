@@ -5,7 +5,7 @@ or update an existing one with the latest standards.
 TODO:
     Port logic from ~/misc/make_new_python_package_repo.sh
 
-ComamndLine:
+CommandLine:
     ~/code/xcookie/xcookie/main.py
 
     python -m xcookie.main
@@ -212,7 +212,7 @@ class XCookieConfig(scfg.DataConfig):
         'test_variants': scfg.Value([
             'full-loose', 'full-strict',
             'minimal-loose', 'minimal-strict'],
-            help='A list of which CI loose / strict / minimal / full varaints to use'),
+            help='A list of which CI loose / strict / minimal / full variants to use'),
 
         'use_vcs': scfg.Value('auto', help=ub.paragraph(
             '''
@@ -366,10 +366,10 @@ class XCookieConfig(scfg.DataConfig):
         """
         if self['interactive']:
             from xcookie.rich_ext import FuzzyPrompt
-            ans = FuzzyPrompt.ask(msg, choices=choices)
+            answer = FuzzyPrompt.ask(msg, choices=choices)
         else:
-            ans = default
-        return ans
+            answer = default
+        return answer
 
     @classmethod
     def load_from_cli_and_pyproject(cls, cmdline=0, **kwargs):
@@ -802,8 +802,8 @@ class TemplateApplier:
         task_summary = ub.map_vals(len, tasks)
         if any(task_summary.values()):
             print('task_summary = {}'.format(ub.urepr(task_summary, nl=1)))
-            ans = self.config.prompt('What parts of the patch to apply?', ['yes', 'all', 'some', 'none'], default='yes')
-            if ans in {'all', 'yes'}:
+            answer = self.config.prompt('What parts of the patch to apply?', ['yes', 'all', 'some', 'none'], default='yes')
+            if answer in {'all', 'yes'}:
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
                     d.ensuredir()
@@ -813,7 +813,7 @@ class TemplateApplier:
                     shutil.copy2(src, dst)
                 for fname, mode in perm_tasks:
                     os.chmod(fname, mode)
-            elif ans == 'some':
+            elif answer == 'some':
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
                     d.ensuredir()
@@ -1433,7 +1433,8 @@ class TemplateApplier:
             '# --prefer-binary',
         ]
         version_defaults = [
-            {'version': '>=4.5.5.64', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('4.0')},
+            {'version': '>=4.10.0.84', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},  # minimal for numpy 2.x
+            {'version': '>=4.5.5.64', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.13')},
             {'version': '>=4.5.4.58', 'pyver_ge': Version('3.10'), 'pyver_lt': Version('3.11')},
             {'version': '>=3.4.15.55', 'pyver_ge': Version('3.7'), 'pyver_lt': Version('3.10')},
             {'version': '>=3.4.13.47', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.7')},
@@ -1456,7 +1457,8 @@ class TemplateApplier:
             '--find-links https://girder.github.io/large_image_wheels',
         ]
         version_defaults = [
-            {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('3.13')},
             {'version': '>=3.5.2', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.12')},
             {'version': '>=3.4.1', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
         ]
