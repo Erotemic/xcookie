@@ -910,6 +910,8 @@ def test_wheels_job(self, needs=None):
         # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
             item['os'] = 'ubuntu-20.04'
+        if item['python-version'] == '3.7' and item['os'] == 'ubuntu-latest':
+            item['os'] = 'ubuntu-22.04'
         if item['python-version'] == '3.6' and item['os'] == 'macOS-latest':
             item['os'] = 'macos-13'
         if item['python-version'] == '3.7' and item['os'] == 'macOS-latest':
@@ -1139,7 +1141,7 @@ def build_deploy(self, mode='live', needs=None):
             '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',
             '$GPG_EXECUTABLE --list-keys',
             'VERSION=$(python -c "import setup; print(setup.VERSION)")',
-            'pip install twine',
+            'pip install twine packaging -U',
             # 'pip install six pyopenssl ndg-httpsclient pyasn1 -U --user',
             # 'pip install urllib3 requests[security] twine --user',
             'pip install urllib3 requests[security] twine',
