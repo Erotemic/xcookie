@@ -1,14 +1,16 @@
-KNOWN_PYTHON_VERSIONS = [
+from typing import List
+
+KNOWN_PYTHON_VERSIONS: List[str]  = [
     '2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', '3.12',
     '3.13',
 ]
 
-DEV_PYTHON_VERSIONS = [
+DEV_PYTHON_VERSIONS: List[str] = [
     # '3.13',
 ]
 
 
-KNOWN_CPYTHON_DOCKER_IMAGES = {
+KNOWN_CPYTHON_DOCKER_IMAGES: List[str]  = {
     # TODO allow rc?
     # 'cp314': 'python:3.14.0-alpha.0',
     'cp313': 'python:3.13',
@@ -27,7 +29,7 @@ KNOWN_CPYTHON_DOCKER_IMAGES = {
 
 # TODO: make a table of details about each version
 # https://devguide.python.org/versions/
-KNOWN_PYTHON_VERSION_INFO = [
+KNOWN_PYTHON_VERSION_INFO: List[dict]  = [
     {'version': '3.14', 'end_of_life': '2030-10', 'github_action_version': '3.14.0-alpha.0', 'is_prerelease': True},
     {'version': '3.13', 'end_of_life': '2029-10'},
     {'version': '3.12', 'end_of_life': '2028-10'},
