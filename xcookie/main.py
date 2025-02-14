@@ -874,6 +874,7 @@ class TemplateApplier:
             if queue.jobs:
                 queue.rprint()
                 if self.config.confirm('Do git init?'):
+                    self.repodir.ensuredir()
                     queue.run()
 
             if self.config['init_new_remotes'] and self.config.confirm('Do you want to create the repo on the remote?'):
