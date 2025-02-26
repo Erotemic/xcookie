@@ -32,6 +32,8 @@ ExampleUsage:
     # Create a new binary gitlab kitware repo
     python -m xcookie.main --repo_name=kwimage_ext --repodir=$HOME/code/kwimage_ext --tags="kitware,gitlab,binpy"
 
+    python -m xcookie.main --repo_name=kwcoco_dataloader --repodir=$HOME/code/kwcoco_dataloader --tags="kitware,gitlab,purepy,gdal,cv2"
+
     # Create a new binary github repo
     python -m xcookie.main --repodir=$HOME/code/networkx_algo_common_subtree --tags="github,erotemic,binpy"
 
