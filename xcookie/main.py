@@ -221,6 +221,8 @@ class XCookieConfig(scfg.DataConfig):
             Set to False to disable VCS. Will default to True if config has enough information to infer a VCS
             ''')),
 
+        'use_uv': scfg.Value('auto', help=ub.paragraph('if False use plain pip, otherwise use uv instead')),
+
         # ---
         'interactive': scfg.Value(True),
         'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
@@ -323,6 +325,10 @@ class XCookieConfig(scfg.DataConfig):
                 self['ci_pypy_versions'] = ['3.9']
             else:
                 self['ci_pypy_versions'] = []
+        if self['use_uv'] == 'auto':
+            # Can only use uv if the min python >= 3.8
+            min_python = self['supported_python_versions'][0]
+            self['use_uv'] = Version(min_python) >= Version('3.8')
 
     def _load_pyproject_config(self):
         pyproject_fpath = self['repodir'] / 'pyproject.toml'
@@ -1289,12 +1295,27 @@ class TemplateApplier:
         from xcookie.builders import pyproject
         return pyproject.build_pyproject(self)
 
+    def _setup_pip_commands(self):
+        # Hack for uv migration, to get some common variables.  need to clean
+        # up how we control what is used as the package installer later.
+        if self.config.use_uv:
+            # Does UV always prefer binary?
+            self.PIP_INSTALL = 'python -m uv pip install'
+            self.PIP_INSTALL_PREFER_BINARY = 'python -m uv pip install'
+            self.UPDATE_PIP = 'python -m pip install pip uv -U'
+        else:
+            self.PIP_INSTALL = 'python -m pip install'
+            self.PIP_INSTALL_PREFER_BINARY = 'python -m pip install --prefer-binary'
+            self.UPDATE_PIP = 'python -m pip install pip -U'
+
     def build_github_actions(self):
         from xcookie.builders import github_actions
+        self._setup_pip_commands()
         return github_actions.build_github_actions(self)
 
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci
+        self._setup_pip_commands()
         return gitlab_ci.build_gitlab_ci(self)
 
     def build_manifest_in(self):

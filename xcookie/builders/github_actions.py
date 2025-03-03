@@ -115,7 +115,7 @@ class Actions:
                 pwd
                 cp .wheelhouse/.coverage* . || true
                 ls -al
-                python -m pip install coverage[toml]
+                uv pip install coverage[toml] | pip install coverage[toml]
                 echo '############ combine'
                 coverage combine . || true
                 echo '############ XML'
@@ -422,7 +422,7 @@ def build_github_actions(self):
 
 
 def lint_job(self):
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     job = {
         'runs-on': 'ubuntu-latest',
@@ -437,9 +437,9 @@ def lint_job(self):
             {
                 'name': 'Install dependencies',
                 'run': ub.codeblock(
-                    '''
-                    python -m pip install --upgrade pip
-                    python -m pip install flake8
+                    f'''
+                    {self.UPDATE_PIP}
+                    {self.PIP_INSTALL} flake8
                     ''')
             },
             {
@@ -465,7 +465,7 @@ def lint_job(self):
 
 
 def build_and_test_sdist_job(self):
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     wheelhouse_dpath = 'wheelhouse'
 
@@ -482,11 +482,11 @@ def build_and_test_sdist_job(self):
             {
                 'name': 'Upgrade pip',
                 'run': [_ for _ in [
-                    'python -m pip install --upgrade pip',
-                    'python -m pip install --prefer-binary -r requirements/tests.txt',
-                    'python -m pip install --prefer-binary -r requirements/runtime.txt',
-                    'python -m pip install --prefer-binary -r requirements/headless.txt' if 'cv2' in self.tags else None,
-                    'python -m pip install --prefer-binary -r requirements/gdal.txt' if 'gdal' in self.tags else None,
+                    f'{self.UPDATE_PIP}',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/tests.txt',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/runtime.txt',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt' if 'cv2' in self.tags else None,
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt' if 'gdal' in self.tags else None,
                 ] if _ is not None]
             },
             {
@@ -499,7 +499,7 @@ def build_and_test_sdist_job(self):
                 'name': 'Install sdist',
                 'run': [
                     f'ls -al {wheelhouse_dpath}',
-                    f'pip install --prefer-binary {wheelhouse_dpath}/{self.pkg_name}*.tar.gz -v',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} {wheelhouse_dpath}/{self.pkg_name}*.tar.gz -v',
                 ]
             },
             {
@@ -528,9 +528,7 @@ def build_and_test_sdist_job(self):
                 'run': [
                     'pwd',
                     'ls -al',
-                    # 'python -m pip install -r requirements/optional.txt',  # todo: use the extra-spec
-                    # 'python -m pip install -r requirements/ipython.txt',  # hack for line-profiler
-                    'python -m pip install --prefer-binary -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
                     '# Run in a sandboxed directory',
                     'WORKSPACE_DNAME="testsrcdir_full_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
                     'mkdir -p $WORKSPACE_DNAME',
@@ -567,7 +565,7 @@ def build_binpy_wheels_job(self):
         Supported Action platforms:
             https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
     """
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
     os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
 
@@ -696,88 +694,9 @@ def build_binpy_wheels_job(self):
     return job
 
 
-def get_supported_platform_info(self):
-    os_list = []
-
-    # TODO: maybe allow pinning, or list out what the options are
-    # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
-    if 'linux' in self.config['os']:
-        os_list.append('ubuntu-latest')
-    if 'osx' in self.config['os']:
-        os_list.append('macOS-latest')
-    if 'win' in self.config['os']:
-        os_list.append('windows-latest')
-
-    cpython_versions = self.config['ci_cpython_versions']
-    pypy_versions = [
-        f'pypy-{v}'
-        for v in self.config['ci_pypy_versions']
-    ]
-    # 3.4 is broken on github actions it seems
-    cpython_versions_non34 = [v for v in cpython_versions if v != '3.4']
-    supported_py_versions = self.config['supported_python_versions']
-    if len(supported_py_versions) == 0:
-        raise Exception('no supported python versions?')
-
-    # Choose which Python version will be the "main" one we use for version
-    # agnostic jobs.
-    main_python_version = supported_py_versions[-1]
-    from xcookie import constants
-    # import kwutil
-    INFO_LUT = {row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO}
-    for pyver in supported_py_versions[::-1]:
-        info = INFO_LUT[pyver]
-        if info.get('is_prerelease'):
-            continue
-        main_python_version = pyver
-        break
-
-    # TODO: find a nicer way to codify the idea that the supported python
-    # version needs to map to something github actions knows about, which could
-    # be a prerelease version.
-    cpython_versions_non34_ = []
-    for pyver in cpython_versions_non34:
-        info = INFO_LUT[pyver]
-        if 'github_action_version' in info:
-            pyver = info['github_action_version']
-        cpython_versions_non34_.append(pyver)
-    cpython_versions_non34 = cpython_versions_non34_
-
-    extras_versions_templates = {
-        'full-loose': self.config['ci_versions_full_loose'],
-        'full-strict': self.config['ci_versions_full_strict'],
-        'minimal-loose': self.config['ci_versions_minimal_loose'],
-        'minimal-strict': self.config['ci_versions_minimal_strict'],
-    }
-    extras_versions = {}
-    for k, v in extras_versions_templates.items():
-        if v == '':
-            v = []
-        elif v == 'min':
-            v = [cpython_versions_non34[0]]
-        elif v == 'max':
-            v = [cpython_versions_non34[-1]]
-        elif v == '*':
-            v = cpython_versions_non34 + pypy_versions
-        else:
-            raise KeyError(v)
-        extras_versions[k] = v
-
-    supported_platform_info = {
-        'os_list': os_list,
-        'cpython_versions': cpython_versions_non34,
-        'pypy_versions': pypy_versions,
-        'min_python_version': supported_py_versions[0],
-        'max_python_version': supported_py_versions[-1],
-        'main_python_version': main_python_version,
-        'install_extra_versions': extras_versions,
-    }
-    return supported_platform_info
-
-
 def build_purewheel_job(self):
     wheelhouse_dpath = 'wheelhouse'
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
     # os_list = supported_platform_info['os_list']
     cpython_versions = supported_platform_info['cpython_versions']
     # pypy_versions = supported_platform_info['pypy_versions']
@@ -829,7 +748,7 @@ def build_purewheel_job(self):
 
 def test_wheels_job(self, needs=None):
     wheelhouse_dpath = 'wheelhouse'
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
 
     os_list = supported_platform_info['os_list']
 
@@ -963,7 +882,7 @@ def test_wheels_job(self, needs=None):
     special_install_lines = []
     if 'gdal' in self.tags:
         install_env['GDAL_REQUIREMENT_TXT'] = '${{ matrix.gdal-requirement-txt }}'
-        special_install_lines.append('pip install -r "$GDAL_REQUIREMENT_TXT"')
+        special_install_lines.append(f'{self.PIP_INSTALL} -r "$GDAL_REQUIREMENT_TXT"')
 
     if 'ibeis' == self.mod_name:
         custom_before_test_lines = [
@@ -1141,10 +1060,9 @@ def build_deploy(self, mode='live', needs=None):
             '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',
             '$GPG_EXECUTABLE --list-keys',
             'VERSION=$(python -c "import setup; print(setup.VERSION)")',
-            'pip install twine packaging -U',
-            # 'pip install six pyopenssl ndg-httpsclient pyasn1 -U --user',
-            # 'pip install urllib3 requests[security] twine --user',
-            'pip install urllib3 requests[security] twine',
+            f'{self.UPDATE_PIP}',
+            f'{self.PIP_INSTALL} packaging twine -U',
+            f'{self.PIP_INSTALL} urllib3 requests[security]',
             'GPG_KEYID=$(cat dev/public_gpg_key)',
             '''echo "GPG_KEYID = '$GPG_KEYID'"''',
             'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
@@ -1172,7 +1090,7 @@ def build_deploy(self, mode='live', needs=None):
         enable_otc = True
         if enable_otc:
             run += [
-                'pip install opentimestamps-client',
+                f'{self.PIP_INSTALL} opentimestamps-client',
                 f'ots stamp {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.asc',
                 'ls -la wheelhouse'
             ]
@@ -1194,8 +1112,7 @@ def build_deploy(self, mode='live', needs=None):
     else:
         if self.config['deploy_pypi']:
             run = [
-                # 'pip install requests[security] twine pyopenssl ndg-httpsclient pyasn1 -U',
-                'pip install urllib3 requests[security] twine -U',
+                f'{self.PIP_INSTALL} urllib3 requests[security] twine -U',
                 f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
             ]
 

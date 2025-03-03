@@ -24,7 +24,8 @@ def make_mypy_check_parts(self):
 def make_build_sdist_parts(self, wheelhouse_dpath='wheelhouse'):
     commands = [
         # 'python -m pip install pip -U',
-        'python -m pip install setuptools>=0.8 wheel build twine',
+        f'{self.UPDATE_PIP}',
+        f'{self.PIP_INSTALL} setuptools>=0.8 wheel build twine',
         f'python -m build --sdist --outdir {wheelhouse_dpath}',
         f'python -m twine check ./{wheelhouse_dpath}/{self.mod_name}*.tar.gz',
     ]
@@ -39,7 +40,8 @@ def make_build_sdist_parts(self, wheelhouse_dpath='wheelhouse'):
 def make_build_wheel_parts(self, wheelhouse_dpath='wheelhouse'):
     commands = [
         # 'python -m pip install pip -U',
-        'python -m pip install setuptools>=0.8 wheel build twine',
+        f'{self.UPDATE_PIP}',
+        f'{self.PIP_INSTALL} setuptools>=0.8 wheel build twine',
         f'python -m build --wheel --outdir {wheelhouse_dpath}',
         f'python -m twine check ./{wheelhouse_dpath}/{self.mod_name}*.whl',
     ]
@@ -124,9 +126,10 @@ def make_install_and_test_wheel_parts(self,
         'echo "Finding the path to the wheel"',
         f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',
         'echo "Installing helpers"',
+        f'{self.UPDATE_PIP}',
         # 'pip install pip setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
-        'pip install setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
-        'pip install tomli pkginfo',
+        f'{self.PIP_INSTALL} setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+        f'{self.PIP_INSTALL} tomli pkginfo',
         # 'pip install delorean',
         f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
         # 'echo "WHEEL_FPATH=$WHEEL_FPATH"',
@@ -145,7 +148,7 @@ def make_install_and_test_wheel_parts(self,
         # 'cp wheelhouse/* wheeldownload/',
         # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
 
-        f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+        f'{self.PIP_INSTALL_PREFER_BINARY} "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
         'echo "Install finished."',
     ]
 
@@ -179,3 +182,82 @@ def make_install_and_test_wheel_parts(self,
         'test_wheel_commands': test_wheel_commands,
     }
     return install_and_test_wheel_parts
+
+
+def get_supported_platform_info(self):
+    os_list = []
+
+    # TODO: maybe allow pinning, or list out what the options are
+    # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+    if 'linux' in self.config['os']:
+        os_list.append('ubuntu-latest')
+    if 'osx' in self.config['os']:
+        os_list.append('macOS-latest')
+    if 'win' in self.config['os']:
+        os_list.append('windows-latest')
+
+    cpython_versions = self.config['ci_cpython_versions']
+    pypy_versions = [
+        f'pypy-{v}'
+        for v in self.config['ci_pypy_versions']
+    ]
+    # 3.4 is broken on github actions it seems
+    cpython_versions_non34 = [v for v in cpython_versions if v != '3.4']
+    supported_py_versions = self.config['supported_python_versions']
+    if len(supported_py_versions) == 0:
+        raise Exception('no supported python versions?')
+
+    # Choose which Python version will be the "main" one we use for version
+    # agnostic jobs.
+    main_python_version = supported_py_versions[-1]
+    from xcookie import constants
+    # import kwutil
+    INFO_LUT = {row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO}
+    for pyver in supported_py_versions[::-1]:
+        info = INFO_LUT[pyver]
+        if info.get('is_prerelease'):
+            continue
+        main_python_version = pyver
+        break
+
+    # TODO: find a nicer way to codify the idea that the supported python
+    # version needs to map to something github actions knows about, which could
+    # be a prerelease version.
+    cpython_versions_non34_ = []
+    for pyver in cpython_versions_non34:
+        info = INFO_LUT[pyver]
+        if 'github_action_version' in info:
+            pyver = info['github_action_version']
+        cpython_versions_non34_.append(pyver)
+    cpython_versions_non34 = cpython_versions_non34_
+
+    extras_versions_templates = {
+        'full-loose': self.config['ci_versions_full_loose'],
+        'full-strict': self.config['ci_versions_full_strict'],
+        'minimal-loose': self.config['ci_versions_minimal_loose'],
+        'minimal-strict': self.config['ci_versions_minimal_strict'],
+    }
+    extras_versions = {}
+    for k, v in extras_versions_templates.items():
+        if v == '':
+            v = []
+        elif v == 'min':
+            v = [cpython_versions_non34[0]]
+        elif v == 'max':
+            v = [cpython_versions_non34[-1]]
+        elif v == '*':
+            v = cpython_versions_non34 + pypy_versions
+        else:
+            raise KeyError(v)
+        extras_versions[k] = v
+
+    supported_platform_info = {
+        'os_list': os_list,
+        'cpython_versions': cpython_versions_non34,
+        'pypy_versions': pypy_versions,
+        'min_python_version': supported_py_versions[0],
+        'max_python_version': supported_py_versions[-1],
+        'main_python_version': main_python_version,
+        'install_extra_versions': extras_versions,
+    }
+    return supported_platform_info

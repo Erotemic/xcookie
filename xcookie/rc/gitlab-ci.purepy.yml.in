@@ -1,3 +1,5 @@
+# NOTE: THIS IS OUTDATED AND NOT USED BY XCOOKIE
+# IT CAN LIKELY BE REMOVED
 # Abuse YAML notation to make a heredoc. This will be ignored by the CI.
 .__doc__: &__doc__
     - | 
