@@ -10,7 +10,7 @@ DEV_PYTHON_VERSIONS: List[str] = [
 ]
 
 
-KNOWN_CPYTHON_DOCKER_IMAGES: List[str]  = {
+KNOWN_CPYTHON_DOCKER_IMAGES: dict[str, str]  = {
     # TODO allow rc?
     # 'cp314': 'python:3.14.0-alpha.0',
     'cp313': 'python:3.13',
