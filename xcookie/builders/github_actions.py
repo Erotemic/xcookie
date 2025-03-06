@@ -1061,8 +1061,8 @@ def build_deploy(self, mode='live', needs=None):
             '$GPG_EXECUTABLE --list-keys',
             'VERSION=$(python -c "import setup; print(setup.VERSION)")',
             f'{self.UPDATE_PIP}',
-            f'{self.PIP_INSTALL} packaging twine -U',
-            f'{self.PIP_INSTALL} urllib3 requests[security]',
+            f'{self.SYSTEM_PIP_INSTALL} packaging twine -U',
+            f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security]',
             'GPG_KEYID=$(cat dev/public_gpg_key)',
             '''echo "GPG_KEYID = '$GPG_KEYID'"''',
             'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
@@ -1090,7 +1090,7 @@ def build_deploy(self, mode='live', needs=None):
         enable_otc = True
         if enable_otc:
             run += [
-                f'{self.PIP_INSTALL} opentimestamps-client',
+                f'{self.SYSTEM_PIP_INSTALL} opentimestamps-client',
                 f'ots stamp {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.asc',
                 'ls -la wheelhouse'
             ]
@@ -1112,7 +1112,7 @@ def build_deploy(self, mode='live', needs=None):
     else:
         if self.config['deploy_pypi']:
             run = [
-                f'{self.PIP_INSTALL} urllib3 requests[security] twine -U',
+                f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security] twine -U',
                 f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
             ]
 

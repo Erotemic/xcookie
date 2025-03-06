@@ -1303,10 +1303,14 @@ class TemplateApplier:
             self.PIP_INSTALL = 'python -m uv pip install'
             self.PIP_INSTALL_PREFER_BINARY = 'python -m uv pip install'
             self.UPDATE_PIP = 'python -m pip install pip uv -U'
+            # The system uv seems to have an issue on CI
+            self.SYSTEM_PIP_INSTALL = 'python -m pip install'
+            # self.SYSTEM_PIP_INSTALL = 'python -m uv pip install --system --break-system-packages'
         else:
             self.PIP_INSTALL = 'python -m pip install'
             self.PIP_INSTALL_PREFER_BINARY = 'python -m pip install --prefer-binary'
             self.UPDATE_PIP = 'python -m pip install pip -U'
+            self.SYSTEM_PIP_INSTALL = 'python -m pip install'
 
     def build_github_actions(self):
         from xcookie.builders import github_actions
