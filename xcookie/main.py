@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# PYTHON_ARGCOMPLETE_OK
 """
 This is a Python script to apply the xcookie template to either create a new repo
 or update an existing one with the latest standards.

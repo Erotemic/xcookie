@@ -236,7 +236,9 @@ class Actions:
                     # 'CIBW_TEST_REQUIRES': '-r requirements/tests.txt'0
                     # 'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
                     # configure cibuildwheel to build native archs ('auto'), or emulated ones
-                    'CIBW_ARCHS_LINUX': '${{ matrix.arch }}'
+                    'CIBW_ARCHS_LINUX': '${{ matrix.arch }}',
+                    'CIBW_ENVIRONMENT': 'PYTHONUTF8=1',  # for windows
+                    'PYTHONUTF8': '1',  # for windows
                 }
             })
 
