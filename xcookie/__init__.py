@@ -1,7 +1,7 @@
 """
 The xcookie module is a CLI tool for initializing and maintaining standardized
-repo infastructure. In other words it is a Python project cookie cutter that
-attempts to help keep existing modules up to date with latest infastructure
+repo infrastructure. In other words it is a Python project cookie cutter that
+attempts to help keep existing modules up to date with latest infrastructure
 developments.
 
 Currently this module is specialized towards Erotemic / PyUtils / Kitware

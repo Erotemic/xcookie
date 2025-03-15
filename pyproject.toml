@@ -73,4 +73,4 @@ ignore_missing_imports = true
 skip = ['./docs/build', './*.egg-info', './build', './htmlcov']
 count = true
 quiet-level = 3
-ignore-words-list = ["fpr", 'ANS']
+ignore-words-list = ['wont', 'cant', 'fpr', 'ANS', 'doesnt', 'arent', 'ans', 'thats', 'datas', 'isnt']
