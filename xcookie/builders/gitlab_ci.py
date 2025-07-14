@@ -230,7 +230,7 @@ def make_purepy_ci_jobs(self):
             if extra_key.endswith('-strict'):
                 special_install_lines = [
                     """
-                    sed 's/>=/==/' "requirements/gdal.txt" > "requirements-strict/gdal-strict.txt"
+                    sed 's/>=/==/' "requirements/gdal.txt" > "requirements/gdal-strict.txt"
                     """.strip(),
                     f'{self.PIP_INSTALL} -r requirements/gdal-strict.txt',
                 ]
