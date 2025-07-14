@@ -33,6 +33,7 @@ ExampleUsage:
 
     # Create a new binary gitlab kitware repo
     python -m xcookie.main --repo_name=kwimage_ext --repodir=$HOME/code/kwimage_ext --tags="kitware,gitlab,binpy"
+    python -m xcookie.main --repo_name=balanced_sampler --repodir=$HOME/code/balanced_sampler --tags="kitware,gitlab,binpy"
 
     python -m xcookie.main --repo_name=kwcoco_dataloader --repodir=$HOME/code/kwcoco_dataloader --tags="kitware,gitlab,purepy,gdal,cv2"
 
@@ -710,12 +711,14 @@ class TemplateApplier:
             # We can infer this if the repo already exists.
             git_dpath = self.repodir / '.git'
             if git_dpath.exists():
-                remote_url = ub.cmd('git remote -v  get-url origin', cwd=self.repodir)['out'].strip()
-                if self.config.url is None:
-                    self.config.url = GitURL(remote_url).to_https()
-                    if self.config.url.endswith('.git'):
-                        self.config.url = self.config.url[:-4]
-                    # print(f'self.config.url={self.config.url}')
+                resp = ub.cmd('git remote -v  get-url origin', cwd=self.repodir)
+                if resp['ret'] == 0:
+                    remote_url = resp['out'].strip()
+                    if self.config.url is None:
+                        self.config.url = GitURL(remote_url).to_https()
+                        if self.config.url.endswith('.git'):
+                            self.config.url = self.config.url[:-4]
+                        # print(f'self.config.url={self.config.url}')
 
         if self.config['remote_host'] is not None:
             self.remote_info['host'] = self.config['remote_host']
@@ -1490,7 +1493,7 @@ class TemplateApplier:
             {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},
             {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('3.13')},
             {'version': '>=3.5.2', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.12')},
-            {'version': '>=3.4.1', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
+            {'version': '>=3.4.1<=3.11.0', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
         ]
         return self._build_special_requirements(variant, version_defaults, header_lines)
 
@@ -1691,7 +1694,9 @@ class GitURL(str):
         if self._info is None:
             url = self
             info = {}
-            if url.startswith('https://'):
+            if url == '':
+                ...
+            elif url.startswith('https://'):
                 parts = url.split('https://')[1].split('/', 3)
                 info['host'] = parts[0]
                 info['group'] = parts[1]

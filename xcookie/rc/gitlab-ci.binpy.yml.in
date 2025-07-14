@@ -1,11 +1,11 @@
 # Note: expand yaml
 # yaml merge-expand .gitlab-ci.yml _expandyml && cat _expandyml
-# 
+#
 # GITLAB LINTER
 # https://gitlab.kitware.com/computer-vision/xcookie/-/ci/lint
 
 .__doc__: &__doc__
-    - | 
+    - |
         NOTE: INSTRUCTION HAVE BEEN MOVED TO ./dev/setup_secrets.sh
         This file should need minimal modification.
 
@@ -16,10 +16,10 @@
         ~/code/kwimage_ext/.gitlab-ci.yml
 
 stages:
-  - build
-  - test
-  - gpgsign
-  - deploy
+    - build
+    - test
+    - gpgsign
+    - deploy
 
 
 ### TEMPLATES ###
@@ -27,7 +27,7 @@ stages:
 
 
 .cibuildwheel_template: &cibuildwheel_template
-    stage: 
+    stage:
         build
 
     tags:
@@ -42,7 +42,7 @@ stages:
     script:
         - podman --version
         - podman info --debug
-        - python3 -m pip install cibuildwheel>=2.8.0 
+        - python3 -m pip install cibuildwheel>=2.8.0
         - pwd
         - ls -al
         # NOTE: this requires that some mechanism exists in cibuildwheel to
@@ -134,19 +134,19 @@ stages:
 
 
 .common_test_template: &common_test_template
-    <<: 
+    <<:
         - *common_template
 
-    stage: 
+    stage:
         test
-          
+
     # Coverage is a regex that will parse the coverage from the test stdout
     coverage: '/TOTAL.+ ([0-9]{1,3}%)/'
 
     except:
         refs:
-          - release 
-          - tags
+            - release
+            - tags
         #changes:
         #    - README.rst
         #    - CHANGELOG.md
@@ -171,78 +171,77 @@ stages:
     MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
     mkdir -p sandbox && cd sandbox && pytest --xdoctest-verbose=3 -s --cov-config ../pyproject.toml --cov-report html --cov-report term --cov="$MOD_NAME" --xdoc $(python -c "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))") ../tests
 
-    
-    
+
 .test_full_loose_template: &test_full_loose_template
-    <<: 
+    <<:
         - *common_test_template
 
     before_script:
         - *_setup_virtualenv_template
 
-    script: 
-      - ls wheelhouse || echo "wheelhouse does not exist"
-      - pip install tomli
-      - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
-      - pip install "${MOD_NAME}"[all,headless] -f wheelhouse
-      - *_run_tests_in_sandboxed_dir
+    script:
+        - ls wheelhouse || echo "wheelhouse does not exist"
+        - pip install tomli
+        - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
+        - pip install "${MOD_NAME}"[all,headless] -f wheelhouse
+        - *_run_tests_in_sandboxed_dir
 
 
 .test_minimal_loose_template: &test_minimal_loose_template
-    <<: 
+    <<:
         - *common_test_template
 
     before_script:
         - *_setup_virtualenv_template
 
     script:
-      - ls wheelhouse || echo "wheelhouse does not exist"
-      - pip install tomli
-      - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
-      - pip install "${MOD_NAME}"[tests,headless] -f wheelhouse
-      - *_run_tests_in_sandboxed_dir
+        - ls wheelhouse || echo "wheelhouse does not exist"
+        - pip install tomli
+        - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
+        - pip install "${MOD_NAME}"[tests,headless] -f wheelhouse
+        - *_run_tests_in_sandboxed_dir
 
 .test_full_strict_template: &test_full_strict_template
-    <<: 
+    <<:
         - *common_test_template
 
     before_script:
         - *_setup_virtualenv_template
 
-    script: 
-      - ls wheelhouse || echo "wheelhouse does not exist"
-      - pip install tomli
-      - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
-      - pip install "${MOD_NAME}"[all-strict,headless-strict] -f wheelhouse
-      - *_run_tests_in_sandboxed_dir
+    script:
+        - ls wheelhouse || echo "wheelhouse does not exist"
+        - pip install tomli
+        - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
+        - pip install "${MOD_NAME}"[all-strict,headless-strict] -f wheelhouse
+        - *_run_tests_in_sandboxed_dir
 
 
 .test_minimal_strict_template: &test_minimal_strict_template
-    <<: 
+    <<:
         - *common_test_template
 
     before_script:
         - *_setup_virtualenv_template
 
     script:
-      - ls wheelhouse || echo "wheelhouse does not exist"
-      - pip install tomli
-      - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
-      - pip install "${MOD_NAME}"[runtime-strict,tests-strict,headless-strict] -f wheelhouse
-      - *_run_tests_in_sandboxed_dir
+        - ls wheelhouse || echo "wheelhouse does not exist"
+        - pip install tomli
+        - MOD_NAME=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])")
+        - pip install "${MOD_NAME}"[runtime-strict,tests-strict,headless-strict] -f wheelhouse
+        - *_run_tests_in_sandboxed_dir
 
 
 gpgsign/wheels:
-    <<: 
+    <<:
         - *common_template
 
     image:
         python:3.8
 
-    stage: 
+    stage:
         gpgsign
 
-    script: 
+    script:
         - ls wheelhouse
         - export GPG_EXECUTABLE=gpg
         - export GPG_KEYID=$(cat dev/public_gpg_key)
@@ -255,9 +254,9 @@ gpgsign/wheels:
         - openssl version
         - $GPG_EXECUTABLE --list-keys
         # note CI_KITWARE_SECRET is a protected variables only available on master and release branch
-        - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import 
+        - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
         - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
-        - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import 
+        - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
         - GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
 
         - |
@@ -270,7 +269,7 @@ gpgsign/wheels:
                 echo "WHEEL_PATH = $WHEEL_PATH"
                 $GPG_SIGN_CMD --output $WHEEL_PATH.asc $WHEEL_PATH
                 $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH  || echo "hack, the first run of gpg very fails"
-                $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH 
+                $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH
             done
         - ls wheelhouse
 
@@ -310,262 +309,262 @@ gpgsign/wheels:
 # Python 3.11 Jobs
 
 build/cp3_11-cp3_11-linux:
-    <<: 
+    <<:
         - *cibuildwheel_template
     variables:
         CIBW_BUILD: "cp311-*"
 
 test_full_loose/cp3_11-cp3_11-linux:
-    <<: 
+    <<:
         - *test_full_loose_template
     image:
         *image_python3_11
-    needs: 
-        -  build/cp3_11-cp3_11-linux
+    needs:
+        - build/cp3_11-cp3_11-linux
 
 test_minimal_loose/cp3_11-cp3_11-linux:
-    <<: 
+    <<:
         - *test_minimal_loose_template
     image:
         *image_python3_11
-    needs: 
-        -  build/cp3_11-cp3_11-linux
+    needs:
+        - build/cp3_11-cp3_11-linux
 
 test_full_strict/cp3_11-cp3_11-linux:
-    <<: 
+    <<:
         - *test_full_strict_template
     image:
         *image_python3_11
-    needs: 
-        -  build/cp3_11-cp3_11-linux
+    needs:
+        - build/cp3_11-cp3_11-linux
 
 test_minimal_strict/cp3_11-cp3_11-linux:
-    <<: 
+    <<:
         - *test_minimal_strict_template
     image:
         *image_python3_11
-    needs: 
-        -  build/cp3_11-cp3_11-linux
+    needs:
+        - build/cp3_11-cp3_11-linux
 
 # ---------------
 # Python 3.10 Jobs
 
 build/cp3_10-cp3_10-linux:
-    <<: 
+    <<:
         - *cibuildwheel_template
     variables:
         CIBW_BUILD: "cp310-*"
 
 test_full_loose/cp3_10-cp3_10-linux:
-    <<: 
+    <<:
         - *test_full_loose_template
     image:
         *image_python3_10
-    needs: 
-        -  build/cp3_10-cp3_10-linux
+    needs:
+        - build/cp3_10-cp3_10-linux
 
 test_minimal_loose/cp3_10-cp3_10-linux:
-    <<: 
+    <<:
         - *test_minimal_loose_template
     image:
         *image_python3_10
-    needs: 
-        -  build/cp3_10-cp3_10-linux
+    needs:
+        - build/cp3_10-cp3_10-linux
 
 test_full_strict/cp3_10-cp3_10-linux:
-    <<: 
+    <<:
         - *test_full_strict_template
     image:
         *image_python3_10
-    needs: 
-        -  build/cp3_10-cp3_10-linux
+    needs:
+        - build/cp3_10-cp3_10-linux
 
 test_minimal_strict/cp3_10-cp3_10-linux:
-    <<: 
+    <<:
         - *test_minimal_strict_template
     image:
         *image_python3_10
-    needs: 
-        -  build/cp3_10-cp3_10-linux
+    needs:
+        - build/cp3_10-cp3_10-linux
 
 # ---------------
 # Python 3.9 Jobs
 
 build/cp39-cp39-linux:
-    <<: 
+    <<:
         - *cibuildwheel_template
     variables:
         CIBW_BUILD: "cp39-*"
 
 test_full_loose/cp39-cp39-linux:
-    <<: 
+    <<:
         - *test_full_loose_template
     image:
         *image_python39
-    needs: 
-        -  build/cp39-cp39-linux
+    needs:
+        - build/cp39-cp39-linux
 
 test_minimal_loose/cp39-cp39-linux:
-    <<: 
+    <<:
         - *test_minimal_loose_template
     image:
         *image_python39
-    needs: 
-        -  build/cp39-cp39-linux
+    needs:
+        - build/cp39-cp39-linux
 
 test_minimal_strict/cp39-cp39-linux:
-    <<: 
+    <<:
         - *test_minimal_strict_template
     image:
         *image_python39
-    needs: 
-        -  build/cp39-cp39-linux
+    needs:
+        - build/cp39-cp39-linux
 
 test_full_strict/cp39-cp39-linux:
-    <<: 
+    <<:
         - *test_full_strict_template
     image:
         *image_python39
-    needs: 
-        -  build/cp39-cp39-linux
+    needs:
+        - build/cp39-cp39-linux
 
 # ---------------
 # Python 3.8 Jobs
 
 build/cp38-cp38-linux:
-    <<: 
+    <<:
         - *cibuildwheel_template
     variables:
         CIBW_BUILD: "cp38-*"
 
 test_full_loose/cp38-cp38-linux:
-    <<: 
+    <<:
         - *test_full_loose_template
     image:
         *image_python38
-    needs: 
-        -  build/cp38-cp38-linux
+    needs:
+        - build/cp38-cp38-linux
 
 test_minimal_loose/cp38-cp38-linux:
-    <<: 
+    <<:
         - *test_minimal_loose_template
     image:
         *image_python38
-    needs: 
-        -  build/cp38-cp38-linux
+    needs:
+        - build/cp38-cp38-linux
 
 test_minimal_strict/cp38-cp38-linux:
-    <<: 
+    <<:
         - *test_minimal_strict_template
     image:
         *image_python38
-    needs: 
-        -  build/cp38-cp38-linux
+    needs:
+        - build/cp38-cp38-linux
 
 test_full_strict/cp38-cp38-linux:
-    <<: 
+    <<:
         - *test_full_strict_template
     image:
         *image_python38
-    needs: 
-        -  build/cp38-cp38-linux
+    needs:
+        - build/cp38-cp38-linux
 
 # ---------------
 # Python 3.7 Jobs
 
 build/cp37-cp37m-linux:
-    <<: 
+    <<:
         - *cibuildwheel_template
     variables:
         CIBW_BUILD: "cp37-*"
 
 test_full_loose/cp37-cp37m-linux:
-    <<: 
+    <<:
         - *test_full_loose_template
     image:
         *image_python37
-    needs: 
-        -  build/cp37-cp37m-linux
+    needs:
+        - build/cp37-cp37m-linux
 
 test_minimal_loose/cp37-cp37m-linux:
-    <<: 
+    <<:
         - *test_minimal_loose_template
     image:
         *image_python37
-    needs: 
-        -  build/cp37-cp37m-linux
+    needs:
+        - build/cp37-cp37m-linux
 
 test_minimal_strict/cp37-cp37m-linux:
-    <<: 
+    <<:
         - *test_minimal_strict_template
     image:
         *image_python37
-    needs: 
-        -  build/cp37-cp37m-linux
+    needs:
+        - build/cp37-cp37m-linux
 
 test_full_strict/cp37-cp37m-linux:
-    <<: 
+    <<:
         - *test_full_strict_template
     image:
         *image_python37
-    needs: 
-        -  build/cp37-cp37m-linux
+    needs:
+        - build/cp37-cp37m-linux
 
 
 # ---------------
 # Python 3.6 Jobs
 
 build/cp36-cp36m-linux:
-    <<: 
+    <<:
         - *cibuildwheel_template
     variables:
         CIBW_BUILD: "cp36-*"
 
 test_full_loose/cp36-cp36m-linux:
-    <<: 
+    <<:
         - *test_full_loose_template
     image:
         *image_python36
-    needs: 
-        -  build/cp36-cp36m-linux
+    needs:
+        - build/cp36-cp36m-linux
 
 test_minimal_loose/cp36-cp36m-linux:
-    <<: 
+    <<:
         - *test_minimal_loose_template
     image:
         *image_python36
-    needs: 
-        -  build/cp36-cp36m-linux
+    needs:
+        - build/cp36-cp36m-linux
 
 test_minimal_strict/cp36-cp36m-linux:
-    <<: 
+    <<:
         - *test_minimal_strict_template
     image:
         *image_python36
-    needs: 
-        -  build/cp36-cp36m-linux
+    needs:
+        - build/cp36-cp36m-linux
 
 test_full_strict/cp36-cp36m-linux:
-    <<: 
+    <<:
         - *test_full_strict_template
     image:
         *image_python36
-    needs: 
-        -  build/cp36-cp36m-linux
+    needs:
+        - build/cp36-cp36m-linux
 
 
 deploy/wheels:
-    <<: 
+    <<:
         - *common_template
 
     image:
         python:3.8
 
-    stage: 
+    stage:
         deploy
 
-    script: 
-        - pip install six pyopenssl ndg-httpsclient pyasn1 requests[security] twine -U 
+    script:
+        - pip install six pyopenssl ndg-httpsclient pyasn1 requests[security] twine -U
         - ls wheelhouse
         - |
             WHEEL_PATHS=(wheelhouse/*.whl)
@@ -579,7 +578,7 @@ deploy/wheels:
                 twine check $WHEEL_PATH
                 twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH || echo "upload already exists"
             done
-        - | 
+        - |
             # Have the server git-tag the release and push the tags
             export VERSION=$(python -c "import setup; print(setup.VERSION)")
             # do sed twice to handle the case of https clone with and without a read token
@@ -604,166 +603,166 @@ deploy/wheels:
                 git tag $TAG_NAME -m "tarball tag $VERSION"
                 git push --tags "https://git-push-token:${PUSH_TOKEN}@${URL_HOST}"
             fi
-            
+
     only:
         refs:
             - release
 
 
 .__local_docker_heredoc__:
-        - | 
-            # Commands to help developers debug pipelines on their local machine
-            # Grab the base docker image, (forwarding your ssh credentials), clone
-            # the watch repo, create the environment, and run the tests. 
-            #docker login gitlab.kitware.com:4567
+    - |
+        # Commands to help developers debug pipelines on their local machine
+        # Grab the base docker image, (forwarding your ssh credentials), clone
+        # the watch repo, create the environment, and run the tests.
+        #docker login gitlab.kitware.com:4567
 
-            IMAGE_NAME=gitlab.kitware.com:4567/computer-vision/ci-docker/gl-python:3.6
-            docker run -v $PWD:/io:ro -v $HOME/.cache/pip:/pip_cache -it $IMAGE_NAME bash
-            # Will need to chmod things afterwards
-            export PIP_CACHE_DIR=/pip_cache
-            echo $PIP_CACHE_DIR
-            chmod -R o+rw $PIP_CACHE_DIR
-            chmod -R o+rw $PIP_CACHE_DIR
-            chmod -R g+rw $PIP_CACHE_DIR
-            USER=$(whoami)
-            chown -R $USER $PIP_CACHE_DIR
-            cd $HOME
-            git clone /io ./repo
+        IMAGE_NAME=gitlab.kitware.com:4567/computer-vision/ci-docker/gl-python:3.6
+        docker run -v $PWD:/io:ro -v $HOME/.cache/pip:/pip_cache -it $IMAGE_NAME bash
+        # Will need to chmod things afterwards
+        export PIP_CACHE_DIR=/pip_cache
+        echo $PIP_CACHE_DIR
+        chmod -R o+rw $PIP_CACHE_DIR
+        chmod -R o+rw $PIP_CACHE_DIR
+        chmod -R g+rw $PIP_CACHE_DIR
+        USER=$(whoami)
+        chown -R $USER $PIP_CACHE_DIR
+        cd $HOME
+        git clone /io ./repo
 
-            cd $HOME/repo
+        cd $HOME/repo
 
-            # Make a virtualenv
-            export PYVER=$(python -c "import sys; print('{}{}'.format(*sys.version_info[0:2]))")
-            pip install virtualenv
-            virtualenv venv$PYVER
-            source venv$PYVER/bin/activate
-            #pip install pip -U
-            #pip install pip setuptools -U
+        # Make a virtualenv
+        export PYVER=$(python -c "import sys; print('{}{}'.format(*sys.version_info[0:2]))")
+        pip install virtualenv
+        virtualenv venv$PYVER
+        source venv$PYVER/bin/activate
+        #pip install pip -U
+        #pip install pip setuptools -U
 
-            # STRICT VARIANT
-            ./dev/make_strict_req.sh
-            #pip install pip-tools
-            #pip install pip -U
-            #pip install scikit-build cmake ninja
-            pip install -r requirements-strict/build.txt
-            pip install -r requirements-strict.txt -r requirements-strict/headless.txt
-            pip install -e .
-            ./run_tests.py
+        # STRICT VARIANT
+        ./dev/make_strict_req.sh
+        #pip install pip-tools
+        #pip install pip -U
+        #pip install scikit-build cmake ninja
+        pip install -r requirements-strict/build.txt
+        pip install -r requirements-strict.txt -r requirements-strict/headless.txt
+        pip install -e .
+        ./run_tests.py
 
-            # LOOSE VARIANT
-            pip install -r requirements.txt
-            pip install -e .[tests,headless]
-            ./run_tests.py
+        # LOOSE VARIANT
+        pip install -r requirements.txt
+        pip install -e .[tests,headless]
+        ./run_tests.py
 
 
 .__local_test_wheel__:
-  IMAGE_NAME=gitlab.kitware.com:4567/computer-vision/ci-docker/gl-python:3.6
-  docker run --privileged -v $PWD:/io:ro -v $HOME/.cache/pip:/pip_cache -it $IMAGE_NAME bash
-  cd /io
+    IMAGE_NAME=gitlab.kitware.com:4567/computer-vision/ci-docker/gl-python:3.6
+    docker run --privileged -v $PWD:/io:ro -v $HOME/.cache/pip:/pip_cache -it $IMAGE_NAME bash
+    cd /io
 
 
 .__local_podman_heredoc__:
-        - | 
-          # Test podman in docker locally
-          IMAGE_NAME=gitlab.kitware.com:4567/computer-vision/ci-docker/podman:3.2.1
+    - |
+      # Test podman in docker locally
+      IMAGE_NAME=gitlab.kitware.com:4567/computer-vision/ci-docker/podman:3.2.1
 
-          # Cannot clone issue:
-          # https://github.com/containers/podman/issues/10802
-          # Podman requires a clone system call
-          # This invocation of docker with --privledged works around it:
-          docker run --privileged -v $PWD:/io:ro -v $HOME/.cache/pip:/pip_cache -it $IMAGE_NAME bash
+      # Cannot clone issue:
+      # https://github.com/containers/podman/issues/10802
+      # Podman requires a clone system call
+      # This invocation of docker with --privledged works around it:
+      docker run --privileged -v $PWD:/io:ro -v $HOME/.cache/pip:/pip_cache -it $IMAGE_NAME bash
 
-          # Once inside docker, we can test that podman works correctly
-          mkdir -p "$HOME/.local/.cache/containers/vfs-storage/"
-          #podman --cgroup-manager=cgroupfs --storage-driver=vfs --root=$HOME/.local/share/containers/vfs-storage/ info --debug
+      # Once inside docker, we can test that podman works correctly
+      mkdir -p "$HOME/.local/.cache/containers/vfs-storage/"
+      #podman --cgroup-manager=cgroupfs --storage-driver=vfs --root=$HOME/.local/share/containers/vfs-storage/ info --debug
 
-          export PIP_CACHE_DIR=/pip_cache
-          echo $PIP_CACHE_DIR
-          chmod -R o+rw $PIP_CACHE_DIR
-          chmod -R o+rw $PIP_CACHE_DIR
-          chmod -R g+rw $PIP_CACHE_DIR
-          USER=$(whoami)
-          chown -R $USER $PIP_CACHE_DIR
+      export PIP_CACHE_DIR=/pip_cache
+      echo $PIP_CACHE_DIR
+      chmod -R o+rw $PIP_CACHE_DIR
+      chmod -R o+rw $PIP_CACHE_DIR
+      chmod -R g+rw $PIP_CACHE_DIR
+      USER=$(whoami)
+      chown -R $USER $PIP_CACHE_DIR
 
-          # Install the local host copy of cibuildwheel
-          #git clone /cibuildwheel /internal_cibuildwheel
-          #cd /internal_cibuildwheel
-          #python3 -m pip install .
-          #python3 -m pip uninstall cibuildwheel
-          #cibuildwheel --platform linux --print-build-identifiers
-          python3 -m pip install cibuildwheel
+      # Install the local host copy of cibuildwheel
+      #git clone /cibuildwheel /internal_cibuildwheel
+      #cd /internal_cibuildwheel
+      #python3 -m pip install .
+      #python3 -m pip uninstall cibuildwheel
+      #cibuildwheel --platform linux --print-build-identifiers
+      python3 -m pip install cibuildwheel
 
-          # Install the repo
-          cd $HOME
-          git clone /io ./repo
-          cd $HOME/repo
+      # Install the repo
+      cd $HOME
+      git clone /io ./repo
+      cd $HOME/repo
 
-          #cat /etc/os-release
-          #podman --version
-          #podman info --debug
-          #(cd /internal_cibuildwheel && git pull)
-          #pwd
-          #ls -al
+      #cat /etc/os-release
+      #podman --version
+      #podman info --debug
+      #(cd /internal_cibuildwheel && git pull)
+      #pwd
+      #ls -al
 
-          cibuildwheel --platform linux --print-build-identifiers
+      cibuildwheel --platform linux --print-build-identifiers
 
-          #export CIBW_OCI_EXTRA_ARGS_CREATE="--events-backend=file --cap-add CAP_SYS_ADMIN --cap-add=SYS_PTRACE"
-          export CIBW_SKIP="pp* cp310-* cp39-* cp38-* cp37-* *musllinux*"
-          cibuildwheel --config-file pyproject.toml --platform linux --archs x86_64 --print-build-identifiers
-          cd $HOME/repo
-          export CIBW_CONTAINER_ENGINE="podman"
-          #cibuildwheel --output-dir wheelhouse --platform linux --archs x86_64
-          # - cibuildwheel --output-dir wheelhouse --platform linux --archs x86_64,i686,aarch64,ppc64le,s390x,universal2,arm64,x86,AMD64
-          
-          #https://infosecadalid.com/2021/08/30/containers-rootful-rootless-privileged-and-super-privileged/
-          #
-          # rw,relatime  
-          
-          codeblock()
-          {
-              PYEXE=python3
-              echo "$1" | $PYEXE -c "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()).strip('\n'))"
-          }
-          # Make a storage.conf and containers.conf file
-          #
-          # https://github.com/containers/common/blob/main/docs/containers.conf.5.md
-          # https://github.com/containers/storage/blob/main/docs/containers-storage.conf.5.md
-          export CONTAINERS_CONF=$(realpath "temp_containers.conf")
-          export CONTAINERS_STORAGE_CONF=$(realpath "temp_storage.conf")
-          # --
-          codeblock "
-          [storage]
-          driver=\"vfs\"
-          graphroot=\"$HOME/.local/share/containers/vfs-storage\"
-          runroot=\"$HOME/.local/share/containers/vfs-runroot\"
-          [storage.options.aufs]
-          mountopt=\"rw\"
-          " > $CONTAINERS_STORAGE_CONF
-          # --
-          # For defaults see /usr/share/containers/containers.conf
-          codeblock "
-          [containers]
-          default_capabilities = [
-            \"CHOWN\",
-            \"DAC_OVERRIDE\",
-            \"FOWNER\",
-            \"FSETID\",
-            \"KILL\",
-            \"NET_BIND_SERVICE\",
-            \"SETFCAP\",
-            \"SETGID\",
-            \"SETPCAP\",
-            \"SETUID\",
-            \"SYS_CHROOT\"
-          ]
-          [engine]
-          cgroup_manager=\"cgroupfs\"
-          events_logger=\"file\"
-          " > $CONTAINERS_CONF
-          #podman run ubi8 mount
-          #podman run --privileged ubi8 mount
-          cat $CONTAINERS_CONF
-          cat $CONTAINERS_STORAGE_CONF
+      #export CIBW_OCI_EXTRA_ARGS_CREATE="--events-backend=file --cap-add CAP_SYS_ADMIN --cap-add=SYS_PTRACE"
+      export CIBW_SKIP="pp* cp310-* cp39-* cp38-* cp37-* *musllinux*"
+      cibuildwheel --config-file pyproject.toml --platform linux --archs x86_64 --print-build-identifiers
+      cd $HOME/repo
+      export CIBW_CONTAINER_ENGINE="podman"
+      #cibuildwheel --output-dir wheelhouse --platform linux --archs x86_64
+      # - cibuildwheel --output-dir wheelhouse --platform linux --archs x86_64,i686,aarch64,ppc64le,s390x,universal2,arm64,x86,AMD64
 
-          cd $HOME/repo
-          cibuildwheel --config-file pyproject.toml --platform linux --archs x86_64
+      #https://infosecadalid.com/2021/08/30/containers-rootful-rootless-privileged-and-super-privileged/
+      #
+      # rw,relatime
+
+      codeblock()
+      {
+          PYEXE=python3
+          echo "$1" | $PYEXE -c "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()).strip('\n'))"
+      }
+      # Make a storage.conf and containers.conf file
+      #
+      # https://github.com/containers/common/blob/main/docs/containers.conf.5.md
+      # https://github.com/containers/storage/blob/main/docs/containers-storage.conf.5.md
+      export CONTAINERS_CONF=$(realpath "temp_containers.conf")
+      export CONTAINERS_STORAGE_CONF=$(realpath "temp_storage.conf")
+      # --
+      codeblock "
+      [storage]
+      driver=\"vfs\"
+      graphroot=\"$HOME/.local/share/containers/vfs-storage\"
+      runroot=\"$HOME/.local/share/containers/vfs-runroot\"
+      [storage.options.aufs]
+      mountopt=\"rw\"
+      " > $CONTAINERS_STORAGE_CONF
+      # --
+      # For defaults see /usr/share/containers/containers.conf
+      codeblock "
+      [containers]
+      default_capabilities = [
+        \"CHOWN\",
+        \"DAC_OVERRIDE\",
+        \"FOWNER\",
+        \"FSETID\",
+        \"KILL\",
+        \"NET_BIND_SERVICE\",
+        \"SETFCAP\",
+        \"SETGID\",
+        \"SETPCAP\",
+        \"SETUID\",
+        \"SYS_CHROOT\"
+      ]
+      [engine]
+      cgroup_manager=\"cgroupfs\"
+      events_logger=\"file\"
+      " > $CONTAINERS_CONF
+      #podman run ubi8 mount
+      #podman run --privileged ubi8 mount
+      cat $CONTAINERS_CONF
+      cat $CONTAINERS_STORAGE_CONF
+
+      cd $HOME/repo
+      cibuildwheel --config-file pyproject.toml --platform linux --archs x86_64

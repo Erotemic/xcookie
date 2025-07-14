@@ -17,6 +17,9 @@ Notes:
     # need to edit the conf.py
 
     cd ~/code/xcookie/docs
+
+    # Remove any old auto docs folder and regenerate it.
+    rm -rf ~/code/xcookie/docs/source/auto
     sphinx-apidoc --private --separate --force --output-dir ~/code/xcookie/docs/source/auto ~/code/xcookie/xcookie
 
     # Note: the module should importable before running this

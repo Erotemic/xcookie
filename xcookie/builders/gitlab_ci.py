@@ -186,6 +186,10 @@ def make_purepy_ci_jobs(self):
 
         # Coverage is a regex that will parse the coverage from the test stdout
         'coverage': '/TOTAL.+ ([0-9]{1,3}%)/',
+
+        # Skip tests on the release branch, as these were covered in the MR and
+        # main. This speeds up deployment and deployment debugging.
+        'except': {'refs': ['release']},
     }
 
     common_test_template = CommentedMap(common_test_template)
@@ -223,10 +227,17 @@ def make_purepy_ci_jobs(self):
     install_extras = ub.udict(all_install_extras) & self.config.test_variants
     for extra_key, extra in install_extras.items():
         if 'gdal' in self.tags:
-            special_install_lines = [
-                # TODO: handle strict
-                f'{self.PIP_INSTALL} -r requirements/gdal.txt',
-            ]
+            if extra_key.endswith('-strict'):
+                special_install_lines = [
+                    """
+                    sed 's/>=/==/' "requirements/gdal.txt" > "requirements-strict/gdal-strict.txt"
+                    """.strip(),
+                    f'{self.PIP_INSTALL} -r requirements/gdal-strict.txt',
+                ]
+            else:
+                special_install_lines = [
+                    f'{self.PIP_INSTALL} -r requirements/gdal.txt',
+                ]
         else:
             special_install_lines = []
         workspace_dname = 'sandbox'
@@ -496,13 +507,14 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
         '''))))
     deploy_script = [
         f'{self.UPDATE_PIP}',
-        f'{self.PIP_INSTALL} pyopenssl ndg-httpsclient pyasn1 requests[security] twine -U',
+        f'{self.PIP_INSTALL} pyopenssl ndg-httpsclient pyasn1 requests[security] setuptools twine -U',
         f'ls {wheelhouse_dpath}',
     ]
     if self.config['deploy_pypi']:
         deploy_script += [
             Yaml.CodeBlock(
                 '''
+                set -e
                 WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
                 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
                 source dev/secrets_configuration.sh
@@ -511,7 +523,7 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                 echo "$WHEEL_PATHS_STR"
                 for WHEEL_PATH in "${WHEEL_PATHS[@]}"
                 do
-                    twine check $WHEEL_PATH.asc $WHEEL_PATH
+                    twine check $WHEEL_PATH
                     twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH || echo "upload already exists"
                 done
                 ''')
@@ -521,6 +533,7 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
         deploy_script += [
             Yaml.CodeBlock(
                 r'''
+                set -e
                 # Have the server git-tag the release and push the tags
                 export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
                 # do sed twice to handle the case of https clone with and without a read token
@@ -553,6 +566,7 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
         deploy_script += [
             Yaml.CodeBlock(
                 fr'''
+                set -e
                 # https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
                 echo "CI_PROJECT_ID=$CI_PROJECT_ID"
                 echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
