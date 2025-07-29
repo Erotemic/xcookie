@@ -98,26 +98,35 @@ def make_install_and_test_wheel_parts(self,
             from pkginfo import Wheel, SDist
             fpath = '$WHEEL_FPATH'
             cls = Wheel if fpath.endswith('.whl') else SDist
-            print(cls(fpath).version)
+            item = cls(fpath)
+            if item.version is None:
+                import re
+                # This is very fragile
+                match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
+                assert match is not None
+                # Not sure why version is None in 3.6 and 3.7
+                print(match.groups()[1])
+            else:
+                print(item.version)
         "
         ''')
-    get_mod_version_bash = ub.codeblock(
-        r'''
-        export MOD_VERSION=$(printf "$WHEEL_FPATH" | sed -E 's#.*/[^/]+-([0-9]+\.[0-9]+\.[0-9]+)[-.].*#\1#')
-        '''
-    )
-    # Will this help?
-    get_mod_version_bash = ub.codeblock(
-        '''
-        python -c "if 1:
-            from pkginfo import Wheel, SDist
-            import sys
-            f=sys.argv[1]
-            cls=Wheel if f.endswith('.whl') else SDist
-            print(cls(f).version)
-        " "$WHEEL_FPATH"
-        '''
-    )
+    # get_mod_version_bash = ub.codeblock(
+    #     r'''
+    #     export MOD_VERSION=$(printf "$WHEEL_FPATH" | sed -E 's#.*/[^/]+-([0-9]+\.[0-9]+\.[0-9]+)[-.].*#\1#')
+    #     '''
+    # )
+    # # Will this help?
+    # get_mod_version_bash = ub.codeblock(
+    #     '''
+    #     python -c "if 1:
+    #         from pkginfo import Wheel, SDist
+    #         import sys
+    #         f=sys.argv[1]
+    #         cls=Wheel if f.endswith('.whl') else SDist
+    #         print(cls(f).version)
+    #     " "$WHEEL_FPATH"
+    #     '''
+    # )
 
     # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath(f'{self.mod_name}'))"
     get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
