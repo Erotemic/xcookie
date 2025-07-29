@@ -327,6 +327,24 @@ jobs:
             fpath = sorted(candidates)[-1]
             print(str(fpath).replace(chr(92), chr(47)))
         ")
+        echo "DEBUG WHEEL_FPATH=$WHEEL_FPATH"
+        echo "DEBUG INSTALL_EXTRAS=$INSTALL_EXTRAS"
+        python -c "if 1:
+            print('PYTHON DEBUG 1')
+            import pkginfo
+            import sys
+            print(pkginfo)
+            from pkginfo import Wheel, SDist
+            f=sys.argv[1]
+            print(f)
+            cls=Wheel if f.endswith('.whl') else SDist
+            print(cls)
+            item = cls(f)
+            print(item)
+            print(item.__dict__)
+            print(item.version)
+            print('PYTHON DEBUG 2')
+        " "$WHEEL_FPATH"
         export MOD_VERSION=$(python -c "if 1:
             from pkginfo import Wheel, SDist
             import sys
