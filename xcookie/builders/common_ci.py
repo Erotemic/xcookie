@@ -266,7 +266,7 @@ def get_supported_platform_info(self):
             v = [cpython_versions_non34_[0]]
         elif v == 'max':
             v = [cpython_versions_non34_non_prerelease_[-1]]
-            v = [cpython_versions_non34_[-1]]
+            # v = [cpython_versions_non34_[-1]]
         elif v == '*':
             v = cpython_versions_non34 + pypy_versions
         else:

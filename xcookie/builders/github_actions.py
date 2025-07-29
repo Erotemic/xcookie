@@ -30,7 +30,7 @@ class Actions:
     """
     action_versions = {
         'checkout': 'actions/checkout@v3',
-        'setup-python': 'actions/setup-python@v4',
+        'setup-python': 'actions/setup-python@v5',
     }
 
     @classmethod
@@ -84,14 +84,14 @@ class Actions:
     def checkout(cls, *args, **kwargs):
         return cls.action({
             'name': 'Checkout source',
-            'uses': 'actions/checkout@v4.1.1'
+            'uses': 'actions/checkout@v4.2.2'
         }, *args, **kwargs)
 
     @classmethod
     def setup_python(cls, *args, **kwargs):
         return cls.action({
             'name': 'Setup Python',
-            'uses': 'actions/setup-python@v5.1.1'
+            'uses': 'actions/setup-python@v5.6.0'
         }, *args, **kwargs)
 
     @classmethod
@@ -101,7 +101,7 @@ class Actions:
             https://github.com/codecov/codecov-action
         """
         return cls.action({
-            'uses': 'codecov/codecov-action@v4.5.0'
+            'uses': 'codecov/codecov-action@v5.4.3'
         }, *args, **kwargs)
 
     @classmethod
