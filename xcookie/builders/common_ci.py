@@ -186,6 +186,10 @@ def make_install_and_test_wheel_parts(self,
 
 def get_supported_platform_info(self):
     """
+    CommandLine:
+        xdoctest -m /home/joncrall/code/xcookie/xcookie/builders/common_ci.py get_supported_platform_info
+        xdoctest -m xcookie.builders.common_ci get_supported_platform_info
+
     Example:
         >>> from xcookie.builders.github_actions import *  # NOQA
         >>> from xcookie.builders.common_ci import *  # NOQA
@@ -193,8 +197,9 @@ def get_supported_platform_info(self):
         >>> from xcookie.main import TemplateApplier
         >>> config = XCookieConfig(tags=['purepy'], remote_group='Org', repo_name='Repo')
         >>> self = TemplateApplier(config)
-        >>> get_supported_platform_info(self)
-
+        >>> supported_platform_info = get_supported_platform_info(self)
+        >>> import ubelt as ub
+        >>> print(f'supported_platform_info = {ub.urepr(supported_platform_info, nl=2)}')
     """
     os_list = []
 
@@ -244,6 +249,8 @@ def get_supported_platform_info(self):
         if not info.get('is_prerelease'):
             cpython_versions_non34_non_prerelease_.append(pyver)
     cpython_versions_non34 = cpython_versions_non34_
+    print(f'cpython_versions_non34_={cpython_versions_non34_}')
+    print(f'cpython_versions_non34_non_prerelease_={cpython_versions_non34_non_prerelease_}')
 
     extras_versions_templates = {
         'full-loose': self.config['ci_versions_full_loose'],
@@ -256,9 +263,10 @@ def get_supported_platform_info(self):
         if v == '':
             v = []
         elif v == 'min':
-            v = [cpython_versions_non34_non_prerelease_[0]]
+            v = [cpython_versions_non34_[0]]
         elif v == 'max':
             v = [cpython_versions_non34_non_prerelease_[-1]]
+            v = [cpython_versions_non34_[-1]]
         elif v == '*':
             v = cpython_versions_non34 + pypy_versions
         else:

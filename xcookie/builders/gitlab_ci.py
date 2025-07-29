@@ -12,7 +12,7 @@ def build_gitlab_ci(self):
         >>> config['enable_gpg'] = False
         >>> config['linter'] = False
         >>> config['test_variants'] = ['full-loose']
-        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-1:]
+        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-2:]
         >>> self = TemplateApplier(config)
         >>> text = build_gitlab_ci(self)
         >>> print(ub.highlight_code(text, 'yaml'))

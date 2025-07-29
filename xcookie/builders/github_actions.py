@@ -267,7 +267,7 @@ def build_github_actions(self):
         >>> from xcookie.main import XCookieConfig
         >>> from xcookie.main import TemplateApplier
         >>> config = XCookieConfig(tags=['purepy'], repo_name='mymod')
-        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-1:]
+        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-2:]
         >>> self = TemplateApplier(config)
         >>> text = build_github_actions(self)
         >>> print(ub.highlight_code(text, 'yaml'))
