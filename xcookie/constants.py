@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 KNOWN_PYTHON_VERSIONS: List[str]  = [
     '2.7', '3.4', '3.5', '3.6', '3.7', '3.8', '3.9', '3.10', '3.11', '3.12',
@@ -11,7 +11,7 @@ DEV_PYTHON_VERSIONS: List[str] = [
 ]
 
 
-KNOWN_CPYTHON_DOCKER_IMAGES: dict[str, str]  = {
+KNOWN_CPYTHON_DOCKER_IMAGES: Dict[str, str]  = {
     # TODO allow rc?
     'cp314': 'python:3.14.0-rc.1',
     'cp313': 'python:3.13',
