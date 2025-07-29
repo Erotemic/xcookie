@@ -185,6 +185,17 @@ def make_install_and_test_wheel_parts(self,
 
 
 def get_supported_platform_info(self):
+    """
+    Example:
+        >>> from xcookie.builders.github_actions import *  # NOQA
+        >>> from xcookie.builders.common_ci import *  # NOQA
+        >>> from xcookie.main import XCookieConfig
+        >>> from xcookie.main import TemplateApplier
+        >>> config = XCookieConfig(tags=['purepy'], remote_group='Org', repo_name='Repo')
+        >>> self = TemplateApplier(config)
+        >>> get_supported_platform_info(self)
+
+    """
     os_list = []
 
     # TODO: maybe allow pinning, or list out what the options are
@@ -224,11 +235,14 @@ def get_supported_platform_info(self):
     # version needs to map to something github actions knows about, which could
     # be a prerelease version.
     cpython_versions_non34_ = []
+    cpython_versions_non34_non_prerelease_ = []
     for pyver in cpython_versions_non34:
         info = INFO_LUT[pyver]
         if 'github_action_version' in info:
             pyver = info['github_action_version']
         cpython_versions_non34_.append(pyver)
+        if not info.get('is_prerelease'):
+            cpython_versions_non34_non_prerelease_.append(pyver)
     cpython_versions_non34 = cpython_versions_non34_
 
     extras_versions_templates = {
@@ -242,9 +256,9 @@ def get_supported_platform_info(self):
         if v == '':
             v = []
         elif v == 'min':
-            v = [cpython_versions_non34[0]]
+            v = [cpython_versions_non34_non_prerelease_[0]]
         elif v == 'max':
-            v = [cpython_versions_non34[-1]]
+            v = [cpython_versions_non34_non_prerelease_[-1]]
         elif v == '*':
             v = cpython_versions_non34 + pypy_versions
         else:

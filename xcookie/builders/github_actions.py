@@ -564,6 +564,11 @@ def build_and_test_sdist_job(self):
 
 def build_binpy_wheels_job(self):
     """
+    Builds the action for binary python packages that creates the wheels.
+
+    Returns:
+        Dict: yaml structure
+
     cat ~/code/xcookie/xcookie/rc/test_binaries.yml.in | yq  .jobs.build_and_test_wheels
 
     Notes:
@@ -703,7 +708,7 @@ def build_purewheel_job(self):
     wheelhouse_dpath = 'wheelhouse'
     supported_platform_info = common_ci.get_supported_platform_info(self)
     # os_list = supported_platform_info['os_list']
-    cpython_versions = supported_platform_info['cpython_versions']
+    main_python_version = supported_platform_info['main_python_version']
     # pypy_versions = supported_platform_info['pypy_versions']
     # min_python_version = supported_platform_info['min_python_version']
     # max_python_version = supported_platform_info['max_python_version']
@@ -716,7 +721,7 @@ def build_purewheel_job(self):
                 # Build on one of the platforms with the newest python version
                 # (it does not really matter)
                 'os': ['ubuntu-latest'],  # os_list[0:1],
-                'python-version': cpython_versions[-1:],
+                'python-version': [main_python_version],
                 'arch': ['auto'],
             }
         },
@@ -927,6 +932,8 @@ def test_wheels_job(self, needs=None):
     ]
 
     workspace_dname = 'testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}'
+
+    # HACK
     WITH_COVERAGE = ('ibeis' != self.mod_name)
     if WITH_COVERAGE:
         custom_after_test_commands = [

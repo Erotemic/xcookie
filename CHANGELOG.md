@@ -7,6 +7,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Version 0.3.1 - Unreleased
 
+### Changed
+
+* Prerelease versions are no longer considered as "max" versions.
+
 
 ## [Version 0.3.0] - 
 
