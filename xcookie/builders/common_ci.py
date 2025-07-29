@@ -103,7 +103,7 @@ def make_install_and_test_wheel_parts(self,
         ''')
     get_mod_version_bash = ub.codeblock(
         r'''
-        export MOD_VERSION=$(echo "$WHEEL_FPATH" | sed -E 's#.*/[^/]+-([0-9]+\.[0-9]+\.[0-9]+)[-.].*#\1#')
+        export MOD_VERSION=$(printf "$WHEEL_FPATH" | sed -E 's#.*/[^/]+-([0-9]+\.[0-9]+\.[0-9]+)[-.].*#\1#')
         '''
     )
     # Will this help?
