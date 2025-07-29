@@ -259,6 +259,9 @@ def build_github_actions(self):
         cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.deploy
         cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .
 
+    CommandLine:
+        xdoctest -m xcookie.builders.github_actions build_github_actions
+
     Example:
         >>> from xcookie.builders.github_actions import *  # NOQA
         >>> from xcookie.main import XCookieConfig

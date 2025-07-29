@@ -471,6 +471,7 @@ class TemplateApplier:
         self.remote_info = {
             'type': 'unknown'
         }
+        self._setup_pip_commands()  # Is this sufficient here?
 
     def apply(self):
         """
@@ -1319,12 +1320,12 @@ class TemplateApplier:
 
     def build_github_actions(self):
         from xcookie.builders import github_actions
-        self._setup_pip_commands()
+        self._setup_pip_commands()  # Do we need this here?
         return github_actions.build_github_actions(self)
 
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci
-        self._setup_pip_commands()
+        self._setup_pip_commands()  # Do we need this here?
         return gitlab_ci.build_gitlab_ci(self)
 
     def build_manifest_in(self):
@@ -1493,7 +1494,7 @@ class TemplateApplier:
             {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},
             {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('3.13')},
             {'version': '>=3.5.2', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.12')},
-            {'version': '>=3.4.1<=3.11.0', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
+            {'version': '>=3.4.1,<=3.11.0', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
         ]
         return self._build_special_requirements(variant, version_defaults, header_lines)
 
