@@ -716,10 +716,13 @@ class TemplateApplier:
                 if resp['ret'] == 0:
                     remote_url = resp['out'].strip()
                     if self.config.url is None:
-                        self.config.url = GitURL(remote_url).to_https()
-                        if self.config.url.endswith('.git'):
-                            self.config.url = self.config.url[:-4]
-                        # print(f'self.config.url={self.config.url}')
+                        try:
+                            self.config.url = GitURL(remote_url).to_https()
+                            if self.config.url.endswith('.git'):
+                                self.config.url = self.config.url[:-4]
+                            # print(f'self.config.url={self.config.url}')
+                        except IndexError:
+                            ...
 
         if self.config['remote_host'] is not None:
             self.remote_info['host'] = self.config['remote_host']

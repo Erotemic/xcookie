@@ -985,6 +985,10 @@ def test_wheels_job(self, needs=None):
 
 def build_deploy(self, mode='live', needs=None):
     """
+    CommandLine:
+        xdoctest -m /home/joncrall/code/xcookie/xcookie/builders/github_actions.py build_deploy
+        xdoctest -m xcookie.builders.github_actions build_deploy
+
     Example:
         >>> from xcookie.builders.github_actions import *  # NOQA
         >>> from xcookie.main import XCookieConfig
