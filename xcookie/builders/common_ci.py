@@ -105,9 +105,15 @@ def make_install_and_test_wheel_parts(self,
                 # This is very fragile
                 fname = pathlib.Path(fpath).name
                 match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
-                assert match is not None
+                bs = chr(92)
+                fname = 'xcookie-0.3.1-py3-none-any.whl'
+                pat = '([0-9]+' + bs + '.[0-9]+' + bs + '.[0-9]+)'
+                import re
                 # Not sure why version is None in 3.6 and 3.7
-                print(match.groups()[1])
+                match = re.search(pat, fname)
+                assert match is not None
+                version = match.groups()[0]
+                print(version)
             else:
                 print(item.version)
         "
