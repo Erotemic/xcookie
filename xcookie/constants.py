@@ -32,7 +32,7 @@ KNOWN_CPYTHON_DOCKER_IMAGES: Dict[str, str]  = {
 # TODO: make a table of details about each version
 # https://devguide.python.org/versions/
 KNOWN_PYTHON_VERSION_INFO: List[dict]  = [
-    {'version': '3.14', 'end_of_life': '2030-10', 'github_action_version': 'python:3.14.0-rc.1', 'is_prerelease': True},
+    {'version': '3.14', 'end_of_life': '2030-10', 'github_action_version': '3.14.0-rc.1', 'is_prerelease': True},
     {'version': '3.13', 'end_of_life': '2029-10'},
     {'version': '3.12', 'end_of_life': '2028-10'},
     {'version': '3.11', 'end_of_life': '2027-10'},
