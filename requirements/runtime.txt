@@ -29,7 +29,7 @@ packaging>=21.3
 ruamel.yaml>=0.17.22,<=0.17.32
 
 PyYAML>=6.0.2     ; python_version < '4.0'  and python_version >= '3.12'    # Python 3.12+
-PyYAML>=6.0.2     ; python_version < '3.12'                                 # Python 3.6 - 3.11
+PyYAML>=6.0       ; python_version < '3.12'                                 # Python 3.6 - 3.11
 
 argcomplete>=1.0
 
