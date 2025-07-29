@@ -96,12 +96,14 @@ def make_install_and_test_wheel_parts(self,
         '''
         python -c "if 1:
             from pkginfo import Wheel, SDist
+            import pathlib
             fpath = '$WHEEL_FPATH'
             cls = Wheel if fpath.endswith('.whl') else SDist
             item = cls(fpath)
             if item.version is None:
                 import re
                 # This is very fragile
+                fname = pathlib.Path(fpath).name
                 match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
                 assert match is not None
                 # Not sure why version is None in 3.6 and 3.7
