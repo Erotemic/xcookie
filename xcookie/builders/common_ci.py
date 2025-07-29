@@ -90,6 +90,8 @@ def make_install_and_test_wheel_parts(self,
             print(str(fpath).replace(chr(92), chr(47)))
         "
         ''')
+
+    # Not sure why this fails on 3.6 / 3.7?
     get_mod_version_bash = ub.codeblock(
         '''
         python -c "if 1:
@@ -99,6 +101,23 @@ def make_install_and_test_wheel_parts(self,
             print(cls(fpath).version)
         "
         ''')
+    get_mod_version_bash = ub.codeblock(
+        r'''
+        export MOD_VERSION=$(echo "$WHEEL_FPATH" | sed -E 's#.*/[^/]+-([0-9]+\.[0-9]+\.[0-9]+)[-.].*#\1#')
+        '''
+    )
+    # Will this help?
+    # get_mod_version_bash = ub.codeblock(
+    #     '''
+    #     python -c "if 1:
+    #         from pkginfo import Wheel, SDist
+    #         import sys
+    #         f=sys.argv[1]
+    #         cls=Wheel if f.endswith('.whl') else SDist
+    #         print(cls(f).version)
+    #     " "$WHEEL_FPATH"
+    #     '''
+    # )
 
     # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath(f'{self.mod_name}'))"
     get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
