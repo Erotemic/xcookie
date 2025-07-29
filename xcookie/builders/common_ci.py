@@ -107,17 +107,17 @@ def make_install_and_test_wheel_parts(self,
         '''
     )
     # Will this help?
-    # get_mod_version_bash = ub.codeblock(
-    #     '''
-    #     python -c "if 1:
-    #         from pkginfo import Wheel, SDist
-    #         import sys
-    #         f=sys.argv[1]
-    #         cls=Wheel if f.endswith('.whl') else SDist
-    #         print(cls(f).version)
-    #     " "$WHEEL_FPATH"
-    #     '''
-    # )
+    get_mod_version_bash = ub.codeblock(
+        '''
+        python -c "if 1:
+            from pkginfo import Wheel, SDist
+            import sys
+            f=sys.argv[1]
+            cls=Wheel if f.endswith('.whl') else SDist
+            print(cls(f).version)
+        " "$WHEEL_FPATH"
+        '''
+    )
 
     # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath(f'{self.mod_name}'))"
     get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
