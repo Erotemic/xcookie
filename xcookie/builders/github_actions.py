@@ -247,7 +247,8 @@ class Actions:
             'name': 'Build binary wheels',
             # 'uses': 'pypa/cibuildwheel@v2.16.2',
             # 'uses': 'pypa/cibuildwheel@v2.17.0',
-            'uses': 'pypa/cibuildwheel@v2.21.0',
+            # 'uses': 'pypa/cibuildwheel@v2.21.0',
+            'uses': 'pypa/cibuildwheel@v3.1.2',
         }, *args, **kwargs)
 
 
@@ -838,7 +839,8 @@ def test_wheels_job(self, needs=None):
         # Available os names:
         # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
-            item['os'] = 'ubuntu-20.04'
+            # item['os'] = 'ubuntu-20.04'
+            item['os'] = 'ubuntu-18.04'
         if item['python-version'] == '3.7' and item['os'] == 'ubuntu-latest':
             item['os'] = 'ubuntu-22.04'
         if item['python-version'] == '3.6' and item['os'] == 'macOS-latest':

@@ -91,33 +91,46 @@ def make_install_and_test_wheel_parts(self,
         "
         ''')
 
-    # Not sure why this fails on 3.6 / 3.7?
-    get_mod_version_bash = ub.codeblock(
-        '''
-        python -c "if 1:
-            from pkginfo import Wheel, SDist
-            import pathlib
-            fpath = '$WHEEL_FPATH'
-            cls = Wheel if fpath.endswith('.whl') else SDist
-            item = cls(fpath)
-            if item.version is None:
-                import re
-                # This is very fragile
-                fname = pathlib.Path(fpath).name
-                match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
-                bs = chr(92)
-                fname = 'xcookie-0.3.1-py3-none-any.whl'
-                pat = '([0-9]+' + bs + '.[0-9]+' + bs + '.[0-9]+)'
-                import re
-                # Not sure why version is None in 3.6 and 3.7
-                match = re.search(pat, fname)
-                assert match is not None
-                version = match.groups()[0]
-                print(version)
-            else:
+    if tuple(map(int, self.config.min_python.split('.'))) >= (3, 8):
+        # Not sure why this fails on 3.6 / 3.7?
+        # Use less ugly version when we can
+        get_mod_version_bash = ub.codeblock(
+            '''
+            python -c "if 1:
+                from pkginfo import Wheel, SDist
+                import pathlib
+                fpath = '$WHEEL_FPATH'
+                cls = Wheel if fpath.endswith('.whl') else SDist
+                item = cls(fpath)
                 print(item.version)
-        "
-        ''')
+            "
+            ''')
+    else:
+        get_mod_version_bash = ub.codeblock(
+            '''
+            python -c "if 1:
+                from pkginfo import Wheel, SDist
+                import pathlib
+                fpath = '$WHEEL_FPATH'
+                cls = Wheel if fpath.endswith('.whl') else SDist
+                item = cls(fpath)
+                if item.version is None:
+                    import re
+                    # This is very fragile
+                    fname = pathlib.Path(fpath).name
+                    match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
+                    bs = chr(92)
+                    pat = '([0-9]+' + bs + '.[0-9]+' + bs + '.[0-9]+)'
+                    import re
+                    # Not sure why version is None in 3.6 and 3.7
+                    match = re.search(pat, fname)
+                    assert match is not None
+                    version = match.groups()[0]
+                    print(version)
+                else:
+                    print(item.version)
+            "
+            ''')
     # get_mod_version_bash = ub.codeblock(
     #     r'''
     #     export MOD_VERSION=$(printf "$WHEEL_FPATH" | sed -E 's#.*/[^/]+-([0-9]+\.[0-9]+\.[0-9]+)[-.].*#\1#')

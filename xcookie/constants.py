@@ -14,7 +14,7 @@ DEV_PYTHON_VERSIONS: List[str] = [
 
 KNOWN_CPYTHON_DOCKER_IMAGES: Dict[str, str]  = {
     # TODO allow rc?
-    'cp314': 'python:3.14.0-rc.1',
+    'cp314': 'python:3.14-rc',
     'cp313': 'python:3.13',
     'cp312': 'python:3.12',
     'cp311': 'python:3.11',

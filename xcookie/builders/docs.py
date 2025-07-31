@@ -355,6 +355,9 @@ def build_docs_conf(self):
             'geowatch.tasks.cold.export_change_map',
         ]
 
+        autodoc_default_options = {{  # Document callable classes
+            'special-members': '__call__'}}
+
         autodoc_member_order = 'bysource'
         autoclass_content = 'both'
         # autodoc_mock_imports = ['torch', 'torchvision', 'visdom']
