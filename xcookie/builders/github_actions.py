@@ -870,16 +870,34 @@ def test_wheels_job(self, needs=None):
 
     if True:
         # hack, todo better specific disable for rc versions
-        if self.config.mod_name == 'xcookie':
-            filtered_include = []
-            for item in include:
-                flag = True
-                if 'rc' in item['python-version']:
-                    if 'windows' in item['os']:
-                        flag = False
-                if flag:
-                    filtered_include.append(item)
-            include = filtered_include
+        # if self.config.mod_name == 'xcookie':
+        #     filtered_include = []
+        #     for item in include:
+        #         flag = True
+        #         if 'rc' in item['python-version']:
+        #             if 'windows' in item['os']:
+        #                 flag = False
+        #         if flag:
+        #             filtered_include.append(item)
+        #     include = filtered_include
+        from fnmatch import translate as glob_to_re
+        import re
+
+        def compile_rules(rules):
+            return [
+                {k: re.compile(glob_to_re(str(pat))) for k, pat in rule.items()}
+                for rule in (rules or ())
+            ]
+
+        def is_blocked_compiled(item, compiled_rules):
+            for crule in compiled_rules:
+                if all(regex.fullmatch(str(item.get(k, ""))) for k, regex in crule.items()):
+                    return True
+            return False
+
+        ci_blocklist = Yaml.coerce(self.config.ci_blocklist)
+        compiled = compile_rules(ci_blocklist)
+        include = [it for it in include if not is_blocked_compiled(it, compiled)]
 
     condition = "! startsWith(github.event.ref, 'refs/heads/release')"
     job = Yaml.Dict({

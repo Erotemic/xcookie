@@ -154,6 +154,12 @@ class XCookieConfig(scfg.DataConfig):
             Defaults will depend on purepy vs binpy tags.
             ''')),
 
+        'ci_blocklist': scfg.Value([], help=ub.paragraph(
+            '''
+            List[Dict] of filters that will remove generated includes. Keys can
+            be os or python-version and values are glob strings.
+            ''')),
+
         'ci_versions_minimal_strict': scfg.Value('min', help='todo: sus out'),
         'ci_versions_full_strict': scfg.Value('max'),
         'ci_versions_minimal_loose': scfg.Value('max'),

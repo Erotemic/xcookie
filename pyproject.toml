@@ -13,6 +13,10 @@ min_python = '3.7'
 ci_pypy_versions = []
 typed=true
 
+[[tool.xcookie.ci_blocklist]]
+os = "*windows*"
+python-version = "*rc*"
+
 
 [tool.xcookie.entry_points]
 console_scripts = [
