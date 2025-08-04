@@ -1,5 +1,5 @@
 """
-Template code for building docs includeing conf.py
+Template code for building docs including conf.py
 """
 import ubelt as ub
 
@@ -175,14 +175,15 @@ def build_docs_conf(self):
 
             # need to edit the conf.py
 
+            # Remove any old auto docs folder and regenerate it.
+            rm -rf {docs_dpath_wrt_home}/source/auto
             cd {docs_dpath_wrt_home}
             {invoke_apidoc}
+            git add {rel_add_dir}/*.rst
 
             # Note: the module should importable before running this
             # (e.g. install it in developer mode or munge the PYTHONPATH)
             make html
-
-            git add {rel_add_dir}/*.rst
 
             Also:
                 To turn on PR checks
@@ -242,6 +243,7 @@ def build_docs_conf(self):
                         push events,
                         tag push events,
                         merge request events
+                        release events
 
                     Click the "Add webhook" button.
 
@@ -353,6 +355,9 @@ def build_docs_conf(self):
             'geowatch.tasks.cold.export_change_map',
         ]
 
+        autodoc_default_options = {{  # Document callable classes
+            'special-members': '__call__'}}
+
         autodoc_member_order = 'bysource'
         autoclass_content = 'both'
         # autodoc_mock_imports = ['torch', 'torchvision', 'visdom']
@@ -376,7 +381,7 @@ def build_docs_conf(self):
             # 'xxhash': ('https://pypi.org/project/xxhash/', None),
             # 'pygments': ('https://pygments.org/docs/', None),
             # 'tqdm': ('https://tqdm.github.io/', None),
-            # Requries that the repo have objects.inv
+            # Requires that the repo have objects.inv
             'kwarray': ('https://kwarray.readthedocs.io/en/latest/', None),
             'kwimage': ('https://kwimage.readthedocs.io/en/latest/', None),
             # 'kwplot': ('https://kwplot.readthedocs.io/en/latest/', None),

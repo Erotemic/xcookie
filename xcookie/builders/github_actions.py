@@ -30,7 +30,7 @@ class Actions:
     """
     action_versions = {
         'checkout': 'actions/checkout@v3',
-        'setup-python': 'actions/setup-python@v4',
+        'setup-python': 'actions/setup-python@v5',
     }
 
     @classmethod
@@ -84,14 +84,14 @@ class Actions:
     def checkout(cls, *args, **kwargs):
         return cls.action({
             'name': 'Checkout source',
-            'uses': 'actions/checkout@v4.1.1'
+            'uses': 'actions/checkout@v4.2.2'
         }, *args, **kwargs)
 
     @classmethod
     def setup_python(cls, *args, **kwargs):
         return cls.action({
             'name': 'Setup Python',
-            'uses': 'actions/setup-python@v5.1.1'
+            'uses': 'actions/setup-python@v5.6.0'
         }, *args, **kwargs)
 
     @classmethod
@@ -101,7 +101,7 @@ class Actions:
             https://github.com/codecov/codecov-action
         """
         return cls.action({
-            'uses': 'codecov/codecov-action@v4.5.0'
+            'uses': 'codecov/codecov-action@v5.4.3',
         }, *args, **kwargs)
 
     @classmethod
@@ -115,7 +115,7 @@ class Actions:
                 pwd
                 cp .wheelhouse/.coverage* . || true
                 ls -al
-                python -m pip install coverage[toml]
+                uv pip install coverage[toml] | pip install coverage[toml]
                 echo '############ combine'
                 coverage combine . || true
                 echo '############ XML'
@@ -236,7 +236,9 @@ class Actions:
                     # 'CIBW_TEST_REQUIRES': '-r requirements/tests.txt'0
                     # 'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
                     # configure cibuildwheel to build native archs ('auto'), or emulated ones
-                    'CIBW_ARCHS_LINUX': '${{ matrix.arch }}'
+                    'CIBW_ARCHS_LINUX': '${{ matrix.arch }}',
+                    'CIBW_ENVIRONMENT': 'PYTHONUTF8=1',  # for windows
+                    'PYTHONUTF8': '1',  # for windows
                 }
             })
 
@@ -245,7 +247,8 @@ class Actions:
             'name': 'Build binary wheels',
             # 'uses': 'pypa/cibuildwheel@v2.16.2',
             # 'uses': 'pypa/cibuildwheel@v2.17.0',
-            'uses': 'pypa/cibuildwheel@v2.21.0',
+            # 'uses': 'pypa/cibuildwheel@v2.21.0',
+            'uses': 'pypa/cibuildwheel@v3.1.2',
         }, *args, **kwargs)
 
 
@@ -257,12 +260,15 @@ def build_github_actions(self):
         cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.deploy
         cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .
 
+    CommandLine:
+        xdoctest -m xcookie.builders.github_actions build_github_actions
+
     Example:
         >>> from xcookie.builders.github_actions import *  # NOQA
         >>> from xcookie.main import XCookieConfig
         >>> from xcookie.main import TemplateApplier
         >>> config = XCookieConfig(tags=['purepy'], repo_name='mymod')
-        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-1:]
+        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-2:]
         >>> self = TemplateApplier(config)
         >>> text = build_github_actions(self)
         >>> print(ub.highlight_code(text, 'yaml'))
@@ -422,7 +428,7 @@ def build_github_actions(self):
 
 
 def lint_job(self):
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     job = {
         'runs-on': 'ubuntu-latest',
@@ -437,9 +443,9 @@ def lint_job(self):
             {
                 'name': 'Install dependencies',
                 'run': ub.codeblock(
-                    '''
-                    python -m pip install --upgrade pip
-                    python -m pip install flake8
+                    f'''
+                    {self.UPDATE_PIP}
+                    {self.PIP_INSTALL} flake8
                     ''')
             },
             {
@@ -465,7 +471,7 @@ def lint_job(self):
 
 
 def build_and_test_sdist_job(self):
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     wheelhouse_dpath = 'wheelhouse'
 
@@ -482,11 +488,11 @@ def build_and_test_sdist_job(self):
             {
                 'name': 'Upgrade pip',
                 'run': [_ for _ in [
-                    'python -m pip install --upgrade pip',
-                    'python -m pip install --prefer-binary -r requirements/tests.txt',
-                    'python -m pip install --prefer-binary -r requirements/runtime.txt',
-                    'python -m pip install --prefer-binary -r requirements/headless.txt' if 'cv2' in self.tags else None,
-                    'python -m pip install --prefer-binary -r requirements/gdal.txt' if 'gdal' in self.tags else None,
+                    f'{self.UPDATE_PIP}',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/tests.txt',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/runtime.txt',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt' if 'cv2' in self.tags else None,
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt' if 'gdal' in self.tags else None,
                 ] if _ is not None]
             },
             {
@@ -499,11 +505,17 @@ def build_and_test_sdist_job(self):
                 'name': 'Install sdist',
                 'run': [
                     f'ls -al {wheelhouse_dpath}',
-                    f'pip install --prefer-binary {wheelhouse_dpath}/{self.pkg_name}*.tar.gz -v',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} {wheelhouse_dpath}/{self.pkg_name}*.tar.gz -v',
                 ]
             },
             {
                 'name': 'Test minimal loose sdist',
+                'env': {
+                    # So far not needed, but once we bump to 3.14 this needs to be
+                    # set whenever `pytest` is run with `coverage`
+                    # (see the `test_binpy_wheels` jobs)
+                    'COVERAGE_CORE': 'ctrace'
+                },
                 'run': [
                     'pwd',
                     'ls -al',
@@ -525,12 +537,13 @@ def build_and_test_sdist_job(self):
             },
             {
                 'name': 'Test full loose sdist',
+                'env': {
+                    'COVERAGE_CORE': 'ctrace'
+                },
                 'run': [
                     'pwd',
                     'ls -al',
-                    # 'python -m pip install -r requirements/optional.txt',  # todo: use the extra-spec
-                    # 'python -m pip install -r requirements/ipython.txt',  # hack for line-profiler
-                    'python -m pip install --prefer-binary -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
                     '# Run in a sandboxed directory',
                     'WORKSPACE_DNAME="testsrcdir_full_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
                     'mkdir -p $WORKSPACE_DNAME',
@@ -561,13 +574,18 @@ def build_and_test_sdist_job(self):
 
 def build_binpy_wheels_job(self):
     """
+    Builds the action for binary python packages that creates the wheels.
+
+    Returns:
+        Dict: yaml structure
+
     cat ~/code/xcookie/xcookie/rc/test_binaries.yml.in | yq  .jobs.build_and_test_wheels
 
     Notes:
         Supported Action platforms:
             https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json
     """
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
     os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
 
@@ -645,8 +663,18 @@ def build_binpy_wheels_job(self):
     # Emulate aarch64 ppc64le s390x under linux
     job_steps += [Actions.checkout()]
     job_steps += conditional_actions
+
+    USE_ABI3 = True
+    if USE_ABI3:
+        # Hack in abi3 support, todo: clean up later.
+        abi3_action = Actions.cibuildwheel(sensible=True)
+        # TODO: use min python
+        abi3_action['env']['CIBW_CONFIG_SETTINGS'] = '--build-option=--py-limited-api=cp38'
+        abi3_action['env']['CIBW_BUILD'] = 'cp38-*'
+
     job_steps += [
         Actions.setup_qemu(sensible=True),
+        abi3_action,
         Actions.cibuildwheel(sensible=True),
     ]
     job_steps += [
@@ -696,90 +724,11 @@ def build_binpy_wheels_job(self):
     return job
 
 
-def get_supported_platform_info(self):
-    os_list = []
-
-    # TODO: maybe allow pinning, or list out what the options are
-    # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
-    if 'linux' in self.config['os']:
-        os_list.append('ubuntu-latest')
-    if 'osx' in self.config['os']:
-        os_list.append('macOS-latest')
-    if 'win' in self.config['os']:
-        os_list.append('windows-latest')
-
-    cpython_versions = self.config['ci_cpython_versions']
-    pypy_versions = [
-        f'pypy-{v}'
-        for v in self.config['ci_pypy_versions']
-    ]
-    # 3.4 is broken on github actions it seems
-    cpython_versions_non34 = [v for v in cpython_versions if v != '3.4']
-    supported_py_versions = self.config['supported_python_versions']
-    if len(supported_py_versions) == 0:
-        raise Exception('no supported python versions?')
-
-    # Choose which Python version will be the "main" one we use for version
-    # agnostic jobs.
-    main_python_version = supported_py_versions[-1]
-    from xcookie import constants
-    # import kwutil
-    INFO_LUT = {row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO}
-    for pyver in supported_py_versions[::-1]:
-        info = INFO_LUT[pyver]
-        if info.get('is_prerelease'):
-            continue
-        main_python_version = pyver
-        break
-
-    # TODO: find a nicer way to codify the idea that the supported python
-    # version needs to map to something github actions knows about, which could
-    # be a prerelease version.
-    cpython_versions_non34_ = []
-    for pyver in cpython_versions_non34:
-        info = INFO_LUT[pyver]
-        if 'github_action_version' in info:
-            pyver = info['github_action_version']
-        cpython_versions_non34_.append(pyver)
-    cpython_versions_non34 = cpython_versions_non34_
-
-    extras_versions_templates = {
-        'full-loose': self.config['ci_versions_full_loose'],
-        'full-strict': self.config['ci_versions_full_strict'],
-        'minimal-loose': self.config['ci_versions_minimal_loose'],
-        'minimal-strict': self.config['ci_versions_minimal_strict'],
-    }
-    extras_versions = {}
-    for k, v in extras_versions_templates.items():
-        if v == '':
-            v = []
-        elif v == 'min':
-            v = [cpython_versions_non34[0]]
-        elif v == 'max':
-            v = [cpython_versions_non34[-1]]
-        elif v == '*':
-            v = cpython_versions_non34 + pypy_versions
-        else:
-            raise KeyError(v)
-        extras_versions[k] = v
-
-    supported_platform_info = {
-        'os_list': os_list,
-        'cpython_versions': cpython_versions_non34,
-        'pypy_versions': pypy_versions,
-        'min_python_version': supported_py_versions[0],
-        'max_python_version': supported_py_versions[-1],
-        'main_python_version': main_python_version,
-        'install_extra_versions': extras_versions,
-    }
-    return supported_platform_info
-
-
 def build_purewheel_job(self):
     wheelhouse_dpath = 'wheelhouse'
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
     # os_list = supported_platform_info['os_list']
-    cpython_versions = supported_platform_info['cpython_versions']
+    main_python_version = supported_platform_info['main_python_version']
     # pypy_versions = supported_platform_info['pypy_versions']
     # min_python_version = supported_platform_info['min_python_version']
     # max_python_version = supported_platform_info['max_python_version']
@@ -790,9 +739,9 @@ def build_purewheel_job(self):
             'fail-fast': False,
             'matrix': {
                 # Build on one of the platforms with the newest python version
-                # (it doesnt really matter)
+                # (it does not really matter)
                 'os': ['ubuntu-latest'],  # os_list[0:1],
-                'python-version': cpython_versions[-1:],
+                'python-version': [main_python_version],
                 'arch': ['auto'],
             }
         },
@@ -829,7 +778,7 @@ def build_purewheel_job(self):
 
 def test_wheels_job(self, needs=None):
     wheelhouse_dpath = 'wheelhouse'
-    supported_platform_info = get_supported_platform_info(self)
+    supported_platform_info = common_ci.get_supported_platform_info(self)
 
     os_list = supported_platform_info['os_list']
 
@@ -909,11 +858,46 @@ def test_wheels_job(self, needs=None):
         # Available os names:
         # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
+            # This image is no longer supported, and does not work apparently
             item['os'] = 'ubuntu-20.04'
+            # item['os'] = 'ubuntu-18.04'
+        if item['python-version'] == '3.7' and item['os'] == 'ubuntu-latest':
+            item['os'] = 'ubuntu-22.04'
         if item['python-version'] == '3.6' and item['os'] == 'macOS-latest':
             item['os'] = 'macos-13'
         if item['python-version'] == '3.7' and item['os'] == 'macOS-latest':
             item['os'] = 'macos-13'
+
+    if True:
+        # hack, todo better specific disable for rc versions
+        # if self.config.mod_name == 'xcookie':
+        #     filtered_include = []
+        #     for item in include:
+        #         flag = True
+        #         if 'rc' in item['python-version']:
+        #             if 'windows' in item['os']:
+        #                 flag = False
+        #         if flag:
+        #             filtered_include.append(item)
+        #     include = filtered_include
+        from fnmatch import translate as glob_to_re
+        import re
+
+        def compile_rules(rules):
+            return [
+                {k: re.compile(glob_to_re(str(pat))) for k, pat in rule.items()}
+                for rule in (rules or ())
+            ]
+
+        def is_blocked_compiled(item, compiled_rules):
+            for crule in compiled_rules:
+                if all(regex.fullmatch(str(item.get(k, ""))) for k, regex in crule.items()):
+                    return True
+            return False
+
+        ci_blocklist = Yaml.coerce(self.config.ci_blocklist)
+        compiled = compile_rules(ci_blocklist)
+        include = [it for it in include if not is_blocked_compiled(it, compiled)]
 
     condition = "! startsWith(github.event.ref, 'refs/heads/release')"
     job = Yaml.Dict({
@@ -961,7 +945,7 @@ def test_wheels_job(self, needs=None):
     special_install_lines = []
     if 'gdal' in self.tags:
         install_env['GDAL_REQUIREMENT_TXT'] = '${{ matrix.gdal-requirement-txt }}'
-        special_install_lines.append('pip install -r "$GDAL_REQUIREMENT_TXT"')
+        special_install_lines.append(f'{self.PIP_INSTALL} -r "$GDAL_REQUIREMENT_TXT"')
 
     if 'ibeis' == self.mod_name:
         custom_before_test_lines = [
@@ -1001,6 +985,8 @@ def test_wheels_job(self, needs=None):
     ]
 
     workspace_dname = 'testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}'
+
+    # HACK
     WITH_COVERAGE = ('ibeis' != self.mod_name)
     if WITH_COVERAGE:
         custom_after_test_commands = [
@@ -1031,7 +1017,8 @@ def test_wheels_job(self, needs=None):
         'name': 'Test wheel ${{ matrix.install-extras }}',
         'shell': 'bash',
         'env': {
-            'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
+            'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}',
+            'COVERAGE_CORE': 'ctrace',
         },
         'run': install_and_test_wheel_parts['test_wheel_commands'],
     }))
@@ -1052,6 +1039,10 @@ def test_wheels_job(self, needs=None):
 
 def build_deploy(self, mode='live', needs=None):
     """
+    CommandLine:
+        xdoctest -m /home/joncrall/code/xcookie/xcookie/builders/github_actions.py build_deploy
+        xdoctest -m xcookie.builders.github_actions build_deploy
+
     Example:
         >>> from xcookie.builders.github_actions import *  # NOQA
         >>> from xcookie.main import XCookieConfig
@@ -1139,10 +1130,9 @@ def build_deploy(self, mode='live', needs=None):
             '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',
             '$GPG_EXECUTABLE --list-keys',
             'VERSION=$(python -c "import setup; print(setup.VERSION)")',
-            'pip install twine',
-            # 'pip install six pyopenssl ndg-httpsclient pyasn1 -U --user',
-            # 'pip install urllib3 requests[security] twine --user',
-            'pip install urllib3 requests[security] twine',
+            f'{self.UPDATE_PIP}',
+            f'{self.SYSTEM_PIP_INSTALL} packaging twine -U',
+            f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security]',
             'GPG_KEYID=$(cat dev/public_gpg_key)',
             '''echo "GPG_KEYID = '$GPG_KEYID'"''',
             'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
@@ -1170,7 +1160,7 @@ def build_deploy(self, mode='live', needs=None):
         enable_otc = True
         if enable_otc:
             run += [
-                'pip install opentimestamps-client',
+                f'{self.SYSTEM_PIP_INSTALL} opentimestamps-client',
                 f'ots stamp {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.asc',
                 'ls -la wheelhouse'
             ]
@@ -1192,8 +1182,7 @@ def build_deploy(self, mode='live', needs=None):
     else:
         if self.config['deploy_pypi']:
             run = [
-                # 'pip install requests[security] twine pyopenssl ndg-httpsclient pyasn1 -U',
-                'pip install urllib3 requests[security] twine -U',
+                f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security] twine -U',
                 f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
             ]
 

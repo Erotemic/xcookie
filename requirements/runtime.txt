@@ -28,7 +28,7 @@ packaging>=21.3
 # ruamel.yaml>=0.17.21
 ruamel.yaml>=0.17.22,<=0.17.32
 
-PyYAML>=6.0.1     ; python_version < '4.0'  and python_version >= '3.12'    # Python 3.12+
+PyYAML>=6.0.2     ; python_version < '4.0'  and python_version >= '3.12'    # Python 3.12+
 PyYAML>=6.0       ; python_version < '3.12'                                 # Python 3.6 - 3.11
 
 argcomplete>=1.0
@@ -47,8 +47,10 @@ numpy>=1.26.0  ; python_version < '3.13'  and python_version >= '3.12'    # Pyth
 numpy>=1.23.2  ; python_version < '3.12' and python_version >= '3.11'    # Python 3.11
 numpy>=1.21.6  ; python_version < '3.11' and python_version >= '3.10'  # Python 3.10
 numpy>=1.19.3  ; python_version < '3.10' and python_version >= '3.9'   # Python 3.9
-numpy>=1.19.3  ; python_version < '3.9' and python_version >= '3.8'    # Python 3.8
-numpy>=1.19.3  ; python_version < '3.8' and python_version >= '3.7'    # Python 3.7
+
+numpy>=1.22.0 ; sys_platform == "darwin" and python_version < '3.9' and python_version >= '3.8'  # Python 3.8 (mac)
+numpy>=1.20.0 ; sys_platform != "darwin" and python_version < '3.9' and python_version >= '3.8'  # Python 3.8 (non-mac)
+numpy>=1.19.3 ; python_version < '3.8' and python_version >= '3.7'    # Python 3.7
 
 cmd_queue>=0.1.6
 

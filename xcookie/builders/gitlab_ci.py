@@ -12,7 +12,7 @@ def build_gitlab_ci(self):
         >>> config['enable_gpg'] = False
         >>> config['linter'] = False
         >>> config['test_variants'] = ['full-loose']
-        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-1:]
+        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-2:]
         >>> self = TemplateApplier(config)
         >>> text = build_gitlab_ci(self)
         >>> print(ub.highlight_code(text, 'yaml'))
@@ -73,7 +73,7 @@ def build_gitlab_rules(self):
 
 
 def make_purepy_ci_jobs(self):
-    import ruamel.yaml
+    import ruamel.yaml  # NOQA
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
     from xcookie.util_yaml import Yaml
     from xcookie.constants import KNOWN_CPYTHON_DOCKER_IMAGES
@@ -116,6 +116,7 @@ def make_purepy_ci_jobs(self):
             # Change pip's cache directory to be inside the project directory
             # since we can only cache local items.
             PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+            UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
 
         except:
             # Don't run the pipeline for new tags
@@ -124,6 +125,7 @@ def make_purepy_ci_jobs(self):
         cache:
             paths:
                 - .cache/pip
+                - .cache/uv
         ''')))
 
     common_template = CommentedMap(common_template)
@@ -184,6 +186,10 @@ def make_purepy_ci_jobs(self):
 
         # Coverage is a regex that will parse the coverage from the test stdout
         'coverage': '/TOTAL.+ ([0-9]{1,3}%)/',
+
+        # Skip tests on the release branch, as these were covered in the MR and
+        # main. This speeds up deployment and deployment debugging.
+        'except': {'refs': ['release']},
     }
 
     common_test_template = CommentedMap(common_test_template)
@@ -192,16 +198,16 @@ def make_purepy_ci_jobs(self):
     body['.common_test_template'] = common_test_template
 
     setup_venv_template = Yaml.CodeBlock(
-        '''
+        f'''
         # Setup the correct version of python (which should be the same as this instance)
         python --version  # Print out python version for debugging
-        export PYVER=$(python -c "import sys; print('{}{}'.format(*sys.version_info[0:2]))")
+        export PYVER=$(python -c "import sys; print(''.join(map(str, sys.version_info[0:2])))")
         python -m pip install virtualenv
         python -m virtualenv venv$PYVER
         source venv$PYVER/bin/activate
-        pip install pip -U
-        pip install pip setuptools -U
-        pip install pygments
+        {self.UPDATE_PIP}
+        {self.PIP_INSTALL} setuptools -U
+        {self.PIP_INSTALL} pygments
         python --version  # Print out python version for debugging
         ''')
 
@@ -221,10 +227,17 @@ def make_purepy_ci_jobs(self):
     install_extras = ub.udict(all_install_extras) & self.config.test_variants
     for extra_key, extra in install_extras.items():
         if 'gdal' in self.tags:
-            special_install_lines = [
-                # TODO: handle strict
-                'pip install -r requirements/gdal.txt',
-            ]
+            if extra_key.endswith('-strict'):
+                special_install_lines = [
+                    """
+                    sed 's/>=/==/' "requirements/gdal.txt" > "requirements/gdal-strict.txt"
+                    """.strip(),
+                    f'{self.PIP_INSTALL} -r requirements/gdal-strict.txt',
+                ]
+            else:
+                special_install_lines = [
+                    f'{self.PIP_INSTALL} -r requirements/gdal.txt',
+                ]
         else:
             special_install_lines = []
         workspace_dname = 'sandbox'
@@ -246,8 +259,10 @@ def make_purepy_ci_jobs(self):
         body['.' + anchor] = test
         test_templates[extra_key] = test
 
-    python_images = KNOWN_CPYTHON_DOCKER_IMAGES
-    deploy_image = python_images['cp311']
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    main_pyver = supported_platform_info['main_python_version']
+    main_cpver = 'cp' + main_pyver.replace('.', '')
+    main_image = KNOWN_CPYTHON_DOCKER_IMAGES[main_cpver]
 
     build_names = []
 
@@ -256,12 +271,12 @@ def make_purepy_ci_jobs(self):
         jobs = {}
         opsys = 'linux'
         arch = 'x86_64'
-        pyver = '3.11'
+        pyver = supported_platform_info['main_python_version']
         cpver = 'cp' + pyver.replace('.', '')
         build_name = 'build/sdist'
         build_names.append(build_name)
         build_job = {
-            'image': python_images[cpver],
+            'image': main_image,
         }
         build_job = CommentedMap(build_job)
         build_job.add_yaml_merge([(0, build_sdist_template)])
@@ -271,13 +286,13 @@ def make_purepy_ci_jobs(self):
         sdist_extra_keys = [ub.peek(install_extras)]
         for pyver in sdist_test_python_versions:
             cpver = 'cp' + pyver.replace('.', '')
-            assert cpver in python_images
+            assert cpver in KNOWN_CPYTHON_DOCKER_IMAGES
             swenv_key = f'{cpver}-{opsys}-{arch}'  # software environment key
             for extra_key in sdist_extra_keys:
                 common_test_template = test_templates[extra_key]
                 test_name = f'test/sdist/{extra_key}/{swenv_key}'
                 test_job = {
-                    'image': python_images[cpver],
+                    'image': main_image,
                     'needs': [
                         build_name,
                     ]
@@ -294,13 +309,13 @@ def make_purepy_ci_jobs(self):
         arch = 'x86_64'
         for pyver in self.config['ci_cpython_versions']:
             cpver = 'cp' + pyver.replace('.', '')
-            if cpver in python_images:
+            if cpver in KNOWN_CPYTHON_DOCKER_IMAGES:
                 swenv_key = f'{cpver}-{opsys}-{arch}'  # software environment key
                 build_name = f'build/{swenv_key}'
                 build_names.append(build_name)
 
                 build_job = {
-                    'image': python_images[cpver],
+                    'image': KNOWN_CPYTHON_DOCKER_IMAGES[cpver],
                 }
                 build_job = CommentedMap(build_job)
                 build_job.add_yaml_merge([(0, build_wheel_template)])
@@ -309,7 +324,7 @@ def make_purepy_ci_jobs(self):
                 for extra_key, common_test_template in test_templates.items():
                     test_name = f'test/{extra_key}/{swenv_key}'
                     test_job = {
-                        'image': python_images[cpver],
+                        'image': KNOWN_CPYTHON_DOCKER_IMAGES[cpver],
                         'needs': [
                             build_name,
                         ]
@@ -320,17 +335,17 @@ def make_purepy_ci_jobs(self):
         body.update(jobs)
 
     if enable_lint:
-        lint_job = build_lint_job(common_template, deploy_image)
+        lint_job = build_lint_job(self, common_template, main_image)
         body['lint'] = lint_job
 
     if enable_gpg:
-        gpgsign_job = build_gpg_job(common_template, deploy_image, wheelhouse_dpath)
+        gpgsign_job = build_gpg_job(self, common_template, main_image, wheelhouse_dpath)
         gpgsign_job['needs'] = [{'job': build_name, 'artifacts': True} for build_name in build_names]
         body['gpgsign/wheels'] = gpgsign_job
 
     deploy = self.config['deploy']
     if deploy:
-        deploy_job = build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self)
+        deploy_job = build_deploy_job(self, common_template, main_image, wheelhouse_dpath)
         body['stages'].append('deploy')
         body['deploy/wheels'] = deploy_job
 
@@ -358,7 +373,7 @@ def make_purepy_ci_jobs(self):
     return text
 
 
-def build_lint_job(common_template, deploy_image):
+def build_lint_job(self, common_template, deploy_image):
     from xcookie.util_yaml import Yaml
     from ruamel.yaml.comments import CommentedMap
     lint_job = {}
@@ -375,11 +390,12 @@ def build_lint_job(common_template, deploy_image):
     # e.g. mypy_check_commands = common_ci.make_mypy_check_parts(self)
     # TODO: only install linting requirements if the file exists.
     lint_job.update(Yaml.loads(ub.codeblock(
-        '''
+        f'''
         before_script:
             - df -h
         script:
-            - pip install -r requirements/linting.txt
+            - {self.UPDATE_PIP}
+            - {self.PIP_INSTALL} -r requirements/linting.txt
             - ./run_linter.sh
         ''')))
 
@@ -390,7 +406,7 @@ def build_lint_job(common_template, deploy_image):
     return lint_job
 
 
-def build_gpg_job(common_template, deploy_image, wheelhouse_dpath):
+def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
     # import ruamel.yaml
     from ruamel.yaml.comments import CommentedMap
     from xcookie.util_yaml import Yaml
@@ -465,12 +481,13 @@ def build_gpg_job(common_template, deploy_image, wheelhouse_dpath):
         # Use an open timestamp to tag when the signature and wheels were
         # created
         gpgsign_job['artifacts']['paths'].append(f'{wheelhouse_dpath}/*.ots')
-        gpgsign_job['script'].append('python -m pip install opentimestamps-client')
+        gpgsign_job['script'].append(f'{self.UPDATE_PIP}')
+        gpgsign_job['script'].append(f'{self.PIP_INSTALL} opentimestamps-client')
         gpgsign_job['script'].append(f'ots stamp {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.asc')
     return gpgsign_job
 
 
-def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
+def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
     # import ruamel.yaml
     from ruamel.yaml.comments import CommentedMap
     from xcookie.util_yaml import Yaml
@@ -489,13 +506,15 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
                 - release
         '''))))
     deploy_script = [
-        'pip install pyopenssl ndg-httpsclient pyasn1 requests[security] twine -U',
+        f'{self.UPDATE_PIP}',
+        f'{self.PIP_INSTALL} pyopenssl ndg-httpsclient pyasn1 requests[security] setuptools twine -U',
         f'ls {wheelhouse_dpath}',
     ]
     if self.config['deploy_pypi']:
         deploy_script += [
             Yaml.CodeBlock(
                 '''
+                set -e
                 WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
                 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
                 source dev/secrets_configuration.sh
@@ -504,7 +523,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
                 echo "$WHEEL_PATHS_STR"
                 for WHEEL_PATH in "${WHEEL_PATHS[@]}"
                 do
-                    twine check $WHEEL_PATH.asc $WHEEL_PATH
+                    twine check $WHEEL_PATH
                     twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH || echo "upload already exists"
                 done
                 ''')
@@ -514,6 +533,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
         deploy_script += [
             Yaml.CodeBlock(
                 r'''
+                set -e
                 # Have the server git-tag the release and push the tags
                 export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
                 # do sed twice to handle the case of https clone with and without a read token
@@ -546,6 +566,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
         deploy_script += [
             Yaml.CodeBlock(
                 fr'''
+                set -e
                 # https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
                 echo "CI_PROJECT_ID=$CI_PROJECT_ID"
                 echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
@@ -563,7 +584,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
                 fi
 
                 # Loop over all of the assets in the wheelhouse (i.e.  dist)
-                # and upload them to a package registery. We also store the
+                # and upload them to a package registry. We also store the
                 # links to the artifacts so we can attach them to a release
                 # page.
                 PACKAGE_ARTIFACT_ARRAY=()
@@ -587,7 +608,7 @@ def build_deploy_job(common_template, deploy_image, wheelhouse_dpath, self):
         if self.config['deploy_tags']:
             if 0:
                 __note__ = r"""
-                    To populate the CI variables and test localy
+                    To populate the CI variables and test locally
                     This logic is quick and dirty, could be cleaned up
 
                     load_secrets

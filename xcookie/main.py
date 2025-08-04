@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# PYTHON_ARGCOMPLETE_OK
 """
 This is a Python script to apply the xcookie template to either create a new repo
 or update an existing one with the latest standards.
@@ -5,7 +7,7 @@ or update an existing one with the latest standards.
 TODO:
     Port logic from ~/misc/make_new_python_package_repo.sh
 
-ComamndLine:
+CommandLine:
     ~/code/xcookie/xcookie/main.py
 
     python -m xcookie.main
@@ -31,6 +33,9 @@ ExampleUsage:
 
     # Create a new binary gitlab kitware repo
     python -m xcookie.main --repo_name=kwimage_ext --repodir=$HOME/code/kwimage_ext --tags="kitware,gitlab,binpy"
+    python -m xcookie.main --repo_name=balanced_sampler --repodir=$HOME/code/balanced_sampler --tags="kitware,gitlab,binpy"
+
+    python -m xcookie.main --repo_name=kwcoco_dataloader --repodir=$HOME/code/kwcoco_dataloader --tags="kitware,gitlab,purepy,gdal,cv2"
 
     # Create a new binary github repo
     python -m xcookie.main --repodir=$HOME/code/networkx_algo_common_subtree --tags="github,erotemic,binpy"
@@ -149,6 +154,12 @@ class XCookieConfig(scfg.DataConfig):
             Defaults will depend on purepy vs binpy tags.
             ''')),
 
+        'ci_blocklist': scfg.Value([], help=ub.paragraph(
+            '''
+            List[Dict] of filters that will remove generated includes. Keys can
+            be os or python-version and values are glob strings.
+            ''')),
+
         'ci_versions_minimal_strict': scfg.Value('min', help='todo: sus out'),
         'ci_versions_full_strict': scfg.Value('max'),
         'ci_versions_minimal_loose': scfg.Value('max'),
@@ -212,12 +223,14 @@ class XCookieConfig(scfg.DataConfig):
         'test_variants': scfg.Value([
             'full-loose', 'full-strict',
             'minimal-loose', 'minimal-strict'],
-            help='A list of which CI loose / strict / minimal / full varaints to use'),
+            help='A list of which CI loose / strict / minimal / full variants to use'),
 
         'use_vcs': scfg.Value('auto', help=ub.paragraph(
             '''
             Set to False to disable VCS. Will default to True if config has enough information to infer a VCS
             ''')),
+
+        'use_uv': scfg.Value('auto', help=ub.paragraph('if False use plain pip, otherwise use uv instead')),
 
         # ---
         'interactive': scfg.Value(True),
@@ -321,6 +334,10 @@ class XCookieConfig(scfg.DataConfig):
                 self['ci_pypy_versions'] = ['3.9']
             else:
                 self['ci_pypy_versions'] = []
+        if self['use_uv'] == 'auto':
+            # Can only use uv if the min python >= 3.8
+            min_python = self['supported_python_versions'][0]
+            self['use_uv'] = Version(min_python) >= Version('3.8')
 
     def _load_pyproject_config(self):
         pyproject_fpath = self['repodir'] / 'pyproject.toml'
@@ -366,10 +383,10 @@ class XCookieConfig(scfg.DataConfig):
         """
         if self['interactive']:
             from xcookie.rich_ext import FuzzyPrompt
-            ans = FuzzyPrompt.ask(msg, choices=choices)
+            answer = FuzzyPrompt.ask(msg, choices=choices)
         else:
-            ans = default
-        return ans
+            answer = default
+        return answer
 
     @classmethod
     def load_from_cli_and_pyproject(cls, cmdline=0, **kwargs):
@@ -460,6 +477,7 @@ class TemplateApplier:
         self.remote_info = {
             'type': 'unknown'
         }
+        self._setup_pip_commands()  # Is this sufficient here?
 
     def apply(self):
         """
@@ -700,12 +718,17 @@ class TemplateApplier:
             # We can infer this if the repo already exists.
             git_dpath = self.repodir / '.git'
             if git_dpath.exists():
-                remote_url = ub.cmd('git remote -v  get-url origin', cwd=self.repodir)['out'].strip()
-                if self.config.url is None:
-                    self.config.url = GitURL(remote_url).to_https()
-                    if self.config.url.endswith('.git'):
-                        self.config.url = self.config.url[:-4]
-                    # print(f'self.config.url={self.config.url}')
+                resp = ub.cmd('git remote -v  get-url origin', cwd=self.repodir)
+                if resp['ret'] == 0:
+                    remote_url = resp['out'].strip()
+                    if self.config.url is None:
+                        try:
+                            self.config.url = GitURL(remote_url).to_https()
+                            if self.config.url.endswith('.git'):
+                                self.config.url = self.config.url[:-4]
+                            # print(f'self.config.url={self.config.url}')
+                        except IndexError:
+                            ...
 
         if self.config['remote_host'] is not None:
             self.remote_info['host'] = self.config['remote_host']
@@ -802,8 +825,8 @@ class TemplateApplier:
         task_summary = ub.map_vals(len, tasks)
         if any(task_summary.values()):
             print('task_summary = {}'.format(ub.urepr(task_summary, nl=1)))
-            ans = self.config.prompt('What parts of the patch to apply?', ['yes', 'all', 'some', 'none'], default='yes')
-            if ans in {'all', 'yes'}:
+            answer = self.config.prompt('What parts of the patch to apply?', ['yes', 'all', 'some', 'none'], default='yes')
+            if answer in {'all', 'yes'}:
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
                     d.ensuredir()
@@ -813,7 +836,7 @@ class TemplateApplier:
                     shutil.copy2(src, dst)
                 for fname, mode in perm_tasks:
                     os.chmod(fname, mode)
-            elif ans == 'some':
+            elif answer == 'some':
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
                     d.ensuredir()
@@ -874,6 +897,7 @@ class TemplateApplier:
             if queue.jobs:
                 queue.rprint()
                 if self.config.confirm('Do git init?'):
+                    self.repodir.ensuredir()
                     queue.run()
 
             if self.config['init_new_remotes'] and self.config.confirm('Do you want to create the repo on the remote?'):
@@ -1286,12 +1310,31 @@ class TemplateApplier:
         from xcookie.builders import pyproject
         return pyproject.build_pyproject(self)
 
+    def _setup_pip_commands(self):
+        # Hack for uv migration, to get some common variables.  need to clean
+        # up how we control what is used as the package installer later.
+        if self.config.use_uv:
+            # Does UV always prefer binary?
+            self.PIP_INSTALL = 'python -m uv pip install'
+            self.PIP_INSTALL_PREFER_BINARY = 'python -m uv pip install'
+            self.UPDATE_PIP = 'python -m pip install pip uv -U'
+            # The system uv seems to have an issue on CI
+            self.SYSTEM_PIP_INSTALL = 'python -m pip install'
+            # self.SYSTEM_PIP_INSTALL = 'python -m uv pip install --system --break-system-packages'
+        else:
+            self.PIP_INSTALL = 'python -m pip install'
+            self.PIP_INSTALL_PREFER_BINARY = 'python -m pip install --prefer-binary'
+            self.UPDATE_PIP = 'python -m pip install pip -U'
+            self.SYSTEM_PIP_INSTALL = 'python -m pip install'
+
     def build_github_actions(self):
         from xcookie.builders import github_actions
+        self._setup_pip_commands()  # Do we need this here?
         return github_actions.build_github_actions(self)
 
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci
+        self._setup_pip_commands()  # Do we need this here?
         return gitlab_ci.build_gitlab_ci(self)
 
     def build_manifest_in(self):
@@ -1433,7 +1476,8 @@ class TemplateApplier:
             '# --prefer-binary',
         ]
         version_defaults = [
-            {'version': '>=4.5.5.64', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('4.0')},
+            {'version': '>=4.10.0.84', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},  # minimal for numpy 2.x
+            {'version': '>=4.5.5.64', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.13')},
             {'version': '>=4.5.4.58', 'pyver_ge': Version('3.10'), 'pyver_lt': Version('3.11')},
             {'version': '>=3.4.15.55', 'pyver_ge': Version('3.7'), 'pyver_lt': Version('3.10')},
             {'version': '>=3.4.13.47', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.7')},
@@ -1456,9 +1500,10 @@ class TemplateApplier:
             '--find-links https://girder.github.io/large_image_wheels',
         ]
         version_defaults = [
-            {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('3.13')},
             {'version': '>=3.5.2', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.12')},
-            {'version': '>=3.4.1', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
+            {'version': '>=3.4.1,<=3.11.0', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
         ]
         return self._build_special_requirements(variant, version_defaults, header_lines)
 
@@ -1659,7 +1704,9 @@ class GitURL(str):
         if self._info is None:
             url = self
             info = {}
-            if url.startswith('https://'):
+            if url == '':
+                ...
+            elif url.startswith('https://'):
                 parts = url.split('https://')[1].split('/', 3)
                 info['host'] = parts[0]
                 info['group'] = parts[1]

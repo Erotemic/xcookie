@@ -13,6 +13,10 @@ min_python = '3.7'
 ci_pypy_versions = []
 typed=true
 
+[[tool.xcookie.ci_blocklist]]
+os = "*windows*"
+python-version = "*rc*"
+
 
 [tool.xcookie.entry_points]
 console_scripts = [
@@ -67,3 +71,10 @@ module = [
     "ubelt",
 ]
 ignore_missing_imports = true
+
+
+[tool.codespell]
+skip = ['./docs/build', './*.egg-info', './build', './htmlcov']
+count = true
+quiet-level = 3
+ignore-words-list = ['wont', 'cant', 'fpr', 'ANS', 'doesnt', 'arent', 'ans', 'thats', 'datas', 'isnt']

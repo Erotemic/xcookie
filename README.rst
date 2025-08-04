@@ -138,7 +138,7 @@ Invocations to create a new github repo:
     python -m xcookie.main --repo_name=cookiecutter_binpy --repodir=$HOME/code/cookiecutter_binpy --tags="github,binpy,gdal"
 
 
-Given an initalized repository the general usage pattern is to edit the
+Given an initialized repository the general usage pattern is to edit the
 generated ``pyproject.toml`` and modify values in the ``[tool.xcookie]``
 section and then rerun ``xcookie`` in that directory. It will then present you
 with a diff of the proposed changes that you can reject, accept entirely, or

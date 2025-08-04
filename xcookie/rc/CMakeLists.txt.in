@@ -1,5 +1,5 @@
 ###
-# CMakeLists for xcookie C/C++/Cuda Python extention modules
+# CMakeLists for xcookie C/C++/Cuda Python extension modules
 #
 # Notes:
 # https://github.com/Erotemic/netharn/issues/7

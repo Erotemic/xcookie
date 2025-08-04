@@ -254,7 +254,7 @@ jobs:
     IMAGE_NAME=quay.io/pypa/manylinux2014_x86_64
     docker run -v $PWD:/io:ro -v $HOME/.cache/pip:/pip_cache -it $IMAGE_NAME bash
 
-    # Will need to chmod things afterwords
+    # Will need to chmod things afterwards
     export PIP_CACHE_DIR=/pip_cache
     echo $PIP_CACHE_DIR
     chmod -R o+rw $PIP_CACHE_DIR
