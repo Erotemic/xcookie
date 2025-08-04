@@ -71,6 +71,8 @@ jobs:
         ls -al wheelhouse
         python -m pip install --prefer-binary wheelhouse/xcookie*.tar.gz -v
     - name: Test minimal loose sdist
+      env:
+        COVERAGE_CORE: ctrace
       run: |-
         pwd
         ls -al
@@ -85,6 +87,8 @@ jobs:
         python -m pytest --verbose --cov=xcookie $MOD_DPATH ../tests
         cd ..
     - name: Test full loose sdist
+      env:
+        COVERAGE_CORE: ctrace
       run: |-
         pwd
         ls -al
@@ -283,10 +287,6 @@ jobs:
           install-extras: tests,optional
           os: windows-latest
           arch: auto
-        - python-version: 3.14.0-rc.1
-          install-extras: tests,optional
-          os: windows-latest
-          arch: auto
     steps:
     - name: Checkout source
       uses: actions/checkout@v4.2.2
@@ -339,7 +339,6 @@ jobs:
                 fname = pathlib.Path(fpath).name
                 match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
                 bs = chr(92)
-                fname = 'xcookie-0.3.1-py3-none-any.whl'
                 pat = '([0-9]+' + bs + '.[0-9]+' + bs + '.[0-9]+)'
                 import re
                 # Not sure why version is None in 3.6 and 3.7
@@ -359,6 +358,7 @@ jobs:
       shell: bash
       env:
         CI_PYTHON_VERSION: py${{ matrix.python-version }}
+        COVERAGE_CORE: ctrace
       run: |-
         echo "Creating test sandbox directory"
         export WORKSPACE_DNAME="testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"

@@ -101,7 +101,7 @@ class Actions:
             https://github.com/codecov/codecov-action
         """
         return cls.action({
-            'uses': 'codecov/codecov-action@v5.4.3'
+            'uses': 'codecov/codecov-action@v5.4.3',
         }, *args, **kwargs)
 
     @classmethod
@@ -510,6 +510,12 @@ def build_and_test_sdist_job(self):
             },
             {
                 'name': 'Test minimal loose sdist',
+                'env': {
+                    # So far not needed, but once we bump to 3.14 this needs to be
+                    # set whenever `pytest` is run with `coverage`
+                    # (see the `test_binpy_wheels` jobs)
+                    'COVERAGE_CORE': 'ctrace'
+                },
                 'run': [
                     'pwd',
                     'ls -al',
@@ -531,6 +537,9 @@ def build_and_test_sdist_job(self):
             },
             {
                 'name': 'Test full loose sdist',
+                'env': {
+                    'COVERAGE_CORE': 'ctrace'
+                },
                 'run': [
                     'pwd',
                     'ls -al',
@@ -654,8 +663,18 @@ def build_binpy_wheels_job(self):
     # Emulate aarch64 ppc64le s390x under linux
     job_steps += [Actions.checkout()]
     job_steps += conditional_actions
+
+    USE_ABI3 = True
+    if USE_ABI3:
+        # Hack in abi3 support, todo: clean up later.
+        abi3_action = Actions.cibuildwheel(sensible=True)
+        # TODO: use min python
+        abi3_action['env']['CIBW_CONFIG_SETTINGS'] = '--build-option=--py-limited-api=cp38'
+        abi3_action['env']['CIBW_BUILD'] = 'cp38-*'
+
     job_steps += [
         Actions.setup_qemu(sensible=True),
+        abi3_action,
         Actions.cibuildwheel(sensible=True),
     ]
     job_steps += [
@@ -839,14 +858,28 @@ def test_wheels_job(self, needs=None):
         # Available os names:
         # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
-            # item['os'] = 'ubuntu-20.04'
-            item['os'] = 'ubuntu-18.04'
+            # This image is no longer supported, and does not work apparently
+            item['os'] = 'ubuntu-20.04'
+            # item['os'] = 'ubuntu-18.04'
         if item['python-version'] == '3.7' and item['os'] == 'ubuntu-latest':
             item['os'] = 'ubuntu-22.04'
         if item['python-version'] == '3.6' and item['os'] == 'macOS-latest':
             item['os'] = 'macos-13'
         if item['python-version'] == '3.7' and item['os'] == 'macOS-latest':
             item['os'] = 'macos-13'
+
+    if True:
+        # hack, todo better specific disable for rc versions
+        if self.config.mod_name == 'xcookie':
+            filtered_include = []
+            for item in include:
+                flag = True
+                if 'rc' in item['python-version']:
+                    if 'windows' in item['os']:
+                        flag = False
+                if flag:
+                    filtered_include.append(item)
+            include = filtered_include
 
     condition = "! startsWith(github.event.ref, 'refs/heads/release')"
     job = Yaml.Dict({
@@ -966,7 +999,8 @@ def test_wheels_job(self, needs=None):
         'name': 'Test wheel ${{ matrix.install-extras }}',
         'shell': 'bash',
         'env': {
-            'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}'
+            'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}',
+            'COVERAGE_CORE': 'ctrace',
         },
         'run': install_and_test_wheel_parts['test_wheel_commands'],
     }))
