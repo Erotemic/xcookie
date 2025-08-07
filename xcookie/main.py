@@ -602,7 +602,7 @@ class TemplateApplier:
             #  },
 
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,binpy',
-             'input_fname': rc.resource_fpath('gitlab-ci.binpy.yml.in')},
+             'dynamic': 'build_gitlab_ci'},
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
 
             {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt',
