@@ -354,7 +354,41 @@ class XCookieConfig(scfg.DataConfig):
         print(f'disk_config = {ub.urepr(disk_config, nl=1)}')
         if disk_config is not None:
             settings = disk_config.get('tool', {}).get('xcookie', {})
+
+            config = self._infer_xcookie_settings_from_pyproject(disk_config)
+
+            config = ub.udict(config)
+            settings = ub.udict(settings)
+
+            # Only add things not explicitly set
+            settings.update(config - settings)
+
+            # If an xcookie section isn't available, we can infer a lot of what
+            # we need from other more standard pyproject settings.
             return settings
+
+    def _infer_xcookie_settings_from_pyproject(self, disk_config):
+        """
+        Helper to populate the xcookie main settings from more standard
+        pyproject schemas.
+        """
+        config = {}
+        project_block = disk_config.get('project', {})
+        config['pkg_name'] = project_block.get('name')
+        config['description'] = project_block.get('description')
+
+        repo_url = project_block.get('urls', {}).get('Repository')
+        if repo_url is not None:
+            if 'github' in repo_url:
+                config['url'] = repo_url
+                config['tags'] = ['github', 'purepy']
+
+        req_py_block = project_block.get('requires-python')
+        if req_py_block:
+            from xcookie.version_helpers import parse_minimum_python_version
+            config['min_python'] = parse_minimum_python_version(req_py_block)
+
+        return config
 
     def confirm(self, msg, default=True):
         """
@@ -1147,7 +1181,7 @@ class TemplateApplier:
                     stats['missing'].append(repo_fpath)
                     tasks['copy'].append((stage_fpath, repo_fpath))
                     stage_text = stage_fpath.read_text()
-                    difftext = xdev.difftext('', stage_text[:1000], colored=1)
+                    difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2)
                     print(f'<NEW FPATH={repo_fpath}>')
                     print(difftext)
                     print(f'<END FPATH={repo_fpath}>')
@@ -1160,7 +1194,7 @@ class TemplateApplier:
                 if stage_text.strip() == repo_text.strip():
                     difftext = None
                 else:
-                    difftext = xdev.difftext(repo_text, stage_text, colored=1)
+                    difftext = xdev.difftext(repo_text, stage_text, colored=1, context_lines=1)
                 if difftext:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:

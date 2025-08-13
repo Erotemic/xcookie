@@ -170,6 +170,8 @@ def make_install_and_test_wheel_parts(self,
         if isinstance(test_command, str):
             test_command = [Yaml.CodeBlock(test_command)]
 
+    # export UV_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/cpu https://download.pytorch.org/whl/nightly/cu126"
+
     # Note: export does not expose the environment variable to subsequent jobs.
     install_wheel_commands = [
         'echo "Finding the path to the wheel"',
@@ -197,7 +199,7 @@ def make_install_and_test_wheel_parts(self,
         # 'cp wheelhouse/* wheeldownload/',
         # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
 
-        f'{self.PIP_INSTALL_PREFER_BINARY} "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+        f'{self.PIP_INSTALL_PREFER_BINARY} --prerelease=allow "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
         'echo "Install finished."',
     ]
 

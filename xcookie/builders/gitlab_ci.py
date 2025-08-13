@@ -416,14 +416,19 @@ def make_binpy_ci_jobs(self):
 
     wheelhouse_dpath = 'wheelhouse'
 
+    # TODO: We may want to bake in a lot of the configuration vfs stuff into
+    # the podman image that we are using. Not sure if that matters, or if there
+    # is a more efficient way to use podman here.
+    podman_image = 'gitlab.kitware.com:4567/computer-vision/ci-docker/podman:v4.9.0-uv0.8.8-python3.12-cuda12.4.1-cudnn-devel-ubuntu22.04'
+
     cibuildwheel_template = Yaml.loads(ub.codeblock(
-        '''
+        fr'''
         stage: build
         tags:
             - linux-x86_64
             - docker
             - privileged
-        image: gitlab.kitware.com:4567/computer-vision/ci-docker/podman:3.2.1
+        image: {podman_image}
         script:
             - podman --version
             - podman info --debug
@@ -433,10 +438,10 @@ def make_binpy_ci_jobs(self):
             - mkdir -p ".cache/containers/vfs-storage/"
             - |
               codeblock()
-              {
+              {{
                   PYEXE=python3
                   echo "$1" | $PYEXE -c "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()).strip(chr(10)))"
-              }
+              }}
               export CONTAINERS_CONF=$(realpath "temp_containers.conf")
               export CONTAINERS_STORAGE_CONF=$(realpath "temp_storage.conf")
               codeblock "
@@ -561,11 +566,32 @@ def make_binpy_ci_jobs(self):
     arch = 'x86_64'
     for pyver in self.config['ci_cpython_versions']:
         cpver = 'cp' + pyver.replace('.', '')
+        image = KNOWN_CPYTHON_DOCKER_IMAGES[cpver]
+
+        # TODO: handle this case in other variants
+        extra_environs = {}
+
+        # fixme: might not be a robust check, e.g. python could release, but
+        # packages might not have official wheels yet.
+        needs_prerelease = ('-rc' in image)
+        if needs_prerelease:
+            if self.config['use_uv']:
+                # TODO: determine if we need torch prereleases or what else
+                extra_environs.update({
+                    'UV_PRERELEASE': 'allow',
+                    'UV_INDEX_STRATEGY': 'unsafe-best-match',
+                    'UV_INDEX': ' '.join([
+                        'https://pypi.org/simple',
+                        'https://download.pytorch.org/whl/nightly/cpu',
+                        # 'https://download.pytorch.org/whl/nightly/cu126',
+                    ])
+                })
+
         swenv_key = f'{cpver}-{opsys}-{arch}'
         build_name = f'build/{swenv_key}'
         build_job = {
             'variables': {
-                'CIBW_BUILD': f'{cpver}-*'
+                'CIBW_BUILD': f'{cpver}-*',
             }
         }
         build_job = CommentedMap(build_job)
@@ -576,11 +602,13 @@ def make_binpy_ci_jobs(self):
         for extra_key, common_test_template in test_templates.items():
             test_name = f'test/{extra_key}/{swenv_key}'
             test_job = {
-                'image': KNOWN_CPYTHON_DOCKER_IMAGES[cpver],
+                'image': image,
                 'needs': [build_name],
             }
             test_job = CommentedMap(test_job)
             test_job.add_yaml_merge([(0, common_test_template)])
+            if extra_environs:
+                test_job['variables'] = extra_environs.copy()
             jobs[test_name] = test_job
 
     body.update(jobs)
