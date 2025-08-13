@@ -384,7 +384,7 @@ class XCookieConfig(scfg.DataConfig):
         config['description'] = project_block.get('description')
 
         setuptools_config = disk_config.get('tool', {}).get('setuptools', {})
-        setuptools_packages = setuptools_config.get('packages')
+        setuptools_packages = setuptools_config.get('packages', [])
         if isinstance(setuptools_packages, list) and len(setuptools_packages) == 1:
             config['mod_name'] = setuptools_packages[0]
             config['rel_mod_parent_dpath'] = '.'
