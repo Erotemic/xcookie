@@ -11,10 +11,16 @@ def make_mypy_check_parts(self):
         'requirements/runtime.txt'
     ]
     req_files_text = ' '.join(type_requirement_files)
+
+    if self.config['use_pyproject_requirements']:
+        pip_install_reqs = 'pip install -r pyproject.toml'
+    else:
+        pip_install_reqs = f'pip install -r {req_files_text}'
+
     commands = ub.codeblock(
         f'''
         python -m pip install mypy
-        pip install -r {req_files_text}
+        {pip_install_reqs}
         mypy --install-types --non-interactive ./{self.rel_mod_dpath}
         mypy ./{self.rel_mod_dpath}
         ''')
@@ -172,23 +178,34 @@ def make_install_and_test_wheel_parts(self,
 
     # export UV_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/cpu https://download.pytorch.org/whl/nightly/cu126"
 
+    if self.config['use_pyproject_requirements']:
+        install_helpers = [
+            'echo "Installing helpers: setuptools"',
+            f'{self.PIP_INSTALL} --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+            'echo "Installing helpers: tomli and pkginfo"',
+            f'{self.PIP_INSTALL} --resolution=highest tomli pkginfo',
+        ]
+    else:
+        install_helpers = [
+            'echo "Installing helpers: setuptools"',
+            f'{self.PIP_INSTALL} setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+            'echo "Installing helpers: tomli and pkginfo"',
+            f'{self.PIP_INSTALL} tomli pkginfo',
+        ]
+
     # Note: export does not expose the environment variable to subsequent jobs.
     install_wheel_commands = [
         'echo "Finding the path to the wheel"',
         f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',
-        'echo "Installing helpers"',
+        'echo "Installing helpers: update pip"',
         f'{self.UPDATE_PIP}',
-        # 'pip install pip setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
-        f'{self.PIP_INSTALL} setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
-        f'{self.PIP_INSTALL} tomli pkginfo',
-        # 'pip install delorean',
+        *install_helpers,
         f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
-        # 'echo "WHEEL_FPATH=$WHEEL_FPATH"',
         f'export MOD_VERSION=$({get_mod_version_bash})',
-        # 'echo "MOD_VERSION=$MOD_VERSION"',
     ] + special_install_lines + [
         'echo "WHEEL_FPATH=$WHEEL_FPATH"',
         'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
+        'echo "UV_RESOLUTION=$UV_RESOLUTION"',
         'echo "MOD_VERSION=$MOD_VERSION"',
 
         # This helps but doesn't solve the problem.
@@ -300,8 +317,6 @@ def get_supported_platform_info(self):
         if not info.get('is_prerelease'):
             cpython_versions_non34_non_prerelease_.append(pyver)
     cpython_versions_non34 = cpython_versions_non34_
-    print(f'cpython_versions_non34_={cpython_versions_non34_}')
-    print(f'cpython_versions_non34_non_prerelease_={cpython_versions_non34_non_prerelease_}')
 
     extras_versions_templates = {
         'full-loose': self.config['ci_versions_full_loose'],
@@ -311,7 +326,7 @@ def get_supported_platform_info(self):
     }
     extras_versions = {}
     for k, v in extras_versions_templates.items():
-        if v == '':
+        if v == '' or v is None:
             v = []
         elif v == 'min':
             v = [cpython_versions_non34_[0]]

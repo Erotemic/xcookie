@@ -357,12 +357,13 @@ def build_github_actions(self):
     else:
         raise Exception('Need to specify binpy or purepy in tags')
 
-    jobs['test_deploy'] = build_deploy(self, mode='test', needs=deploy_needs)
-    jobs['live_deploy'] = build_deploy(self, mode='live', needs=deploy_needs)
+    if self.config['deploy']:
+        jobs['test_deploy'] = build_deploy(self, mode='test', needs=deploy_needs)
+        jobs['live_deploy'] = build_deploy(self, mode='live', needs=deploy_needs)
 
-    if 1:
-        # New action to create a proper release
-        jobs['release'] = build_github_release(self, needs=['live_deploy'])
+        if 1:
+            # New action to create a proper release
+            jobs['release'] = build_github_release(self, needs=['live_deploy'])
 
     defaultbranch = self.config['defaultbranch']
     run_on_branches = ub.oset([defaultbranch, 'main'])
@@ -477,6 +478,20 @@ def build_and_test_sdist_job(self):
 
     build_parts = common_ci.make_build_sdist_parts(self, wheelhouse_dpath)
 
+    if self.config['use_pyproject_requirements']:
+        pip_reqs_install_parts = [
+            f'{self.UPDATE_PIP}',
+            f'{self.PIP_INSTALL_PREFER_BINARY} -r pyproject.toml --extra tests',
+        ]
+    else:
+        pip_reqs_install_parts = [
+            f'{self.UPDATE_PIP}',
+            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/tests.txt',
+            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/runtime.txt',
+            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt' if 'cv2' in self.tags else None,
+            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt' if 'gdal' in self.tags else None,
+        ]
+
     job = {
         'name': 'Build sdist',
         'runs-on': 'ubuntu-latest',
@@ -487,13 +502,7 @@ def build_and_test_sdist_job(self):
                 'with': {'python-version': main_python_version}}),
             {
                 'name': 'Upgrade pip',
-                'run': [_ for _ in [
-                    f'{self.UPDATE_PIP}',
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/tests.txt',
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/runtime.txt',
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt' if 'cv2' in self.tags else None,
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt' if 'gdal' in self.tags else None,
-                ] if _ is not None]
+                'run': [_ for _ in pip_reqs_install_parts if _ is not None]
             },
             {
                 'name': 'Build sdist',
@@ -789,13 +798,23 @@ def test_wheels_job(self, needs=None):
     special_loose_tags = []
     if 'cv2' in self.tags:
         special_loose_tags.append('headless')
-    special_strict_tags = [t + '-strict' for t in special_loose_tags]
-    install_extra_tags = ub.udict({
-        'minimal-loose'  : ['tests'] + special_loose_tags,
-        'full-loose'     : ['tests', 'optional'] + special_loose_tags,
-        'minimal-strict' : ['tests-strict', 'runtime-strict'] + special_strict_tags,
-        'full-strict'    : ['tests-strict', 'runtime-strict', 'optional-strict'] + special_strict_tags,
-    })
+
+    if self.config['use_pyproject_requirements']:
+        special_strict_tags = [t for t in special_loose_tags]
+        install_extra_tags = ub.udict({
+            'minimal-loose'  : ['tests'] + special_loose_tags,
+            'full-loose'     : ['tests', 'optional'] + special_loose_tags,
+            'minimal-strict' : ['tests'] + special_strict_tags,
+            'full-strict'    : ['tests', 'optional'] + special_strict_tags,
+        })
+    else:
+        special_strict_tags = [t + '-strict' for t in special_loose_tags]
+        install_extra_tags = ub.udict({
+            'minimal-loose'  : ['tests'] + special_loose_tags,
+            'full-loose'     : ['tests', 'optional'] + special_loose_tags,
+            'minimal-strict' : ['tests-strict', 'runtime-strict'] + special_strict_tags,
+            'full-strict'    : ['tests-strict', 'runtime-strict', 'optional-strict'] + special_strict_tags,
+        })
     install_extras = ub.udict({k: ','.join(v) for k, v in install_extra_tags.items()})
 
     special_strict_test_env = {}
@@ -818,30 +837,41 @@ def test_wheels_job(self, needs=None):
     for platkw in platform_basis:
         for extra in install_extras.take(['minimal-strict']):
             for pyver in install_extra_versions['minimal-strict']:
-                include.append({
+                item = {
                     'python-version': pyver, 'install-extras': extra,
-                    **platkw, **special_strict_test_env})
+                    **platkw, **special_strict_test_env}
+                if self.config['use_pyproject_requirements']:
+                    item['uv-resolution'] = 'lowest-direct'
+                include.append(item)
 
     for platkw in platform_basis:
         for extra in install_extras.take(['full-strict']):
             for pyver in install_extra_versions['full-strict']:
-                include.append({
-                    'python-version': pyver, 'install-extras': extra,
-                    **platkw, **special_strict_test_env})
+                item = {'python-version': pyver, 'install-extras': extra,
+                        **platkw, **special_strict_test_env}
+                if self.config['use_pyproject_requirements']:
+                    item['uv-resolution'] = 'lowest-direct'
+                include.append(item)
 
     for platkw in platform_basis[1:]:
         for extra in install_extras.take(['minimal-loose']):
             for pyver in install_extra_versions['minimal-loose']:
-                include.append({
+                item = {
                     'python-version': pyver, 'install-extras': extra,
-                    **platkw, **special_loose_test_env})
+                    **platkw, **special_loose_test_env}
+                if self.config['use_pyproject_requirements']:
+                    item['uv-resolution'] = 'highest'
+                include.append(item)
 
     for platkw in platform_basis:
         for extra in install_extras.take(['full-loose']):
             for pyver in install_extra_versions['full-loose']:
-                include.append({
+                item = {
                     'python-version': pyver, 'install-extras': extra,
-                    **platkw, **special_loose_test_env})
+                    **platkw, **special_loose_test_env}
+                if self.config['use_pyproject_requirements']:
+                    item['uv-resolution'] = 'highest'
+                include.append(item)
 
     # TODO: implement pypy support
     # pypy_versions = supported_platform_info['pypy_versions']
@@ -940,7 +970,11 @@ def test_wheels_job(self, needs=None):
     #     # get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
     #     # get_modpath_bash = f'python -c "{get_modpath_python}"'
 
-    install_env = {'INSTALL_EXTRAS': '${{ matrix.install-extras }}'}
+    install_env = {
+        'INSTALL_EXTRAS': '${{ matrix.install-extras }}'
+    }
+    if self.config['use_pyproject_requirements']:
+        install_env['UV_RESOLUTION'] =  '${{ matrix.uv-resolution }}'
 
     special_install_lines = []
     if 'gdal' in self.tags:
@@ -1185,6 +1219,8 @@ def build_deploy(self, mode='live', needs=None):
                 f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security] twine -U',
                 f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
             ]
+        else:
+            run = []
 
     if 'nosrcdist' not in self.tags:
         sdist_wheel_steps = [
@@ -1215,13 +1251,20 @@ def build_deploy(self, mode='live', needs=None):
             'name': 'Show files to upload',
             'shell': 'bash',
             'run': f'ls -la {wheelhouse_dpath}'
-        },
-        # TODO: it might make sense to make this a script that is invoked
-        {
-            'name': 'Sign and Publish' if self.config['enable_gpg'] else 'Publish',
-            'env': env,
-            'run': run,
-        },
+        }
+    ]
+
+    if self.config['deploy_pypi'] or enable_gpg:
+        deploy_steps += [
+            # TODO: it might make sense to make this a script that is invoked
+            {
+                'name': 'Sign and Publish' if self.config['enable_gpg'] else 'Publish',
+                'env': env,
+                'run': run,
+            }
+        ]
+
+    deploy_steps += [
         Actions.upload_artifact({
             'name': 'Upload deploy artifacts',
             'with': {
