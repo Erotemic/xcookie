@@ -389,15 +389,16 @@ class XCookieConfig(scfg.DataConfig):
             config['mod_name'] = setuptools_packages[0]
             config['rel_mod_parent_dpath'] = '.'
 
-        setuptools_find_config = setuptools_packages.get('find', {})
-        setuptools_include = setuptools_find_config.get('include')
-        if len(setuptools_include) == 1:
-            import glob
-            results = list(glob.glob(setuptools_include[0]))
-            results = [r for r in results if '.egg-info' not in r and '-' not in r]
-            if len(results) == 1:
-                config['mod_name'] = results[0]
-                config['rel_mod_parent_dpath'] = '.'
+        if isinstance(setuptools_packages, dict):
+            setuptools_find_config = setuptools_packages.get('find', {})
+            setuptools_include = setuptools_find_config.get('include')
+            if len(setuptools_include) == 1:
+                import glob
+                results = list(glob.glob(setuptools_include[0]))
+                results = [r for r in results if '.egg-info' not in r and '-' not in r]
+                if len(results) == 1:
+                    config['mod_name'] = results[0]
+                    config['rel_mod_parent_dpath'] = '.'
 
         repo_url = project_block.get('urls', {}).get('Repository')
         if repo_url is not None:
