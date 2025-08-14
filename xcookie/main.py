@@ -194,6 +194,11 @@ class XCookieConfig(scfg.DataConfig):
             will be considered for re-write
             ''')),
 
+        'only_generate': scfg.Value(None, alias='only_gen', help=ub.paragraph(
+            '''
+            if specified, onyl generate files matching this multipattern.
+            ''')),
+
         'tags': scfg.Value('auto', nargs='*', help=ub.paragraph(
             '''
             Tags modify what parts of the template are used.
@@ -231,6 +236,7 @@ class XCookieConfig(scfg.DataConfig):
             ''')),
 
         'use_uv': scfg.Value('auto', help=ub.paragraph('if False use plain pip, otherwise use uv instead')),
+        'use_pyproject_requirements': scfg.Value(False, help=ub.paragraph('experimental new style version testing')),
 
         # ---
         'interactive': scfg.Value(True),
@@ -354,7 +360,58 @@ class XCookieConfig(scfg.DataConfig):
         print(f'disk_config = {ub.urepr(disk_config, nl=1)}')
         if disk_config is not None:
             settings = disk_config.get('tool', {}).get('xcookie', {})
+
+            config = self._infer_xcookie_settings_from_pyproject(disk_config)
+
+            config = ub.udict(config)
+            settings = ub.udict(settings)
+
+            # Only add things not explicitly set
+            settings.update(config - settings)
+
+            # If an xcookie section isn't available, we can infer a lot of what
+            # we need from other more standard pyproject settings.
             return settings
+
+    def _infer_xcookie_settings_from_pyproject(self, disk_config):
+        """
+        Helper to populate the xcookie main settings from more standard
+        pyproject schemas.
+        """
+        config = {}
+        project_block = disk_config.get('project', {})
+        config['pkg_name'] = project_block.get('name')
+        config['description'] = project_block.get('description')
+
+        setuptools_config = disk_config.get('tool', {}).get('setuptools', {})
+        setuptools_packages = setuptools_config.get('packages', [])
+        if isinstance(setuptools_packages, list) and len(setuptools_packages) == 1:
+            config['mod_name'] = setuptools_packages[0]
+            config['rel_mod_parent_dpath'] = '.'
+
+        if isinstance(setuptools_packages, dict):
+            setuptools_find_config = setuptools_packages.get('find', {})
+            setuptools_include = setuptools_find_config.get('include')
+            if len(setuptools_include) == 1:
+                import glob
+                results = list(glob.glob(setuptools_include[0]))
+                results = [r for r in results if '.egg-info' not in r and '-' not in r]
+                if len(results) == 1:
+                    config['mod_name'] = results[0]
+                    config['rel_mod_parent_dpath'] = '.'
+
+        repo_url = project_block.get('urls', {}).get('Repository')
+        if repo_url is not None:
+            if 'github' in repo_url:
+                config['url'] = repo_url
+                config['tags'] = ['github', 'purepy']
+
+        req_py_block = project_block.get('requires-python')
+        if req_py_block:
+            from xcookie.version_helpers import parse_minimum_python_version
+            config['min_python'] = parse_minimum_python_version(req_py_block)
+
+        return config
 
     def confirm(self, msg, default=True):
         """
@@ -602,7 +659,7 @@ class TemplateApplier:
             #  },
 
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,binpy',
-             'input_fname': rc.resource_fpath('gitlab-ci.binpy.yml.in')},
+             'dynamic': 'build_gitlab_ci'},
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
 
             {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt',
@@ -1134,11 +1191,20 @@ class TemplateApplier:
         else:
             regen_pat = None
 
+        if self.config['only_generate'] is not None:
+            import kwutil
+            onlygen_pat = kwutil.MultiPattern.coerce(self.config['only_generate'])
+        else:
+            onlygen_pat = None
+
         for info in self.staging_infos:
             stage_fpath = info['stage_fpath']
             repo_fpath = info['repo_fpath']
             if info.get('skip', False):
                 continue
+            if onlygen_pat is not None:
+                if not onlygen_pat.match(info['fname']):
+                    continue
             if not repo_fpath.exists():
                 if stage_fpath.is_dir():
                     tasks['mkdir'].append(repo_fpath)
@@ -1147,7 +1213,7 @@ class TemplateApplier:
                     stats['missing'].append(repo_fpath)
                     tasks['copy'].append((stage_fpath, repo_fpath))
                     stage_text = stage_fpath.read_text()
-                    difftext = xdev.difftext('', stage_text[:1000], colored=1)
+                    difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2) + '...and more'
                     print(f'<NEW FPATH={repo_fpath}>')
                     print(difftext)
                     print(f'<END FPATH={repo_fpath}>')
@@ -1160,7 +1226,7 @@ class TemplateApplier:
                 if stage_text.strip() == repo_text.strip():
                     difftext = None
                 else:
-                    difftext = xdev.difftext(repo_text, stage_text, colored=1)
+                    difftext = xdev.difftext(repo_text, stage_text, colored=1, context_lines=1)
                 if difftext:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:
@@ -1330,7 +1396,8 @@ class TemplateApplier:
     def build_github_actions(self):
         from xcookie.builders import github_actions
         self._setup_pip_commands()  # Do we need this here?
-        return github_actions.build_github_actions(self)
+        text = github_actions.build_github_actions(self)
+        return text
 
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci

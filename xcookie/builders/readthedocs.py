@@ -22,9 +22,9 @@ def build_readthedocs(self):
         version: 2
 
         build:
-          os: "ubuntu-22.04"
+          os: "ubuntu-24.04"
           tools:
-            python: "3.11"
+            python: "3.13"
 
         # Build documentation in the docs/ directory with Sphinx
         sphinx:
