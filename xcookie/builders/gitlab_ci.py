@@ -674,6 +674,20 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
     # import ruamel.yaml
     from ruamel.yaml.comments import CommentedMap
     from xcookie.util_yaml import Yaml
+
+    _dist_patterns = []
+    _dist_patterns.append(wheelhouse_dpath + '/*.whl')
+    if 'nosrcdist' not in self.tags:
+        _dist_patterns.append(wheelhouse_dpath + '/*.tar.gz')
+    dist_pattern = ' '.join(_dist_patterns)
+
+    _artifact_patterns = []
+    _artifact_patterns.append(wheelhouse_dpath + '/*.whl')
+    _artifact_patterns.append(wheelhouse_dpath + '/*.asc')
+    if 'nosrcartifact' not in self.tags and 'nosrcdist' not in self.tags:
+        _artifact_patterns.append(wheelhouse_dpath + '/*.tar.gz')
+    artifact_pattern = ' '.join(_artifact_patterns)
+
     gpgsign_job = {}
     gpgsign_job.update(ub.udict(Yaml.loads(ub.codeblock(
         f'''
@@ -721,7 +735,7 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
     gpgsign_job['script'].append(
         Yaml.CodeBlock(
             '''
-            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
+            WHEEL_PATHS=(''' + dist_pattern + ''')
             WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
             echo "$WHEEL_PATHS_STR"
             for WHEEL_PATH in "${WHEEL_PATHS[@]}"
@@ -747,7 +761,7 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
         gpgsign_job['artifacts']['paths'].append(f'{wheelhouse_dpath}/*.ots')
         gpgsign_job['script'].append(f'{self.UPDATE_PIP}')
         gpgsign_job['script'].append(f'{self.PIP_INSTALL} opentimestamps-client')
-        gpgsign_job['script'].append(f'ots stamp {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.asc')
+        gpgsign_job['script'].append(f'ots stamp {artifact_pattern}')
     return gpgsign_job
 
 
@@ -774,12 +788,19 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
         f'{self.PIP_INSTALL} pyopenssl ndg-httpsclient pyasn1 requests[security] setuptools twine -U',
         f'ls {wheelhouse_dpath}',
     ]
+
+    _dist_patterns = []
+    _dist_patterns.append(wheelhouse_dpath + '/*.whl')
+    if 'nosrcdist' not in self.tags:
+        _dist_patterns.append(wheelhouse_dpath + '/*.tar.gz')
+    dist_pattern = ' '.join(_dist_patterns)
+
     if self.config['deploy_pypi']:
         deploy_script += [
             Yaml.CodeBlock(
                 '''
                 set -e
-                WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
+                WHEEL_PATHS=(''' + dist_pattern + ''')
                 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
                 source dev/secrets_configuration.sh
                 TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}
