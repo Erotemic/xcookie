@@ -523,7 +523,7 @@ def build_and_test_sdist_job(self):
                     # So far not needed, but once we bump to 3.14 this needs to be
                     # set whenever `pytest` is run with `coverage`
                     # (see the `test_binpy_wheels` jobs)
-                    'COVERAGE_CORE': 'ctrace'
+                    # 'COVERAGE_CORE': 'ctrace'
                 },
                 'run': [
                     'pwd',
@@ -547,7 +547,7 @@ def build_and_test_sdist_job(self):
             {
                 'name': 'Test full loose sdist',
                 'env': {
-                    'COVERAGE_CORE': 'ctrace'
+                    # 'COVERAGE_CORE': 'ctrace'
                 },
                 'run': [
                     'pwd',
@@ -673,7 +673,7 @@ def build_binpy_wheels_job(self):
     job_steps += [Actions.checkout()]
     job_steps += conditional_actions
 
-    USE_ABI3 = True
+    USE_ABI3 = False
     if USE_ABI3:
         # Hack in abi3 support, todo: clean up later.
         abi3_action = Actions.cibuildwheel(sensible=True)
@@ -683,7 +683,7 @@ def build_binpy_wheels_job(self):
 
     job_steps += [
         Actions.setup_qemu(sensible=True),
-        abi3_action,
+        # abi3_action,
         Actions.cibuildwheel(sensible=True),
     ]
     job_steps += [
@@ -1052,7 +1052,7 @@ def test_wheels_job(self, needs=None):
         'shell': 'bash',
         'env': {
             'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}',
-            'COVERAGE_CORE': 'ctrace',
+            # 'COVERAGE_CORE': 'ctrace',
         },
         'run': install_and_test_wheel_parts['test_wheel_commands'],
     }))
@@ -1144,9 +1144,13 @@ def build_deploy(self, mode='live', needs=None):
 
     artifact_globs = [
         f'{wheelhouse_dpath}/*.whl',
-        f'{wheelhouse_dpath}/*.zip',
-        f'{wheelhouse_dpath}/*.tar.gz',
     ]
+
+    if 'nosrcdist' not in self.tags:
+        artifact_globs += [
+            f'{wheelhouse_dpath}/*.zip',
+            f'{wheelhouse_dpath}/*.tar.gz',
+        ]
 
     if enable_gpg:
         run = [
@@ -1171,9 +1175,14 @@ def build_deploy(self, mode='live', needs=None):
             '''echo "GPG_KEYID = '$GPG_KEYID'"''',
             'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
         ]
+        _dist_patterns = []
+        _dist_patterns.append(wheelhouse_dpath + '/*.whl')
+        if 'nosrcdist' not in self.tags:
+            _dist_patterns.append(wheelhouse_dpath + '/*.tar.gz')
+        dist_pattern = ' '.join(_dist_patterns)
         run += ub.codeblock(
             '''
-            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
+            WHEEL_PATHS=(''' + dist_pattern + ''')
             WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
             echo "$WHEEL_PATHS_STR"
             for WHEEL_PATH in "${WHEEL_PATHS[@]}"
@@ -1195,7 +1204,7 @@ def build_deploy(self, mode='live', needs=None):
         if enable_otc:
             run += [
                 f'{self.SYSTEM_PIP_INSTALL} opentimestamps-client',
-                f'ots stamp {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.asc',
+                f'ots stamp {dist_pattern} {wheelhouse_dpath}/*.asc',
                 'ls -la wheelhouse'
             ]
             artifact_globs.append(
@@ -1204,7 +1213,7 @@ def build_deploy(self, mode='live', needs=None):
 
         if self.config['deploy_pypi']:
             run += [
-                f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
+                f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {dist_pattern} --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
             ]
         # pypi doesn't care about GPG keys anymore, but we can keep them as artifacts.
         # run += [
@@ -1217,7 +1226,7 @@ def build_deploy(self, mode='live', needs=None):
         if self.config['deploy_pypi']:
             run = [
                 f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security] twine -U',
-                f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
+                f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {dist_pattern} --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
             ]
         else:
             run = []

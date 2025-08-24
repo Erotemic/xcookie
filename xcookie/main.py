@@ -689,7 +689,9 @@ class TemplateApplier:
             {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x',
              'dynamic': 'build_run_doctests',
              },  # TODO: template with xdoctest-style
-            {'template': 1, 'overwrite': 1, 'fname': 'MANIFEST.in', 'dynamic': 'build_manifest_in'},
+
+            # TODO: add this back in eventually
+            # {'template': 1, 'overwrite': 1, 'fname': 'MANIFEST.in', 'dynamic': 'build_manifest_in'},
 
             {'template': 0, 'overwrite': 0, 'fname': 'run_linter.sh', 'perms': 'x',
              'dynamic': 'build_run_linter'},
