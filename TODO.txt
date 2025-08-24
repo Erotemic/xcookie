@@ -1,0 +1,1 @@
+- [ ] Add option to build the source dist, but not test it. I.e. change `nosrcdist` to `notest-srcdist` or something like that.
