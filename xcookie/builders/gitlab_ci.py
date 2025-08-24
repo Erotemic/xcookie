@@ -19,6 +19,8 @@ def build_gitlab_ci(self):
     """
     if 'purepy' in self.tags:
         return make_purepy_ci_jobs(self)
+    elif 'binpy' in self.tags:
+        return make_binpy_ci_jobs(self)
     else:
         raise NotImplementedError
 
@@ -373,6 +375,268 @@ def make_purepy_ci_jobs(self):
     return text
 
 
+def make_binpy_ci_jobs(self):
+    import ruamel.yaml  # NOQA
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+    from xcookie.util_yaml import Yaml
+    from xcookie.constants import KNOWN_CPYTHON_DOCKER_IMAGES
+
+    enable_gpg = self.config['enable_gpg']
+
+    body = CommentedMap()
+
+    stages = ['build', 'test']
+    if enable_gpg:
+        stages.append('gpgsign')
+    body['stages'] = CommentedSeq(stages)
+
+    common_template = ub.udict(Yaml.loads(ub.codeblock(
+        '''
+        tags:
+            - docker
+            - linux-x86_64
+            - build
+
+        variables:
+            PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+            UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+
+        cache:
+            paths:
+                - .cache/pip
+                - .cache/uv
+        ''')))
+
+    common_template = CommentedMap(common_template)
+    common_template.yaml_set_anchor('common_template')
+    body['.common_template'] = common_template
+
+    if 'kitware' in self.tags:
+        body['.common_template']['tags'].append('kitware-python-stack')
+
+    wheelhouse_dpath = 'wheelhouse'
+
+    # TODO: We may want to bake in a lot of the configuration vfs stuff into
+    # the podman image that we are using. Not sure if that matters, or if there
+    # is a more efficient way to use podman here.
+    podman_image = 'gitlab.kitware.com:4567/computer-vision/ci-docker/podman:v4.9.0-uv0.8.8-python3.12-cuda12.4.1-cudnn-devel-ubuntu22.04'
+
+    cibuildwheel_template = Yaml.loads(ub.codeblock(
+        fr'''
+        stage: build
+        tags:
+            - linux-x86_64
+            - docker
+            - privileged
+        image: {podman_image}
+        script:
+            - podman --version
+            - podman info --debug
+            - python3 -m pip install cibuildwheel>=2.8.0
+            - pwd
+            - ls -al
+            - mkdir -p ".cache/containers/vfs-storage/"
+            - |
+              codeblock()
+              {{
+                  PYEXE=python3
+                  echo "$1" | $PYEXE -c "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()).strip(chr(10)))"
+              }}
+              export CONTAINERS_CONF=$(realpath "temp_containers.conf")
+              export CONTAINERS_STORAGE_CONF=$(realpath "temp_storage.conf")
+              codeblock "
+              [storage]
+              driver=\"vfs\"
+              graphroot=\"$HOME/.local/share/containers/vfs-storage\"
+              runroot=\"$HOME/.local/share/containers/vfs-runroot\"
+              [storage.options.aufs]
+              mountopt=\"rw\"
+              " > $CONTAINERS_STORAGE_CONF
+              codeblock "
+              [containers]
+              default_capabilities = [
+                \"CHOWN\",
+                \"DAC_OVERRIDE\",
+                \"FOWNER\",
+                \"FSETID\",
+                \"KILL\",
+                \"NET_BIND_SERVICE\",
+                \"SETFCAP\",
+                \"SETGID\",
+                \"SETPCAP\",
+                \"SETUID\",
+                \"SYS_CHROOT\"
+              ]
+              [engine]
+              cgroup_manager=\"cgroupfs\"
+              events_logger=\"file\"
+              [machine]
+              " > $CONTAINERS_CONF
+              cat $CONTAINERS_CONF
+              cat $CONTAINERS_STORAGE_CONF
+            - podman info --debug
+            - export CIBW_CONTAINER_ENGINE="podman"
+            - cibuildwheel --config-file pyproject.toml --platform linux --print-build-identifiers
+            - cibuildwheel --config-file pyproject.toml --output-dir wheelhouse --platform linux
+            - ls $CIBW_OCI_ROOT
+            - ls wheelhouse
+        artifacts:
+            paths:
+                - wheelhouse/
+        '''))
+
+    cibuildwheel_template = CommentedMap(cibuildwheel_template)
+    cibuildwheel_template.yaml_set_anchor('cibuildwheel_template')
+    body['.cibuildwheel_template'] = cibuildwheel_template
+
+    common_test_template = {
+        'stage': 'test',
+        'coverage': '/TOTAL.+ ([0-9]{1,3}%)/',
+        'except': {'refs': ['release']},
+    }
+    common_test_template = CommentedMap(common_test_template)
+    common_test_template.yaml_set_anchor('common_test_template')
+    common_test_template.add_yaml_merge([(0, common_template)])
+    body['.common_test_template'] = common_test_template
+
+    setup_venv_template = Yaml.CodeBlock(
+        f'''
+        # Setup the correct version of python (which should be the same as this instance)
+        python --version  # Print out python version for debugging
+        export PYVER=$(python -c "import sys; print(''.join(map(str, sys.version_info[0:2])))")
+        python -m pip install virtualenv
+        python -m virtualenv venv$PYVER
+        source venv$PYVER/bin/activate
+        {self.UPDATE_PIP}
+        {self.PIP_INSTALL} setuptools -U
+        {self.PIP_INSTALL} pygments
+        python --version  # Print out python version for debugging
+        ''')
+
+    test_templates = {}
+    loose_cv2 = ''
+    strict_cv2 = ''
+    if 'cv2' in self.tags:
+        loose_cv2 = ',headless'
+        strict_cv2 = ',headless-strict'
+    all_install_extras = ub.udict({
+        'minimal-loose': 'tests' + loose_cv2,
+        'full-loose': 'tests,optional' + loose_cv2,
+        'minimal-strict': 'tests-strict,runtime-strict' + strict_cv2,
+        'full-strict': 'tests-strict,runtime-strict,optional-strict' + strict_cv2,
+    })
+
+    install_extras = ub.udict(all_install_extras) & self.config.test_variants
+    for extra_key, extra in install_extras.items():
+        if 'gdal' in self.tags:
+            if extra_key.endswith('-strict'):
+                special_install_lines = [
+                    """sed 's/>=/==/' "requirements/gdal.txt" > "requirements/gdal-strict.txt""".strip(),
+                    f'{self.PIP_INSTALL} -r requirements/gdal-strict.txt',
+                ]
+            else:
+                special_install_lines = [f'{self.PIP_INSTALL} -r requirements/gdal.txt']
+        else:
+            special_install_lines = []
+        workspace_dname = 'sandbox'
+        install_and_test_wheel_parts = common_ci.make_install_and_test_wheel_parts(
+            self, wheelhouse_dpath, special_install_lines, workspace_dname)
+        test_steps = [f'export INSTALL_EXTRAS="{extra}"']
+        test_steps += install_and_test_wheel_parts['install_wheel_commands']
+        test_steps += install_and_test_wheel_parts['test_wheel_commands']
+        test = {
+            'before_script': [setup_venv_template],
+            'script': test_steps,
+        }
+        anchor = f'test_{extra_key}_template'
+        test = CommentedMap(test)
+        test.yaml_set_anchor(anchor)
+        test.add_yaml_merge([(0, common_test_template)])
+        body['.' + anchor] = test
+        test_templates[extra_key] = test
+
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    main_pyver = supported_platform_info['main_python_version']
+    main_cpver = 'cp' + main_pyver.replace('.', '')
+    main_image = KNOWN_CPYTHON_DOCKER_IMAGES[main_cpver]
+
+    build_names = []
+    jobs = {}
+    opsys = 'linux'
+    arch = 'x86_64'
+    for pyver in self.config['ci_cpython_versions']:
+        cpver = 'cp' + pyver.replace('.', '')
+        image = KNOWN_CPYTHON_DOCKER_IMAGES[cpver]
+
+        # TODO: handle this case in other variants
+        extra_environs = {}
+
+        # fixme: might not be a robust check, e.g. python could release, but
+        # packages might not have official wheels yet.
+        needs_prerelease = ('-rc' in image)
+        if needs_prerelease:
+            if self.config['use_uv']:
+                # TODO: determine if we need torch prereleases or what else
+                extra_environs.update({
+                    'UV_PRERELEASE': 'allow',
+                    'UV_INDEX_STRATEGY': 'unsafe-best-match',
+                    'UV_INDEX': ' '.join([
+                        'https://pypi.org/simple',
+                        'https://download.pytorch.org/whl/nightly/cpu',
+                        # 'https://download.pytorch.org/whl/nightly/cu126',
+                    ])
+                })
+
+        swenv_key = f'{cpver}-{opsys}-{arch}'
+        build_name = f'build/{swenv_key}'
+        build_job = {
+            'variables': {
+                'CIBW_BUILD': f'{cpver}-*',
+            }
+        }
+        build_job = CommentedMap(build_job)
+        build_job.add_yaml_merge([(0, cibuildwheel_template)])
+        jobs[build_name] = build_job
+        build_names.append(build_name)
+
+        for extra_key, common_test_template in test_templates.items():
+            test_name = f'test/{extra_key}/{swenv_key}'
+            test_job = {
+                'image': image,
+                'needs': [build_name],
+            }
+            test_job = CommentedMap(test_job)
+            test_job.add_yaml_merge([(0, common_test_template)])
+            if extra_environs:
+                test_job['variables'] = extra_environs.copy()
+            jobs[test_name] = test_job
+
+    body.update(jobs)
+
+    if enable_gpg:
+        gpgsign_job = build_gpg_job(self, common_template, main_image, wheelhouse_dpath)
+        gpgsign_job['needs'] = [{'job': build_name, 'artifacts': True} for build_name in build_names]
+        body['gpgsign/wheels'] = gpgsign_job
+
+    deploy = self.config['deploy']
+    if deploy:
+        body['stages'].append('deploy')
+        deploy_job = build_deploy_job(self, common_template, main_image, wheelhouse_dpath)
+        body['deploy/wheels'] = deploy_job
+
+    body_text = Yaml.dumps(body)
+    body = Yaml.loads(body_text)
+
+    header = ub.codeblock(
+        '''
+        # Autogenerated by ~/code/xcookie/xcookie/builders/gitlab_ci.py
+        '''
+    )
+    footer = '# end'
+    text = header + '\n\n' + body_text + '\n\n' + footer
+    return text
+
+
 def build_lint_job(self, common_template, deploy_image):
     from xcookie.util_yaml import Yaml
     from ruamel.yaml.comments import CommentedMap
@@ -410,6 +674,20 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
     # import ruamel.yaml
     from ruamel.yaml.comments import CommentedMap
     from xcookie.util_yaml import Yaml
+
+    _dist_patterns = []
+    _dist_patterns.append(wheelhouse_dpath + '/*.whl')
+    if 'nosrcdist' not in self.tags:
+        _dist_patterns.append(wheelhouse_dpath + '/*.tar.gz')
+    dist_pattern = ' '.join(_dist_patterns)
+
+    _artifact_patterns = []
+    _artifact_patterns.append(wheelhouse_dpath + '/*.whl')
+    _artifact_patterns.append(wheelhouse_dpath + '/*.asc')
+    if 'nosrcartifact' not in self.tags and 'nosrcdist' not in self.tags:
+        _artifact_patterns.append(wheelhouse_dpath + '/*.tar.gz')
+    artifact_pattern = ' '.join(_artifact_patterns)
+
     gpgsign_job = {}
     gpgsign_job.update(ub.udict(Yaml.loads(ub.codeblock(
         f'''
@@ -457,7 +735,7 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
     gpgsign_job['script'].append(
         Yaml.CodeBlock(
             '''
-            WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
+            WHEEL_PATHS=(''' + dist_pattern + ''')
             WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
             echo "$WHEEL_PATHS_STR"
             for WHEEL_PATH in "${WHEEL_PATHS[@]}"
@@ -483,7 +761,7 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
         gpgsign_job['artifacts']['paths'].append(f'{wheelhouse_dpath}/*.ots')
         gpgsign_job['script'].append(f'{self.UPDATE_PIP}')
         gpgsign_job['script'].append(f'{self.PIP_INSTALL} opentimestamps-client')
-        gpgsign_job['script'].append(f'ots stamp {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.asc')
+        gpgsign_job['script'].append(f'ots stamp {artifact_pattern}')
     return gpgsign_job
 
 
@@ -510,12 +788,19 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
         f'{self.PIP_INSTALL} pyopenssl ndg-httpsclient pyasn1 requests[security] setuptools twine -U',
         f'ls {wheelhouse_dpath}',
     ]
+
+    _dist_patterns = []
+    _dist_patterns.append(wheelhouse_dpath + '/*.whl')
+    if 'nosrcdist' not in self.tags:
+        _dist_patterns.append(wheelhouse_dpath + '/*.tar.gz')
+    dist_pattern = ' '.join(_dist_patterns)
+
     if self.config['deploy_pypi']:
         deploy_script += [
             Yaml.CodeBlock(
                 '''
                 set -e
-                WHEEL_PATHS=(''' + wheelhouse_dpath + '''/*.whl ''' + wheelhouse_dpath + '''/*.tar.gz)
+                WHEEL_PATHS=(''' + dist_pattern + ''')
                 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
                 source dev/secrets_configuration.sh
                 TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}

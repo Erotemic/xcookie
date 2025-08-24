@@ -332,6 +332,7 @@ def build_docs_conf(self):
             'sphinx.ext.imgconverter',  # For building latexpdf
             'sphinx.ext.githubpages',
             # 'sphinxcontrib.redirects',
+            'sphinxcontrib.jquery',  # Fix for search
             'sphinx_reredirects',
         ]
 
@@ -585,7 +586,7 @@ def build_docs_requirements(self):
         '''
         sphinx>=5.0.1
         sphinx-autobuild>=2021.3.14
-        sphinx_rtd_theme>=1.0.0
+        sphinx_rtd_theme >= 1.2.1
         sphinxcontrib-napoleon>=0.7
         sphinx-autoapi>=1.8.4
         Pygments>=2.9.0
