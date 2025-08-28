@@ -33,12 +33,12 @@ def make_build_sdist_parts(self, wheelhouse_dpath='wheelhouse'):
         f'{self.UPDATE_PIP}',
         f'{self.PIP_INSTALL} setuptools>=0.8 wheel build twine',
         f'python -m build --sdist --outdir {wheelhouse_dpath}',
-        f'python -m twine check ./{wheelhouse_dpath}/{self.pkg_name}*.tar.gz',
+        f'python -m twine check ./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz',
     ]
 
     build_parts = {
         'commands': commands,
-        'artifact': f"./{wheelhouse_dpath}/{self.pkg_name}*.tar.gz"
+        'artifact': f"./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz"
     }
     return build_parts
 
@@ -49,12 +49,12 @@ def make_build_wheel_parts(self, wheelhouse_dpath='wheelhouse'):
         f'{self.UPDATE_PIP}',
         f'{self.PIP_INSTALL} setuptools>=0.8 wheel build twine',
         f'python -m build --wheel --outdir {wheelhouse_dpath}',
-        f'python -m twine check ./{wheelhouse_dpath}/{self.pkg_name}*.whl',
+        f'python -m twine check ./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.whl',
     ]
 
     build_wheel_parts = {
         'commands': commands,
-        'artifact': f"./{wheelhouse_dpath}/{self.pkg_name}*.whl"
+        'artifact': f"./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.whl"
     }
     return build_wheel_parts
 
@@ -90,8 +90,8 @@ def make_install_and_test_wheel_parts(self,
         python -c "if 1:
             import pathlib
             dist_dpath = pathlib.Path('{wheelhouse_dpath}')
-            candidates = list(dist_dpath.glob('{self.pkg_name}*.whl'))
-            candidates += list(dist_dpath.glob('{self.pkg_name}*.tar.gz'))
+            candidates = list(dist_dpath.glob('{self.pkg_fname_prefix}*.whl'))
+            candidates += list(dist_dpath.glob('{self.pkg_fname_prefix}*.tar.gz'))
             fpath = sorted(candidates)[-1]
             print(str(fpath).replace(chr(92), chr(47)))
         "

@@ -589,6 +589,11 @@ class TemplateApplier:
     def pkg_name(self):
         return self.config['pkg_name']
 
+    @property
+    def pkg_fname_prefix(self):
+        # the files have underscores replaced in the prefix
+        return self.config['pkg_name'].replace('-', '_')
+
     def _build_template_registry(self):
         """
         Take stock of the files in the template repo and ensure they all have

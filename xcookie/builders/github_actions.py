@@ -514,7 +514,7 @@ def build_and_test_sdist_job(self):
                 'name': 'Install sdist',
                 'run': [
                     f'ls -al {wheelhouse_dpath}',
-                    f'{self.PIP_INSTALL_PREFER_BINARY} {wheelhouse_dpath}/{self.pkg_name}*.tar.gz -v',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} {wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz -v',
                 ]
             },
             {
