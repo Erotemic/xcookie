@@ -134,6 +134,7 @@ class XCookieConfig(scfg.DataConfig):
 
         'min_python': scfg.Value('3.7', type=str, help='used to infer supported_python_versions'),
         'max_python': scfg.Value(None, type=str, help='used to infer supported_python_versions'),
+        'main_python': scfg.Value('max', help='The main version of Python to use for version agnostic jobs. A value of max uses the maximum version'),
 
         'typed': scfg.Value(None, help='Should be None, False, True, partial or full'),
         'supported_python_versions': scfg.Value('auto', help=ub.paragraph(
@@ -161,8 +162,8 @@ class XCookieConfig(scfg.DataConfig):
             ''')),
 
         'ci_versions_minimal_strict': scfg.Value('min', help='todo: sus out'),
-        'ci_versions_full_strict': scfg.Value('max'),
-        'ci_versions_minimal_loose': scfg.Value('max'),
+        'ci_versions_full_strict': scfg.Value('main'),
+        'ci_versions_minimal_loose': scfg.Value('main'),
         'ci_versions_full_loose': scfg.Value('*'),
 
         'remote_host': scfg.Value(None, help='if unspecified, attempt to infer from tags'),
@@ -171,6 +172,8 @@ class XCookieConfig(scfg.DataConfig):
         'autostage': scfg.Value(False, help='if true, automatically add changes to version control'),
 
         'visibility': scfg.Value('public', help='or private. Does limit what we can do'),
+
+        'test_env': scfg.Value(None, help='A YAML coercable dictionary of environment variables to use in test stages. (TOTO'),
 
 
         'version': scfg.Value(None, help='repo metadata: url for the project'),
@@ -357,7 +360,7 @@ class XCookieConfig(scfg.DataConfig):
 
     def _load_xcookie_pyproject_settings(self):
         disk_config = self._load_pyproject_config()
-        print(f'disk_config = {ub.urepr(disk_config, nl=1)}')
+        # print(f'disk_config = {ub.urepr(disk_config, nl=1)}')
         if disk_config is not None:
             settings = disk_config.get('tool', {}).get('xcookie', {})
 
@@ -446,19 +449,19 @@ class XCookieConfig(scfg.DataConfig):
         return answer
 
     @classmethod
-    def load_from_cli_and_pyproject(cls, cmdline=0, **kwargs):
+    def load_from_cli_and_pyproject(cls, argv=0, **kwargs):
         # We load the config multiple times to get the right defaults.
         # ideally we should fix this up
-        config = XCookieConfig.cli(cmdline=cmdline, data=kwargs)
+        config = XCookieConfig.cli(argv=argv, data=kwargs, strict=True)
         # config.__post_init__()
         settings = config._load_xcookie_pyproject_settings()
         if settings:
             print(f'settings={settings}')
-            config = XCookieConfig.cli(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
+            config = XCookieConfig.cli(argv=argv, data=kwargs, default=ub.dict_isect(settings, config))
         return config
 
     @classmethod
-    def main(cls, cmdline=0, **kwargs):
+    def main(cls, argv=0, **kwargs):
         """
         Main entry point
 
@@ -468,7 +471,7 @@ class XCookieConfig(scfg.DataConfig):
                 'repodir': repodir,
                 'tags': ['binpy', 'erotemic', 'github'],
             }
-            cmdline = 0
+            argv = 0
 
         Example:
             repodir = ub.Path.appdir('pypkg/demo/my_new_repo')
@@ -478,15 +481,15 @@ class XCookieConfig(scfg.DataConfig):
             kwargs = {
                 'repodir': repodir,
             }
-            cmdline = 0
+            argv = 0
         """
         # We load the config multiple times to get the right defaults.
-        config = XCookieConfig.load_from_cli_and_pyproject(cmdline=cmdline, **kwargs)
+        config = XCookieConfig.load_from_cli_and_pyproject(argv=argv, **kwargs)
         # # config.__post_init__()
         # settings = config._load_xcookie_pyproject_settings()
         # if settings:
         #     print(f'settings={settings}')
-        #     config = XCookieConfig.cli(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
+        #     config = XCookieConfig.cli(argv=argv, data=kwargs, default=ub.dict_isect(settings, config))
         # config.__post_init__()
 
         # import xdev
@@ -1012,7 +1015,7 @@ class TemplateApplier:
             >>>     'is_new': False,
             >>>     'interactive': False,
             >>> }
-            >>> config = XCookieConfig.cli(cmdline=0, data=kwargs)
+            >>> config = XCookieConfig.cli(argv=0, data=kwargs)
             >>> #config.__post_init__()
             >>> print('config = {}'.format(ub.urepr(dict(config), nl=1)))
             >>> self = TemplateApplier(config)
@@ -1204,6 +1207,8 @@ class TemplateApplier:
         else:
             onlygen_pat = None
 
+        diff_style = 'unified'
+
         for info in self.staging_infos:
             stage_fpath = info['stage_fpath']
             repo_fpath = info['repo_fpath']
@@ -1220,7 +1225,7 @@ class TemplateApplier:
                     stats['missing'].append(repo_fpath)
                     tasks['copy'].append((stage_fpath, repo_fpath))
                     stage_text = stage_fpath.read_text()
-                    difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2) + '...and more'
+                    difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2, style=diff_style) + '...and more'
                     print(f'<NEW FPATH={repo_fpath}>')
                     print(difftext)
                     print(f'<END FPATH={repo_fpath}>')
@@ -1233,7 +1238,10 @@ class TemplateApplier:
                 if stage_text.strip() == repo_text.strip():
                     difftext = None
                 else:
-                    difftext = xdev.difftext(repo_text, stage_text, colored=1, context_lines=1)
+                    difftext = xdev.difftext(repo_text, stage_text, colored=1,
+                                             context_lines=1, style=diff_style,
+                                             fromfile=repo_fpath,
+                                             tofile=repo_fpath)
                 if difftext:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:
@@ -1519,7 +1527,7 @@ class TemplateApplier:
             >>>     'max_python': '3.12',
             >>>     'interactive': False,
             >>> }
-            >>> config = XCookieConfig.cli(cmdline=0, data=kwargs)
+            >>> config = XCookieConfig.cli(argv=0, data=kwargs)
             >>> print('config = {}'.format(ub.urepr(dict(config), nl=1)))
             >>> self = TemplateApplier(config)
             >>> print(chr(10) + 'headless.txt')
@@ -1574,7 +1582,8 @@ class TemplateApplier:
             '--find-links https://girder.github.io/large_image_wheels',
         ]
         version_defaults = [
-            {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.11.3', 'pyver_ge': Version('3.14'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('3.14')},
             {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('3.13')},
             {'version': '>=3.5.2', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.12')},
             {'version': '>=3.4.1,<=3.11.0', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
@@ -1691,7 +1700,7 @@ class TemplateApplier:
 
 
 def main():
-    XCookieConfig.main(cmdline={
+    XCookieConfig.main(argv={
         'strict': True,
         'autocomplete': True,
     })

@@ -150,30 +150,38 @@ class Actions:
     def msvc_dev_cmd(cls, *args, osvar=None, bits=None, test_condition=None, **kwargs):
         if osvar is not None:
             # hack, just keep it this way for now
+            windows_con = "${{ startsWith(matrix.os, 'windows-') }}"
             if bits == 32:
+                # windows_con = "matrix.os == 'windows-latest'"  # OLD
                 # FIXME; we dont want to rely on the cibw_skip variable
                 # kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_skip == '*-win_amd64'"
                 if test_condition is not None:
-                    kwargs['if'] = "matrix.os == 'windows-latest' && " + test_condition
+                    kwargs['if'] = windows_con + " && " + test_condition
                 else:
-                    kwargs['if'] = "matrix.os == 'windows-latest'"
+                    kwargs['if'] = windows_con
             else:
                 if test_condition is not None:
-                    kwargs['if'] = "matrix.os == 'windows-latest' && " + test_condition
+                    kwargs['if'] = windows_con + " && " + test_condition
                 else:
-                    kwargs['if'] = "matrix.os == 'windows-latest'"
+                    kwargs['if'] = windows_con
+
         if bits is None:
             name = 'Enable MSVC'
         else:
             name = fr'Enable MSVC {bits}bit'
             if str(bits) == '64':
-                ...
+                # As noted in msvc-dev-cmd #90 (and the Action docs), it currently
+                # # assumes `arch=x64`, so we have to manually set it here...
+                kwargs['with'] = {
+                    'arch': "${{ contains(matrix.os, 'arm') && 'arm64' || 'x64' }}",
+                }
             elif str(bits) == '32':
                 kwargs['with'] = {
                     'arch': 'x86'
                 }
             else:
                 raise NotImplementedError(str(bits))
+
         return cls.action({
             'name': name,
             'uses': 'ilammy/msvc-dev-cmd@v1',
@@ -232,6 +240,11 @@ class Actions:
                 'env': {
                     # 'CIBW_BUILD_VERBOSITY': 1,
                     'CIBW_SKIP': '${{ matrix.cibw_skip }}',
+
+                    # We're building on Windows-x64, so ARM64 wheels can't be tested
+                    # locally by `cibuildwheel` (don't worry, we're testing them
+                    # later though in `test_binpy_wheels`)
+                    'CIBW_TEST_SKIP': '*-win_arm64',
                     # 'CIBW_BUILD': '${{ matrix.cibw_build }}',
                     # 'CIBW_TEST_REQUIRES': '-r requirements/tests.txt'0
                     # 'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
@@ -239,6 +252,12 @@ class Actions:
                     'CIBW_ARCHS_LINUX': '${{ matrix.arch }}',
                     'CIBW_ENVIRONMENT': 'PYTHONUTF8=1',  # for windows
                     'PYTHONUTF8': '1',  # for windows
+
+                    # TODO: only include this if we are building on windows arm
+                    # `msvc-dev-cmd` sets this envvar, which interferes with
+                    # cross-architecture building...
+                    # just let `cibuildwheel` handle that
+                    'VSCMD_ARG_TGT_ARCH': ''
                 }
             })
 
@@ -492,6 +511,12 @@ def build_and_test_sdist_job(self):
             f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt' if 'gdal' in self.tags else None,
         ]
 
+    import kwutil
+    test_env = {}
+    user_test_env = kwutil.Yaml.coerce(self.config.test_env, backend='pyyaml')
+    if user_test_env:
+        test_env.update(user_test_env)
+
     job = {
         'name': 'Build sdist',
         'runs-on': 'ubuntu-latest',
@@ -519,12 +544,13 @@ def build_and_test_sdist_job(self):
             },
             {
                 'name': 'Test minimal loose sdist',
-                'env': {
-                    # So far not needed, but once we bump to 3.14 this needs to be
-                    # set whenever `pytest` is run with `coverage`
-                    # (see the `test_binpy_wheels` jobs)
-                    # 'COVERAGE_CORE': 'ctrace'
-                },
+                'env': test_env.copy(),
+                # {
+                #     # So far not needed, but once we bump to 3.14 this needs to be
+                #     # set whenever `pytest` is run with `coverage`
+                #     # (see the `test_binpy_wheels` jobs)
+                #     # 'COVERAGE_CORE': 'ctrace'
+                # },
                 'run': [
                     'pwd',
                     'ls -al',
@@ -546,9 +572,7 @@ def build_and_test_sdist_job(self):
             },
             {
                 'name': 'Test full loose sdist',
-                'env': {
-                    # 'COVERAGE_CORE': 'ctrace'
-                },
+                'env': test_env.copy(),
                 'run': [
                     'pwd',
                     'ls -al',
@@ -638,7 +662,9 @@ def build_binpy_wheels_job(self):
     matrix['os'] = os_list
 
     if 'win' in self.config['os']:
-        matrix['cibw_skip'] = [('*-win32' + explicit_skips).strip()]
+        # Did we need to add the *-win32 here? Maybe have the user use pyproject toml cibw to set if needed?
+        # matrix['cibw_skip'] = [('*-win32' + explicit_skips).strip()]
+        matrix['cibw_skip'] = [explicit_skips.strip()]
     else:
         matrix['cibw_skip'] = [explicit_skips.strip()]
     matrix['arch'] = ['auto']
@@ -739,8 +765,6 @@ def build_purewheel_job(self):
     # os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
     # pypy_versions = supported_platform_info['pypy_versions']
-    # min_python_version = supported_platform_info['min_python_version']
-    # max_python_version = supported_platform_info['max_python_version']
     job = {
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
         'runs-on': '${{ matrix.os }}',
@@ -790,6 +814,18 @@ def test_wheels_job(self, needs=None):
     supported_platform_info = common_ci.get_supported_platform_info(self)
 
     os_list = supported_platform_info['os_list']
+
+    pyproj_config = self.config._load_pyproject_config()
+
+    cibw_windows_build_arches = pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('windows', {}).get('archs', None)
+    if cibw_windows_build_arches is not None:
+        cibw_windows_build_arches = [_.lower() for _ in cibw_windows_build_arches]
+
+    if 'arm64' in cibw_windows_build_arches:
+        # If we are building binaries for arm on windows, then
+        # we need to extend the os_list here to ensure we are testing
+        # on windows arm.
+        os_list = os_list + ['windows-11-arm']
 
     install_extra_versions = supported_platform_info['install_extra_versions']
 
@@ -884,6 +920,9 @@ def test_wheels_job(self, needs=None):
 
     assert not ub.find_duplicates(map(ub.hash_data, include))
 
+    # Do postprocessing on include items, filtering out ones that aren't
+    # supported.
+    filtered_include = []
     for item in include:
         # Available os names:
         # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
@@ -897,6 +936,15 @@ def test_wheels_job(self, needs=None):
             item['os'] = 'macos-13'
         if item['python-version'] == '3.7' and item['os'] == 'macOS-latest':
             item['os'] = 'macos-13'
+
+        if item['os'] == 'windows-11-arm' and item['python-version'] in {'3.6', '3.7', '3.8', '3.9', '3.10'}:
+            # cibuildwheel can't target 3.8 on Window ARM64
+            # GitHub doesn't have anything below Python 3.11 on their ARM64
+            # machines, so just test the built wheels from 3.11+
+            continue
+
+        filtered_include.append(item)
+    include = filtered_include
 
     if True:
         # hack, todo better specific disable for rc versions
@@ -1047,13 +1095,18 @@ def test_wheels_job(self, needs=None):
         'run': install_and_test_wheel_parts['install_wheel_commands'],
     }))
 
+    import kwutil
+    test_env = {
+        'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}',
+    }
+    user_test_env = kwutil.Yaml.coerce(self.config.test_env, backend='pyyaml')
+    if user_test_env:
+        test_env.update(user_test_env)
+
     action_steps.append(Actions.action({
         'name': 'Test wheel ${{ matrix.install-extras }}',
         'shell': 'bash',
-        'env': {
-            'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}',
-            # 'COVERAGE_CORE': 'ctrace',
-        },
+        'env': test_env,
         'run': install_and_test_wheel_parts['test_wheel_commands'],
     }))
     if WITH_COVERAGE:
