@@ -1208,7 +1208,6 @@ class TemplateApplier:
             onlygen_pat = None
 
         diff_style = 'unified'
-
         for info in self.staging_infos:
             stage_fpath = info['stage_fpath']
             repo_fpath = info['repo_fpath']
@@ -1225,7 +1224,11 @@ class TemplateApplier:
                     stats['missing'].append(repo_fpath)
                     tasks['copy'].append((stage_fpath, repo_fpath))
                     stage_text = stage_fpath.read_text()
-                    difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2, style=diff_style) + '...and more'
+                    # TODO: add style when available
+                    try:
+                        difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2, style=diff_style) + '...and more'
+                    except Exception:
+                        difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2) + '...and more'
                     print(f'<NEW FPATH={repo_fpath}>')
                     print(difftext)
                     print(f'<END FPATH={repo_fpath}>')
@@ -1238,10 +1241,14 @@ class TemplateApplier:
                 if stage_text.strip() == repo_text.strip():
                     difftext = None
                 else:
-                    difftext = xdev.difftext(repo_text, stage_text, colored=1,
-                                             context_lines=1, style=diff_style,
-                                             fromfile=repo_fpath,
-                                             tofile=repo_fpath)
+                    try:
+                        difftext = xdev.difftext(repo_text, stage_text, colored=1,
+                                                 context_lines=1)
+                    except Exception:
+                        difftext = xdev.difftext(repo_text, stage_text, colored=1,
+                                                 context_lines=1, style=diff_style,
+                                                 fromfile=repo_fpath,
+                                                 tofile=repo_fpath)
                 if difftext:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:

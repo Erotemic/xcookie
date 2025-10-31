@@ -5,20 +5,13 @@
 # xdev availpkg toml
 # xdev availpkg rich
 
-xdev>=1.5.3     ;                            python_version >= '3.6'    # Python 3.6+
-
-ubelt>=1.3.6     ;                            python_version >= '3.6'    # Python 3.6+
-
-toml>=0.9.6     ;                            python_version >= '2.7'    # Python 2.7+
-
-scriptconfig>=0.8.4     ;                            python_version >= '3.6'    # Python 3.6+
-
+xdev>=1.5.3   
+ubelt>=1.3.6 
+toml>=0.9.6   
+scriptconfig>=0.8.4  
 rich>=12.3.0
-
-git-python>=1.0.0     ;                            python_version >= '2.7'    # Python 2.7+
-
-black>=22.1.0    ;                            python_version >= '3.6.2'    # Python 3.6.2+
-
+git-python>=1.0.0   
+black>=22.1.0     
 packaging>=21.3
 
 # PyYAML>=6.0
@@ -34,20 +27,19 @@ PyYAML>=6.0       ; python_version < '3.12'                                 # Py
 argcomplete>=1.0
 
 # xdev availpkg pandas --request_min=1.1.4
-pandas>=2.2.3  ; python_version < '4.0'  and python_version >= '3.13'    # Python 3.13+
+pandas>=2.3.3     ; python_version < '4.0'  and python_version >= '3.14'    # Python 3.14+
+pandas>=2.2.3     ; python_version < '3.14' and python_version >= '3.13'    # Python 3.13
 pandas>=1.5.0  ; python_version < '3.12' and python_version >= '3.11'  # Python 3.11+
 pandas>=1.3.5  ; python_version < '3.11' and python_version >= '3.10'  # Python 3.10
 pandas>=1.4.0  ; python_version < '3.10' and python_version >= '3.9'   # Python 3.9
 pandas>=1.4.0  ; python_version < '3.9'  and python_version >= '3.8'   # Python 3.8
-pandas>=1.2.0  ; python_version < '3.8'  and python_version >= '3.7'   # Python 3.7.1
-pandas>=1.1.4  ; python_version < '3.7'  and python_version >= '3.6'   # Python 3.6.1
 
-numpy>=2.1.2  ; python_version < '4.0'  and python_version >= '3.13'    # Python 3.13+
+numpy>=2.3.2     ; python_version < '4.0'  and python_version >= '3.14'    # Python 3.14+
+numpy>=2.1.0     ; python_version < '3.14' and python_version >= '3.13'    # Python 3.13
 numpy>=1.26.0  ; python_version < '3.13'  and python_version >= '3.12'    # Python 3.12
 numpy>=1.23.2  ; python_version < '3.12' and python_version >= '3.11'    # Python 3.11
 numpy>=1.21.6  ; python_version < '3.11' and python_version >= '3.10'  # Python 3.10
 numpy>=1.19.3  ; python_version < '3.10' and python_version >= '3.9'   # Python 3.9
-
 numpy>=1.22.0 ; sys_platform == "darwin" and python_version < '3.9' and python_version >= '3.8'  # Python 3.8 (mac)
 numpy>=1.20.0 ; sys_platform != "darwin" and python_version < '3.9' and python_version >= '3.8'  # Python 3.8 (non-mac)
 numpy>=1.19.3 ; python_version < '3.8' and python_version >= '3.7'    # Python 3.7
