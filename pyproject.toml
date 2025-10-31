@@ -6,7 +6,7 @@ author_email = "erotemic@gmail.com"
 author = "Jon Crall"
 url = "https://github.com/Erotemic/xcookie"
 description = "The xcookie cookie-cutter Module"
-min_python = '3.7'
+min_python = '3.9'
 # Reduce the CI load of this package, only test on old and new python versions
 #ci_cpython_versions = ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
 #ci_pypy_versions = 'auto'
