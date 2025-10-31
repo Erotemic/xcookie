@@ -821,11 +821,11 @@ def test_wheels_job(self, needs=None):
     if cibw_windows_build_arches is not None:
         cibw_windows_build_arches = [_.lower() for _ in cibw_windows_build_arches]
 
-    if 'arm64' in cibw_windows_build_arches:
-        # If we are building binaries for arm on windows, then
-        # we need to extend the os_list here to ensure we are testing
-        # on windows arm.
-        os_list = os_list + ['windows-11-arm']
+        if 'arm64' in cibw_windows_build_arches:
+            # If we are building binaries for arm on windows, then
+            # we need to extend the os_list here to ensure we are testing
+            # on windows arm.
+            os_list = os_list + ['windows-11-arm']
 
     install_extra_versions = supported_platform_info['install_extra_versions']
 
