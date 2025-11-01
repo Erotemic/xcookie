@@ -134,6 +134,7 @@ class XCookieConfig(scfg.DataConfig):
 
         'min_python': scfg.Value('3.7', type=str, help='used to infer supported_python_versions'),
         'max_python': scfg.Value(None, type=str, help='used to infer supported_python_versions'),
+        'main_python': scfg.Value('max', help='The main version of Python to use for version agnostic jobs. A value of max uses the maximum version'),
 
         'typed': scfg.Value(None, help='Should be None, False, True, partial or full'),
         'supported_python_versions': scfg.Value('auto', help=ub.paragraph(
@@ -161,8 +162,8 @@ class XCookieConfig(scfg.DataConfig):
             ''')),
 
         'ci_versions_minimal_strict': scfg.Value('min', help='todo: sus out'),
-        'ci_versions_full_strict': scfg.Value('max'),
-        'ci_versions_minimal_loose': scfg.Value('max'),
+        'ci_versions_full_strict': scfg.Value('main'),
+        'ci_versions_minimal_loose': scfg.Value('main'),
         'ci_versions_full_loose': scfg.Value('*'),
 
         'remote_host': scfg.Value(None, help='if unspecified, attempt to infer from tags'),
@@ -171,6 +172,8 @@ class XCookieConfig(scfg.DataConfig):
         'autostage': scfg.Value(False, help='if true, automatically add changes to version control'),
 
         'visibility': scfg.Value('public', help='or private. Does limit what we can do'),
+
+        'test_env': scfg.Value(None, help='A YAML coercable dictionary of environment variables to use in test stages. (TOTO'),
 
 
         'version': scfg.Value(None, help='repo metadata: url for the project'),
@@ -192,6 +195,11 @@ class XCookieConfig(scfg.DataConfig):
             '''
             if specified, any modified template file that matches this pattern
             will be considered for re-write
+            ''')),
+
+        'only_generate': scfg.Value(None, alias='only_gen', help=ub.paragraph(
+            '''
+            if specified, onyl generate files matching this multipattern.
             ''')),
 
         'tags': scfg.Value('auto', nargs='*', help=ub.paragraph(
@@ -231,6 +239,7 @@ class XCookieConfig(scfg.DataConfig):
             ''')),
 
         'use_uv': scfg.Value('auto', help=ub.paragraph('if False use plain pip, otherwise use uv instead')),
+        'use_pyproject_requirements': scfg.Value(False, help=ub.paragraph('experimental new style version testing')),
 
         # ---
         'interactive': scfg.Value(True),
@@ -351,10 +360,61 @@ class XCookieConfig(scfg.DataConfig):
 
     def _load_xcookie_pyproject_settings(self):
         disk_config = self._load_pyproject_config()
-        print(f'disk_config = {ub.urepr(disk_config, nl=1)}')
+        # print(f'disk_config = {ub.urepr(disk_config, nl=1)}')
         if disk_config is not None:
             settings = disk_config.get('tool', {}).get('xcookie', {})
+
+            config = self._infer_xcookie_settings_from_pyproject(disk_config)
+
+            config = ub.udict(config)
+            settings = ub.udict(settings)
+
+            # Only add things not explicitly set
+            settings.update(config - settings)
+
+            # If an xcookie section isn't available, we can infer a lot of what
+            # we need from other more standard pyproject settings.
             return settings
+
+    def _infer_xcookie_settings_from_pyproject(self, disk_config):
+        """
+        Helper to populate the xcookie main settings from more standard
+        pyproject schemas.
+        """
+        config = {}
+        project_block = disk_config.get('project', {})
+        config['pkg_name'] = project_block.get('name')
+        config['description'] = project_block.get('description')
+
+        setuptools_config = disk_config.get('tool', {}).get('setuptools', {})
+        setuptools_packages = setuptools_config.get('packages', [])
+        if isinstance(setuptools_packages, list) and len(setuptools_packages) == 1:
+            config['mod_name'] = setuptools_packages[0]
+            config['rel_mod_parent_dpath'] = '.'
+
+        if isinstance(setuptools_packages, dict):
+            setuptools_find_config = setuptools_packages.get('find', {})
+            setuptools_include = setuptools_find_config.get('include')
+            if len(setuptools_include) == 1:
+                import glob
+                results = list(glob.glob(setuptools_include[0]))
+                results = [r for r in results if '.egg-info' not in r and '-' not in r]
+                if len(results) == 1:
+                    config['mod_name'] = results[0]
+                    config['rel_mod_parent_dpath'] = '.'
+
+        repo_url = project_block.get('urls', {}).get('Repository')
+        if repo_url is not None:
+            if 'github' in repo_url:
+                config['url'] = repo_url
+                config['tags'] = ['github', 'purepy']
+
+        req_py_block = project_block.get('requires-python')
+        if req_py_block:
+            from xcookie.version_helpers import parse_minimum_python_version
+            config['min_python'] = parse_minimum_python_version(req_py_block)
+
+        return config
 
     def confirm(self, msg, default=True):
         """
@@ -389,19 +449,19 @@ class XCookieConfig(scfg.DataConfig):
         return answer
 
     @classmethod
-    def load_from_cli_and_pyproject(cls, cmdline=0, **kwargs):
+    def load_from_cli_and_pyproject(cls, argv=0, **kwargs):
         # We load the config multiple times to get the right defaults.
         # ideally we should fix this up
-        config = XCookieConfig.cli(cmdline=cmdline, data=kwargs)
+        config = XCookieConfig.cli(argv=argv, data=kwargs, strict=True)
         # config.__post_init__()
         settings = config._load_xcookie_pyproject_settings()
         if settings:
             print(f'settings={settings}')
-            config = XCookieConfig.cli(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
+            config = XCookieConfig.cli(argv=argv, data=kwargs, default=ub.dict_isect(settings, config))
         return config
 
     @classmethod
-    def main(cls, cmdline=0, **kwargs):
+    def main(cls, argv=0, **kwargs):
         """
         Main entry point
 
@@ -411,7 +471,7 @@ class XCookieConfig(scfg.DataConfig):
                 'repodir': repodir,
                 'tags': ['binpy', 'erotemic', 'github'],
             }
-            cmdline = 0
+            argv = 0
 
         Example:
             repodir = ub.Path.appdir('pypkg/demo/my_new_repo')
@@ -421,15 +481,15 @@ class XCookieConfig(scfg.DataConfig):
             kwargs = {
                 'repodir': repodir,
             }
-            cmdline = 0
+            argv = 0
         """
         # We load the config multiple times to get the right defaults.
-        config = XCookieConfig.load_from_cli_and_pyproject(cmdline=cmdline, **kwargs)
+        config = XCookieConfig.load_from_cli_and_pyproject(argv=argv, **kwargs)
         # # config.__post_init__()
         # settings = config._load_xcookie_pyproject_settings()
         # if settings:
         #     print(f'settings={settings}')
-        #     config = XCookieConfig.cli(cmdline=cmdline, data=kwargs, default=ub.dict_isect(settings, config))
+        #     config = XCookieConfig.cli(argv=argv, data=kwargs, default=ub.dict_isect(settings, config))
         # config.__post_init__()
 
         # import xdev
@@ -532,6 +592,11 @@ class TemplateApplier:
     def pkg_name(self):
         return self.config['pkg_name']
 
+    @property
+    def pkg_fname_prefix(self):
+        # the files have underscores replaced in the prefix
+        return self.config['pkg_name'].replace('-', '_')
+
     def _build_template_registry(self):
         """
         Take stock of the files in the template repo and ensure they all have
@@ -602,7 +667,7 @@ class TemplateApplier:
             #  },
 
             {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,binpy',
-             'input_fname': rc.resource_fpath('gitlab-ci.binpy.yml.in')},
+             'dynamic': 'build_gitlab_ci'},
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
 
             {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt',
@@ -632,7 +697,9 @@ class TemplateApplier:
             {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x',
              'dynamic': 'build_run_doctests',
              },  # TODO: template with xdoctest-style
-            {'template': 1, 'overwrite': 1, 'fname': 'MANIFEST.in', 'dynamic': 'build_manifest_in'},
+
+            # TODO: add this back in eventually
+            # {'template': 1, 'overwrite': 1, 'fname': 'MANIFEST.in', 'dynamic': 'build_manifest_in'},
 
             {'template': 0, 'overwrite': 0, 'fname': 'run_linter.sh', 'perms': 'x',
              'dynamic': 'build_run_linter'},
@@ -948,7 +1015,7 @@ class TemplateApplier:
             >>>     'is_new': False,
             >>>     'interactive': False,
             >>> }
-            >>> config = XCookieConfig.cli(cmdline=0, data=kwargs)
+            >>> config = XCookieConfig.cli(argv=0, data=kwargs)
             >>> #config.__post_init__()
             >>> print('config = {}'.format(ub.urepr(dict(config), nl=1)))
             >>> self = TemplateApplier(config)
@@ -1134,11 +1201,21 @@ class TemplateApplier:
         else:
             regen_pat = None
 
+        if self.config['only_generate'] is not None:
+            import kwutil
+            onlygen_pat = kwutil.MultiPattern.coerce(self.config['only_generate'])
+        else:
+            onlygen_pat = None
+
+        diff_style = 'unified'
         for info in self.staging_infos:
             stage_fpath = info['stage_fpath']
             repo_fpath = info['repo_fpath']
             if info.get('skip', False):
                 continue
+            if onlygen_pat is not None:
+                if not onlygen_pat.match(info['fname']):
+                    continue
             if not repo_fpath.exists():
                 if stage_fpath.is_dir():
                     tasks['mkdir'].append(repo_fpath)
@@ -1147,7 +1224,11 @@ class TemplateApplier:
                     stats['missing'].append(repo_fpath)
                     tasks['copy'].append((stage_fpath, repo_fpath))
                     stage_text = stage_fpath.read_text()
-                    difftext = xdev.difftext('', stage_text[:1000], colored=1)
+                    # TODO: add style when available
+                    try:
+                        difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2, style=diff_style) + '...and more'
+                    except Exception:
+                        difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2) + '...and more'
                     print(f'<NEW FPATH={repo_fpath}>')
                     print(difftext)
                     print(f'<END FPATH={repo_fpath}>')
@@ -1160,7 +1241,14 @@ class TemplateApplier:
                 if stage_text.strip() == repo_text.strip():
                     difftext = None
                 else:
-                    difftext = xdev.difftext(repo_text, stage_text, colored=1)
+                    try:
+                        difftext = xdev.difftext(repo_text, stage_text, colored=1,
+                                                 context_lines=1)
+                    except Exception:
+                        difftext = xdev.difftext(repo_text, stage_text, colored=1,
+                                                 context_lines=1, style=diff_style,
+                                                 fromfile=repo_fpath,
+                                                 tofile=repo_fpath)
                 if difftext:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:
@@ -1330,7 +1418,8 @@ class TemplateApplier:
     def build_github_actions(self):
         from xcookie.builders import github_actions
         self._setup_pip_commands()  # Do we need this here?
-        return github_actions.build_github_actions(self)
+        text = github_actions.build_github_actions(self)
+        return text
 
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci
@@ -1445,7 +1534,7 @@ class TemplateApplier:
             >>>     'max_python': '3.12',
             >>>     'interactive': False,
             >>> }
-            >>> config = XCookieConfig.cli(cmdline=0, data=kwargs)
+            >>> config = XCookieConfig.cli(argv=0, data=kwargs)
             >>> print('config = {}'.format(ub.urepr(dict(config), nl=1)))
             >>> self = TemplateApplier(config)
             >>> print(chr(10) + 'headless.txt')
@@ -1500,7 +1589,8 @@ class TemplateApplier:
             '--find-links https://girder.github.io/large_image_wheels',
         ]
         version_defaults = [
-            {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.11.3', 'pyver_ge': Version('3.14'), 'pyver_lt': Version('4.0')},
+            {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('3.14')},
             {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('3.13')},
             {'version': '>=3.5.2', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.12')},
             {'version': '>=3.4.1,<=3.11.0', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
@@ -1617,7 +1707,7 @@ class TemplateApplier:
 
 
 def main():
-    XCookieConfig.main(cmdline={
+    XCookieConfig.main(argv={
         'strict': True,
         'autocomplete': True,
     })

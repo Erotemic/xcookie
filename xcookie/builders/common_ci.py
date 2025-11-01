@@ -11,10 +11,16 @@ def make_mypy_check_parts(self):
         'requirements/runtime.txt'
     ]
     req_files_text = ' '.join(type_requirement_files)
+
+    if self.config['use_pyproject_requirements']:
+        pip_install_reqs = 'pip install -r pyproject.toml'
+    else:
+        pip_install_reqs = f'pip install -r {req_files_text}'
+
     commands = ub.codeblock(
         f'''
         python -m pip install mypy
-        pip install -r {req_files_text}
+        {pip_install_reqs}
         mypy --install-types --non-interactive ./{self.rel_mod_dpath}
         mypy ./{self.rel_mod_dpath}
         ''')
@@ -27,12 +33,12 @@ def make_build_sdist_parts(self, wheelhouse_dpath='wheelhouse'):
         f'{self.UPDATE_PIP}',
         f'{self.PIP_INSTALL} setuptools>=0.8 wheel build twine',
         f'python -m build --sdist --outdir {wheelhouse_dpath}',
-        f'python -m twine check ./{wheelhouse_dpath}/{self.mod_name}*.tar.gz',
+        f'python -m twine check ./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz',
     ]
 
     build_parts = {
         'commands': commands,
-        'artifact': f"./{wheelhouse_dpath}/{self.mod_name}*.tar.gz"
+        'artifact': f"./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz"
     }
     return build_parts
 
@@ -43,12 +49,12 @@ def make_build_wheel_parts(self, wheelhouse_dpath='wheelhouse'):
         f'{self.UPDATE_PIP}',
         f'{self.PIP_INSTALL} setuptools>=0.8 wheel build twine',
         f'python -m build --wheel --outdir {wheelhouse_dpath}',
-        f'python -m twine check ./{wheelhouse_dpath}/{self.mod_name}*.whl',
+        f'python -m twine check ./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.whl',
     ]
 
     build_wheel_parts = {
         'commands': commands,
-        'artifact': f"./{wheelhouse_dpath}/{self.mod_name}*.whl"
+        'artifact': f"./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.whl"
     }
     return build_wheel_parts
 
@@ -84,8 +90,8 @@ def make_install_and_test_wheel_parts(self,
         python -c "if 1:
             import pathlib
             dist_dpath = pathlib.Path('{wheelhouse_dpath}')
-            candidates = list(dist_dpath.glob('{self.mod_name}*.whl'))
-            candidates += list(dist_dpath.glob('{self.mod_name}*.tar.gz'))
+            candidates = list(dist_dpath.glob('{self.pkg_fname_prefix}*.whl'))
+            candidates += list(dist_dpath.glob('{self.pkg_fname_prefix}*.tar.gz'))
             fpath = sorted(candidates)[-1]
             print(str(fpath).replace(chr(92), chr(47)))
         "
@@ -170,23 +176,36 @@ def make_install_and_test_wheel_parts(self,
         if isinstance(test_command, str):
             test_command = [Yaml.CodeBlock(test_command)]
 
+    # export UV_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/cpu https://download.pytorch.org/whl/nightly/cu126"
+
+    if self.config['use_pyproject_requirements']:
+        install_helpers = [
+            'echo "Installing helpers: setuptools"',
+            f'{self.PIP_INSTALL} --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+            'echo "Installing helpers: tomli and pkginfo"',
+            f'{self.PIP_INSTALL} --resolution=highest tomli pkginfo',
+        ]
+    else:
+        install_helpers = [
+            'echo "Installing helpers: setuptools"',
+            f'{self.PIP_INSTALL} setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+            'echo "Installing helpers: tomli and pkginfo"',
+            f'{self.PIP_INSTALL} tomli pkginfo',
+        ]
+
     # Note: export does not expose the environment variable to subsequent jobs.
     install_wheel_commands = [
         'echo "Finding the path to the wheel"',
         f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',
-        'echo "Installing helpers"',
+        'echo "Installing helpers: update pip"',
         f'{self.UPDATE_PIP}',
-        # 'pip install pip setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
-        f'{self.PIP_INSTALL} setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
-        f'{self.PIP_INSTALL} tomli pkginfo',
-        # 'pip install delorean',
+        *install_helpers,
         f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
-        # 'echo "WHEEL_FPATH=$WHEEL_FPATH"',
         f'export MOD_VERSION=$({get_mod_version_bash})',
-        # 'echo "MOD_VERSION=$MOD_VERSION"',
     ] + special_install_lines + [
         'echo "WHEEL_FPATH=$WHEEL_FPATH"',
         'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
+        'echo "UV_RESOLUTION=$UV_RESOLUTION"',
         'echo "MOD_VERSION=$MOD_VERSION"',
 
         # This helps but doesn't solve the problem.
@@ -197,7 +216,10 @@ def make_install_and_test_wheel_parts(self,
         # 'cp wheelhouse/* wheeldownload/',
         # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
 
-        f'{self.PIP_INSTALL_PREFER_BINARY} "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+        # TODO: flag to allow prerelease?
+        # f'{self.PIP_INSTALL_PREFER_BINARY} --prerelease=allow "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+        f'{self.PIP_INSTALL_PREFER_BINARY} "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+
         'echo "Install finished."',
     ]
 
@@ -260,6 +282,7 @@ def get_supported_platform_info(self):
         os_list.append('macOS-latest')
     if 'win' in self.config['os']:
         os_list.append('windows-latest')
+        # os_list.append('windows-11-arm')
 
     cpython_versions = self.config['ci_cpython_versions']
     pypy_versions = [
@@ -272,18 +295,26 @@ def get_supported_platform_info(self):
     if len(supported_py_versions) == 0:
         raise Exception('no supported python versions?')
 
+    from xcookie import constants
+    INFO_LUT = {row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO}
+
     # Choose which Python version will be the "main" one we use for version
     # agnostic jobs.
-    main_python_version = supported_py_versions[-1]
-    from xcookie import constants
-    # import kwutil
-    INFO_LUT = {row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO}
-    for pyver in supported_py_versions[::-1]:
-        info = INFO_LUT[pyver]
-        if info.get('is_prerelease'):
-            continue
-        main_python_version = pyver
-        break
+    main_python_version = self.config['main_python']
+    if main_python_version == 'max':
+        # import kwutil
+        for pyver in supported_py_versions[::-1]:
+            info = INFO_LUT[pyver]
+            if info.get('is_prerelease'):
+                continue
+            main_python_version = pyver
+            break
+    elif main_python_version == 'min':
+        main_python_version = supported_py_versions[0]
+    else:
+        main_python_version = str(main_python_version)
+
+    # main_python_version = '3.13'
 
     # TODO: find a nicer way to codify the idea that the supported python
     # version needs to map to something github actions knows about, which could
@@ -298,8 +329,6 @@ def get_supported_platform_info(self):
         if not info.get('is_prerelease'):
             cpython_versions_non34_non_prerelease_.append(pyver)
     cpython_versions_non34 = cpython_versions_non34_
-    print(f'cpython_versions_non34_={cpython_versions_non34_}')
-    print(f'cpython_versions_non34_non_prerelease_={cpython_versions_non34_non_prerelease_}')
 
     extras_versions_templates = {
         'full-loose': self.config['ci_versions_full_loose'],
@@ -309,26 +338,33 @@ def get_supported_platform_info(self):
     }
     extras_versions = {}
     for k, v in extras_versions_templates.items():
-        if v == '':
+        if v == '' or v is None:
             v = []
         elif v == 'min':
             v = [cpython_versions_non34_[0]]
         elif v == 'max':
             v = [cpython_versions_non34_non_prerelease_[-1]]
             # v = [cpython_versions_non34_[-1]]
+        elif v == 'main':
+            v = [main_python_version]
         elif v == '*':
             v = cpython_versions_non34 + pypy_versions
         else:
             raise KeyError(v)
         extras_versions[k] = v
 
+    # NOTE, the os-list that we build on may be different than the one we ant
+    # to test on.
+
     supported_platform_info = {
         'os_list': os_list,
         'cpython_versions': cpython_versions_non34,
         'pypy_versions': pypy_versions,
-        'min_python_version': supported_py_versions[0],
-        'max_python_version': supported_py_versions[-1],
+        # 'min_python_version': supported_py_versions[0],
+        # 'max_python_version': supported_py_versions[-1],
         'main_python_version': main_python_version,
         'install_extra_versions': extras_versions,
     }
+    import ubelt as ub
+    print(f'supported_platform_info = {ub.urepr(supported_platform_info, nl=1)}')
     return supported_platform_info

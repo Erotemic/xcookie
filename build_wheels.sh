@@ -18,6 +18,12 @@ if ! which cibuildwheel ; then
     exit 1
 fi
 
+LOCAL_CP_VERSION=$(python3 -c "import sys; print('cp' + ''.join(list(map(str, sys.version_info[0:2]))))")
+echo "LOCAL_CP_VERSION = $LOCAL_CP_VERSION"
+
+# Build for only the current version of Python
+export CIBW_BUILD="${LOCAL_CP_VERSION}-*"
+
 
 #pip wheel -w wheelhouse .
 python -m build --wheel -o wheelhouse  #  xcookie: +COMMENT_IF(binpy)
