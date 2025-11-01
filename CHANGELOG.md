@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Version 0.3.2 - Unreleased
 
+### Changed
+* working towards pure pyproject.toml support
 
 ## Version 0.3.1 - Released 2025-08-04
 

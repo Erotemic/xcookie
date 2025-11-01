@@ -78,3 +78,58 @@ skip = ['./docs/build', './*.egg-info', './build', './htmlcov']
 count = true
 quiet-level = 3
 ignore-words-list = ['wont', 'cant', 'fpr', 'ANS', 'doesnt', 'arent', 'ans', 'thats', 'datas', 'isnt']
+
+####################################################
+## WIP: Attempt to get xcookie to generate this part
+####################################################
+#[project]
+#name = 'xcookie'
+#dynamic = ['version', "dependencies", "optional-dependencies"]
+#description = "The xcookie cookie-cutter Module"
+#authors = [{ name = "Jon Crall", email = "erotemic@gmail.com" }]
+#license = "Apache-2.0"
+#requires-python = ">=3.9"
+#keywords = ["cookiecutter", "template", "utilities"]
+#classifiers = [
+#  "Development Status :: 1 - Planning",
+#  "Intended Audience :: Developers",
+#  "Topic :: Software Development :: Libraries :: Python Modules",
+#  "Topic :: Utilities",
+#  "License :: OSI Approved :: Apache Software License",
+#  "Programming Language :: Python :: 3.7",
+#  "Programming Language :: Python :: 3.8",
+#  "Programming Language :: Python :: 3.9",
+#  "Programming Language :: Python :: 3.10",
+#  "Programming Language :: Python :: 3.11",
+#  "Programming Language :: Python :: 3.12",
+#  "Programming Language :: Python :: 3.13",
+#]
+
+#[project.urls]
+#Homepage = "https://github.com/Erotemic/xcookie"
+
+#[project.scripts]
+#xcookie = "xcookie.__main__:main"
+
+#[tool.setuptools]
+#include-package-data = true
+
+#[tool.setuptools.packages.find]
+#where = ["."]
+#include = ["xcookie*"]
+
+## Package data mirrors your setup.py
+#[tool.setuptools.package-data]
+#"" = ["requirements/*.txt"]
+#"xcookie" = ["py.typed", "*.pyi"]
+#"xcookie.rc" = ["*.in"]
+
+#[tool.setuptools.dynamic]
+#version = {attr = "xcookie.__version__"}
+#dependencies = {file = ["requirements/runtime.txt"]}
+#readme = { file = ["README.rst"], content-type = "text/x-rst" }
+
+#[tool.setuptools.dynamic.optional-dependencies]
+#tests = {file = ["requirements/tests.txt"]}
+#optional = {file = ["requirements/optional.txt"]}
+#docs = {file = ["requirements/docs.txt"]}
