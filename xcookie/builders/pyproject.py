@@ -10,6 +10,10 @@ def build_pyproject(self):
     # data = toml.loads((self.template_dpath / 'pyproject.toml').read_text())
     # print('data = {}'.format(ub.urepr(data, nl=5)))
     pyproj_config = ub.AutoDict()
+    use_setup_py = self.config.get('use_setup_py', True)
+    pyproject_settings = self.config._load_xcookie_pyproject_settings()
+    if pyproject_settings is None:
+        pyproject_settings = {}
     # {'tool': {}}
     if 'binpy' in self.config['tags']:
         pyproj_config['build-system']['requires'] = [
@@ -136,9 +140,99 @@ def build_pyproject(self):
             'typed',
             'remote_host',
             'remote_group',
+            'use_setup_py',
         ]
         config_to_save = ub.dict_subset(self.config, options_to_save)
         pyproj_config['tool']['xcookie'].update(config_to_save)
+
+    if not use_setup_py:
+        project_block = pyproj_config['project']
+        project_block['name'] = self.config['pkg_name']
+        project_block['description'] = self.config['description']
+        project_block['requires-python'] = f">={self.config['min_python']}"
+        project_block['dynamic'] = [
+            'version',
+            'dependencies',
+            'optional-dependencies',
+        ]
+
+        authors = self.config['author']
+        author_emails = self.config['author_email']
+        author_entries = []
+        if authors:
+            if not isinstance(authors, (list, tuple)):
+                authors = [authors]
+            if not isinstance(author_emails, (list, tuple)):
+                author_emails = [author_emails] if author_emails else []
+            for idx, name in enumerate(authors):
+                entry = {'name': name}
+                if idx < len(author_emails) and author_emails[idx]:
+                    entry['email'] = author_emails[idx]
+                elif isinstance(author_emails, str) and idx == 0:
+                    entry['email'] = author_emails
+                author_entries.append(entry)
+        if author_entries:
+            project_block['authors'] = author_entries
+
+        project_block['classifiers'] = self._project_classifiers()
+        if self.config['license']:
+            project_block['license'] = {'text': self.config['license']}
+        if self.config['url']:
+            project_block['urls'] = {'Homepage': self.config['url']}
+        if self.config['tags']:
+            project_block['keywords'] = sorted({tag for tag in self.config['tags'] if tag})
+
+        setuptools_block = pyproj_config['tool']['setuptools']
+        setuptools_block['include-package-data'] = True
+        setuptools_block['packages']['find']['where'] = [self.config['rel_mod_parent_dpath']]
+        setuptools_block['packages']['find']['include'] = [f"{self.config['mod_name']}*"]
+
+        if self.config['rel_mod_parent_dpath'] != '.':
+            setuptools_block['package-dir'] = {'': self.config['rel_mod_parent_dpath']}
+
+        package_data = setuptools_block['package-data']
+        package_data[''] = ["requirements/*.txt"]
+        if self.config['typed']:
+            package_data[self.mod_name] = ['py.typed', '*.pyi']
+        package_data.update(pyproject_settings.get('package_data', {}))
+
+        setuptools_dynamic = setuptools_block['dynamic']
+        setuptools_dynamic['version'] = {'attr': f"{self.config['mod_name']}.__version__"}
+        setuptools_dynamic['readme'] = {'file': ['README.rst'], 'content-type': 'text/x-rst'}
+        setuptools_dynamic['dependencies'] = {'file': ['requirements/runtime.txt']}
+
+        extras = ['tests', 'optional', 'docs']
+        if 'cv2' in self.tags:
+            extras.extend(['headless', 'graphics'])
+        if 'postgresql' in self.tags:
+            extras.append('postgresql')
+
+        optional_dynamic = {}
+        for name in extras:
+            optional_dynamic[name] = {'file': [f'requirements/{name}.txt']}
+        setuptools_dynamic['optional-dependencies'] = optional_dynamic
+
+        entry_points = pyproject_settings.get('entry_points', {})
+        console_scripts = entry_points.get('console_scripts', [])
+        if console_scripts:
+            scripts = {}
+            for item in console_scripts:
+                name, _, target = item.partition('=')
+                scripts[name.strip()] = target.strip()
+            project_block['scripts'] = scripts
+
+        extra_entry_points = {k: v for k, v in entry_points.items() if k != 'console_scripts'}
+        if extra_entry_points:
+            ep_table = {}
+            for group, entries in extra_entry_points.items():
+                group_entries = {}
+                for item in entries:
+                    name, _, target = item.partition('=')
+                    group_entries[name.strip()] = target.strip()
+                ep_table[group] = group_entries
+            project_block['entry-points'] = ep_table
+
+        pyproj_config['build-system'].setdefault('build-backend', 'setuptools.build_meta')
 
     text = toml.dumps(pyproj_config)
     return text
