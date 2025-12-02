@@ -191,10 +191,12 @@ def build_pyproject(self):
             setuptools_block['package-dir'] = {'': self.config['rel_mod_parent_dpath']}
 
         package_data = setuptools_block['package-data']
-        package_data[''] = ["requirements/*.txt"]
+        package_data['*'] = ["requirements/*.txt"]
         if self.config['typed']:
             package_data[self.mod_name] = ['py.typed', '*.pyi']
-        package_data.update(pyproject_settings.get('package_data', {}))
+        for key, value in pyproject_settings.get('package_data', {}).items():
+            normalized_key = '*' if key == '' else key
+            package_data[normalized_key] = value
 
         setuptools_dynamic = setuptools_block['dynamic']
         setuptools_dynamic['version'] = {'attr': f"{self.config['mod_name']}.__version__"}

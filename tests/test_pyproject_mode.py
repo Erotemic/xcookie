@@ -42,4 +42,4 @@ def test_use_setup_py_false_generates_pep621(tmp_path):
     assert 'tests' in setuptools_dynamic['optional-dependencies']
 
     package_data = pyproject_data['tool']['setuptools']['package-data']
-    assert package_data[''] == ['requirements/*.txt']
+    assert package_data['*'] == ['requirements/*.txt']
