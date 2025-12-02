@@ -8,7 +8,6 @@ def build_setup(self):
     pkg_name = self.config['pkg_name']
     min_python = self.config['min_python']
     # min_py_version = str(self.config['min_python'])
-    dev_status = self.config['dev_status']
 
     fpath = rc.resource_fpath('setup.py.in')
 
@@ -55,48 +54,7 @@ def build_setup(self):
         VERSION = parse_version(INIT_PATH)
         '''))
 
-    version_classifiers = []
-    for ver in self.config['supported_python_versions']:
-        version_classifiers.append(f'Programming Language :: Python :: {ver}')
-
-    # List of classifiers available at:
-    dev_status = dev_status.lower()
-    if dev_status == 'planning':
-        dev_status = 'Development Status :: 1 - Planning'
-    elif dev_status == 'pre-alpha':
-        dev_status = 'Development Status :: 2 - Pre-Alpha'
-    elif dev_status == 'alpha':
-        dev_status = 'Development Status :: 3 - Alpha'
-    elif dev_status == 'beta':
-        dev_status = 'Development Status :: 4 - Beta'
-    elif dev_status in {'stable', 'production'}:
-        dev_status = 'Development Status :: 5 - Production/Stable'
-    elif dev_status == 'mature':
-        dev_status = 'Development Status :: 6 - Mature'
-    elif dev_status == 'inactive':
-        dev_status = 'Development Status :: 7 - Inactive'
-
-    other_classifiers = [
-        # https://pypi.python.org/pypi?%3Aaction=list_classifiers
-        'Intended Audience :: Developers',
-        'Topic :: Software Development :: Libraries :: Python Modules',
-        'Topic :: Utilities',
-        # This should be interpreted as Apache License v2.0
-        'License :: OSI Approved :: Apache Software License',
-    ]
-
-    disk_config = self.config._load_pyproject_config()
-    if disk_config is None:
-        disk_config = {}
-    other_classifiers += disk_config.get('project', {}).get('classifiers', [])
-
-    pyproject_settings = self.config._load_xcookie_pyproject_settings()
-    if pyproject_settings is not None and 'classifiers' in pyproject_settings:
-        other_classifiers += pyproject_settings['classifiers']
-
-    classifiers = [dev_status] + other_classifiers + version_classifiers
-
-    classifiers = list(ub.oset(classifiers))
+    classifiers = self._project_classifiers()
 
     # if 0:
     #     setupkw['entry_points'] = {
@@ -173,6 +131,8 @@ def build_setup(self):
     #     '''))
 
     classifier_text = ub.urepr(classifiers)
+
+    pyproject_settings = self.config._load_xcookie_pyproject_settings()
 
     # author=static_parse('__author__', INIT_PATH),
     # author_email=static_parse('__author_email__', INIT_PATH),

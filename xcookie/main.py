@@ -240,6 +240,12 @@ class XCookieConfig(scfg.DataConfig):
 
         'use_uv': scfg.Value('auto', help=ub.paragraph('if False use plain pip, otherwise use uv instead')),
         'use_pyproject_requirements': scfg.Value(False, help=ub.paragraph('experimental new style version testing')),
+        'use_setup_py': scfg.Value(True, help=ub.paragraph(
+            '''
+            If False, do not generate setup.py and instead emit a fully-specified
+            PEP621-compatible pyproject.toml. When True, the legacy setup.py
+            will be generated alongside a minimal pyproject.toml.
+            ''')),
 
         # ---
         'interactive': scfg.Value(True),
@@ -628,6 +634,7 @@ class TemplateApplier:
             {'template': 1, 'overwrite': 0, 'fname': 'setup.py',
              # 'input_fname': rc.resource_fpath('setup.py.in'),
              'dynamic': 'build_setup',
+             'enabled': self.config['use_setup_py'],
              'perms': 'x'},
 
             {'template': 0, 'overwrite': 0, 'fname': 'docs/source/index.rst',
@@ -768,6 +775,50 @@ class TemplateApplier:
     @property
     def tags(self):
         return set(self.config['tags'])
+
+    def _project_classifiers(self):
+        version_classifiers = [
+            f'Programming Language :: Python :: {ver}'
+            for ver in self.config['supported_python_versions']
+        ]
+
+        dev_status = self.config['dev_status'].lower()
+        if dev_status == 'planning':
+            dev_status = 'Development Status :: 1 - Planning'
+        elif dev_status == 'pre-alpha':
+            dev_status = 'Development Status :: 2 - Pre-Alpha'
+        elif dev_status == 'alpha':
+            dev_status = 'Development Status :: 3 - Alpha'
+        elif dev_status == 'beta':
+            dev_status = 'Development Status :: 4 - Beta'
+        elif dev_status in {'stable', 'production'}:
+            dev_status = 'Development Status :: 5 - Production/Stable'
+        elif dev_status == 'mature':
+            dev_status = 'Development Status :: 6 - Mature'
+        elif dev_status == 'inactive':
+            dev_status = 'Development Status :: 7 - Inactive'
+
+        other_classifiers = [
+            # https://pypi.python.org/pypi?%3Aaction=list_classifiers
+            'Intended Audience :: Developers',
+            'Topic :: Software Development :: Libraries :: Python Modules',
+            'Topic :: Utilities',
+            # This should be interpreted as Apache License v2.0
+            'License :: OSI Approved :: Apache Software License',
+        ]
+
+        disk_config = self.config._load_pyproject_config()
+        if disk_config is None:
+            disk_config = {}
+        other_classifiers += disk_config.get('project', {}).get('classifiers', [])
+
+        pyproject_settings = self.config._load_xcookie_pyproject_settings()
+        if pyproject_settings is not None and 'classifiers' in pyproject_settings:
+            other_classifiers += pyproject_settings['classifiers']
+
+        classifiers = [dev_status] + other_classifiers + version_classifiers
+        classifiers = list(ub.oset(classifiers))
+        return classifiers
 
     def _presetup(self):
         """

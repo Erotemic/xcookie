@@ -120,7 +120,7 @@ ignore-words-list = ['wont', 'cant', 'fpr', 'ANS', 'doesnt', 'arent', 'ans', 'th
 
 ## Package data mirrors your setup.py
 #[tool.setuptools.package-data]
-#"" = ["requirements/*.txt"]
+#"*" = ["requirements/*.txt"]
 #"xcookie" = ["py.typed", "*.pyi"]
 #"xcookie.rc" = ["*.in"]
 
