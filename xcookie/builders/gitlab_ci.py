@@ -74,6 +74,22 @@ def build_gitlab_rules(self):
 #         pass
 
 
+def workflow_section():
+    from xcookie.util_yaml import Yaml
+    return Yaml.loads(ub.codeblock(
+        '''
+        rules:
+          # Allow merge request pipelines (from main repo and forks)
+          - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+          # Allow branch pipelines for default branch (e.g. main)
+          - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+          # Allow branch pipelines for release branch
+          - if: '$CI_COMMIT_BRANCH == "release"'
+        '''))
+
+
 def make_purepy_ci_jobs(self):
     import ruamel.yaml  # NOQA
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
@@ -83,6 +99,8 @@ def make_purepy_ci_jobs(self):
     enable_gpg = self.config['enable_gpg']
 
     body = CommentedMap()
+
+    body['workflow'] = workflow_section()
 
     enable_lint = self.config.linter
 
@@ -384,6 +402,8 @@ def make_binpy_ci_jobs(self):
     enable_gpg = self.config['enable_gpg']
 
     body = CommentedMap()
+
+    body['workflow'] = workflow_section()
 
     stages = ['build', 'test']
     if enable_gpg:
