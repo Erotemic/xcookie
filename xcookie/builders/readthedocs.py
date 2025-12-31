@@ -60,6 +60,8 @@ def build_readthedocs(self):
     if 'gdal' in self.tags:
         data['python']['install'].insert(0, {'requirements': 'requirements/gdal.txt'})
 
-    import ruamel
-    text = ruamel.yaml.round_trip_dump(data, Dumper=ruamel.yaml.RoundTripDumper)
+    # import ruamel
+    # text = ruamel.yaml.round_trip_dump(data, Dumper=ruamel.yaml.RoundTripDumper)
+    import kwutil
+    text = kwutil.Yaml.dumps(data)
     return text

@@ -61,6 +61,10 @@ ExampleUsage:
     load_secrets
     export PRIVATE_GITLAB_TOKEN=$(git_token_for "https://gitlab.kitware.com")
     python -m xcookie.main --repo_name=simple_dvc --repodir=$HOME/code/simple_dvc --tags="gitlab,kitware,purepy,erotemic"
+
+    python -m xcookie.main \
+        --repo_name=audio_restore --repodir=$HOME/code/audio_restore --tags="github,erotemic,purepy" \
+        --use_pyproject_requirements=True --use_setup_py=True
 """
 import toml
 import shutil
@@ -1455,7 +1459,8 @@ class TemplateApplier:
         if self.config.use_uv:
             # Does UV always prefer binary?
             self.PIP_INSTALL = 'python -m uv pip install'
-            self.PIP_INSTALL_PREFER_BINARY = 'python -m uv pip install'
+            # self.PIP_INSTALL_PREFER_BINARY = 'python -m uv pip install'
+            self.PIP_INSTALL_PREFER_BINARY = 'python -m pip install --prefer-binary'
             self.UPDATE_PIP = 'python -m pip install pip uv -U'
             # The system uv seems to have an issue on CI
             self.SYSTEM_PIP_INSTALL = 'python -m pip install'

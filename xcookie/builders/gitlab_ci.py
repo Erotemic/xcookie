@@ -252,11 +252,11 @@ def make_purepy_ci_jobs(self):
                     """
                     sed 's/>=/==/' "requirements/gdal.txt" > "requirements/gdal-strict.txt"
                     """.strip(),
-                    f'{self.PIP_INSTALL} -r requirements/gdal-strict.txt',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal-strict.txt',
                 ]
             else:
                 special_install_lines = [
-                    f'{self.PIP_INSTALL} -r requirements/gdal.txt',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt',
                 ]
         else:
             special_install_lines = []
@@ -551,11 +551,13 @@ def make_binpy_ci_jobs(self):
         if 'gdal' in self.tags:
             if extra_key.endswith('-strict'):
                 special_install_lines = [
-                    """sed 's/>=/==/' "requirements/gdal.txt" > "requirements/gdal-strict.txt""".strip(),
-                    f'{self.PIP_INSTALL} -r requirements/gdal-strict.txt',
+                    """
+                    sed 's/>=/==/' "requirements/gdal.txt" > "requirements/gdal-strict.txt
+                    """.strip(),
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal-strict.txt',
                 ]
             else:
-                special_install_lines = [f'{self.PIP_INSTALL} -r requirements/gdal.txt']
+                special_install_lines = [f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt']
         else:
             special_install_lines = []
         workspace_dname = 'sandbox'
