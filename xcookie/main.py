@@ -64,7 +64,7 @@ ExampleUsage:
 
     python -m xcookie.main \
         --repo_name=audio_restore --repodir=$HOME/code/audio_restore --tags="github,erotemic,purepy" \
-        --use_pyproject_requirements=True --use_setup_py=True
+        --use_pyproject_requirements=True --use_setup_py=False
 """
 import toml
 import shutil

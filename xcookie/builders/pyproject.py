@@ -178,7 +178,7 @@ def build_pyproject(self):
         if self.config['license']:
             project_block['license'] = {'text': self.config['license']}
         if self.config['url']:
-            project_block['urls'] = {'Homepage': self.config['url']}
+            project_block['urls'] = {'Homepage': str(self.config['url'])}
         if self.config['tags']:
             project_block['keywords'] = sorted({tag for tag in self.config['tags'] if tag})
 
@@ -235,6 +235,12 @@ def build_pyproject(self):
             project_block['entry-points'] = ep_table
 
         pyproj_config['build-system'].setdefault('build-backend', 'setuptools.build_meta')
+
+    try:
+        # fix GitURL issue
+        pyproj_config['tool']['xcookie']['url'] = str(pyproj_config['tool']['xcookie']['url'])
+    except KeyError:
+        ...
 
     text = toml.dumps(pyproj_config)
     return text
