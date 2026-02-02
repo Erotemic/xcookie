@@ -98,7 +98,7 @@ def _custom_pyaml_dumper():
 
 
 # @ub.memoize
-def _custom_new_ruaml_yaml_obj():
+def _custom_new_ruaml_yaml_obj(version=None):
     """
     new method
 
@@ -166,6 +166,10 @@ def _custom_new_ruaml_yaml_obj():
     CustomConstructor.add_constructor('!include', _construct_include_tag)
     # yaml_obj = ruamel.yaml.YAML(typ='unsafe', pure=True)
     yaml_obj = ruamel.yaml.YAML()
+    if version is not None:
+        if isinstance(version, str):
+            version = tuple(map(int, version.split('.')))
+        yaml_obj.version = version
     yaml_obj.Constructor = CustomConstructor
     yaml_obj.Representer = CustomRepresenter
     yaml_obj.preserve_quotes = True
@@ -200,7 +204,7 @@ class Yaml:
     """
 
     @staticmethod
-    def dumps(data, backend='ruamel'):
+    def dumps(data, backend='ruamel', version=None):
         """
         Dump yaml to a string representation
         (and account for some of our use-cases)
@@ -229,13 +233,15 @@ class Yaml:
         file = io.StringIO()
         if backend == 'ruamel':
             if NEW_RUAMEL:
-                yaml_obj = _custom_new_ruaml_yaml_obj()
+                yaml_obj = _custom_new_ruaml_yaml_obj(version=version)
                 yaml_obj.dump(data, file)
             else:
                 import ruamel.yaml
                 Dumper = _custom_ruaml_dumper()
                 ruamel.yaml.round_trip_dump(data, file, Dumper=Dumper, width=float("inf"))
         elif backend == 'pyyaml':
+            if version is not None:
+                raise NotImplementedError('pyyaml does not support version yet, use ruamel backend')
             import yaml
             Dumper = _custom_pyaml_dumper()
             yaml.dump(data, file, Dumper=Dumper, sort_keys=False, width=float("inf"))
@@ -245,7 +251,7 @@ class Yaml:
         return text
 
     @staticmethod
-    def load(file, backend='ruamel'):
+    def load(file, backend='ruamel', version=None):
         """
         Load yaml from a file
 
@@ -285,7 +291,7 @@ class Yaml:
                 # TODO: seems like there will be a deprecation
                 # from ruamel.yaml import YAML
                 if NEW_RUAMEL:
-                    yaml_obj = _custom_new_ruaml_yaml_obj()
+                    yaml_obj = _custom_new_ruaml_yaml_obj(version=version)
                     data = yaml_obj.load(file)
                 else:
                     # yaml = YAML(typ='unsafe', pure=True)
@@ -294,6 +300,8 @@ class Yaml:
                     data = ruamel.yaml.load(file, Loader=Loader, preserve_quotes=True)
                     # data = ruamel.yaml.load(file, Loader=ruamel.yaml.RoundTripLoader, preserve_quotes=True)
             elif backend == 'pyyaml':
+                if version is not None:
+                    raise NotImplementedError('pyyaml does not support version yet, use ruamel backend')
                 import yaml
                 # data = yaml.load(file, Loader=yaml.SafeLoader)
                 data = yaml.load(file, Loader=yaml.Loader)
@@ -302,7 +310,7 @@ class Yaml:
             return data
 
     @staticmethod
-    def loads(text, backend='ruamel'):
+    def loads(text, backend='ruamel', version=None):
         """
         Load yaml from a text
 
@@ -338,7 +346,7 @@ class Yaml:
         if backend == 'ruamel':
             import ruamel.yaml  # NOQA
             try:
-                data = Yaml.load(file, backend=backend)
+                data = Yaml.load(file, backend=backend, version=version)
             except ruamel.yaml.parser.ParserError as ex_:
                 ex = ex_
                 print(f'YAML ERROR: {ex!r}')
@@ -360,6 +368,8 @@ class Yaml:
                     ...
                 raise
         else:
+            if version is not None:
+                raise NotImplementedError('pyyaml does not support version yet, use ruamel backend')
             data = Yaml.load(file, backend=backend)
         return data
 
@@ -457,7 +467,10 @@ class Yaml:
             >>> print(Yaml.dumps(data, backend='ruamel'))
         """
         if isinstance(data, os.PathLike):
-            result = Yaml.load(data, backend=backend)
+            if os.path.isfile(data):
+                result = Yaml.load(data, backend=backend)
+            else:
+                result = data
         elif isinstance(data, str):
             maybe_path = None
 
