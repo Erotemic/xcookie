@@ -12,6 +12,7 @@ scriptconfig>=0.8.4
 rich>=12.3.0
 git-python>=1.0.0   
 black>=22.1.0     
+ruff>=0.15.0
 packaging>=21.3
 
 # PyYAML>=6.0

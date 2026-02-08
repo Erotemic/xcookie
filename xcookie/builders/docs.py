@@ -605,6 +605,8 @@ def build_docs_conf(self):
         )
 
     text = text + '\n' + util_text
+    from xcookie.util.util_code_format import format_code
+    text = format_code(text)
     return text
 
 

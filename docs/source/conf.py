@@ -110,7 +110,6 @@ Notes:
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 
-
 # -- Project information -----------------------------------------------------
 import sphinx_rtd_theme
 from os.path import exists
@@ -123,19 +122,23 @@ def parse_version(fpath):
     Statically parse the version number from a python file
     """
     import ast
+
     if not exists(fpath):
         raise ValueError('fpath={!r} does not exist'.format(fpath))
     with open(fpath, 'r') as file_:
         sourcecode = file_.read()
     pt = ast.parse(sourcecode)
+
     class VersionVisitor(ast.NodeVisitor):
         def visit_Assign(self, node):
             for target in node.targets:
                 if getattr(target, 'id', None) == '__version__':
                     self.version = node.value.s
+
     visitor = VersionVisitor()
     visitor.visit(pt)
     return visitor.version
+
 
 project = 'xcookie'
 copyright = '2026, Jon Crall'
@@ -182,8 +185,8 @@ napoleon_google_docstring = True
 napoleon_use_param = False
 napoleon_use_ivar = True
 
-#autoapi_type = 'python'
-#autoapi_dirs = [mod_dpath]
+# autoapi_type = 'python'
+# autoapi_dirs = [mod_dpath]
 
 autodoc_inherit_docstrings = False
 
@@ -198,7 +201,8 @@ autosummary_mock_imports = [
 ]
 
 autodoc_default_options = {  # Document callable classes
-    'special-members': '__call__'}
+    'special-members': '__call__'
+}
 
 autodoc_member_order = 'bysource'
 autoclass_content = 'both'
@@ -233,16 +237,13 @@ intersphinx_mapping = {
     'networkx': ('https://networkx.org/documentation/stable/', None),
     'scriptconfig': ('https://scriptconfig.readthedocs.io/en/latest/', None),
     'rich': ('https://rich.readthedocs.io/en/latest/', None),
-
     'numpy': ('https://numpy.org/doc/stable/', None),
     'sympy': ('https://docs.sympy.org/latest/', None),
     'scikit-learn': ('https://scikit-learn.org/stable/', None),
     'pandas': ('https://pandas.pydata.org/docs/', None),
     'matplotlib': ('https://matplotlib.org/stable/', None),
-
     'pytest': ('https://docs.pytest.org/en/latest/', None),
     'platformdirs': ('https://platformdirs.readthedocs.io/en/latest/', None),
-
     'timerit': ('https://timerit.readthedocs.io/en/latest/', None),
     'progiter': ('https://progiter.readthedocs.io/en/latest/', None),
     'dateutil': ('https://dateutil.readthedocs.io/en/latest/', None),
@@ -358,15 +359,12 @@ latex_elements = {
     # The paper size ('letterpaper' or 'a4paper').
     #
     # 'papersize': 'letterpaper',
-
     # The font size ('10pt', '11pt' or '12pt').
     #
     # 'pointsize': '10pt',
-
     # Additional stuff for the LaTeX preamble.
     #
     # 'preamble': '',
-
     # Latex figure (float) alignment
     #
     # 'figure_align': 'htbp',
@@ -376,8 +374,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'xcookie.tex', 'xcookie Documentation',
-     'Jon Crall', 'manual'),
+    (master_doc, 'xcookie.tex', 'xcookie Documentation', 'Jon Crall', 'manual'),
 ]
 
 
@@ -385,10 +382,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [
-    (master_doc, 'xcookie', 'xcookie Documentation',
-     [author], 1)
-]
+man_pages = [(master_doc, 'xcookie', 'xcookie Documentation', [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------------
@@ -397,9 +391,15 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'xcookie', 'xcookie Documentation',
-     author, 'xcookie', 'One line description of project.',
-     'Miscellaneous'),
+    (
+        master_doc,
+        'xcookie',
+        'xcookie Documentation',
+        author,
+        'xcookie',
+        'One line description of project.',
+        'Miscellaneous',
+    ),
 ]
 
 

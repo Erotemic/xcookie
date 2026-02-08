@@ -9,6 +9,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 * working towards pure pyproject.toml support
+* Using ruff as the backend formatter now
 
 ## Version 0.3.1 - Released 2025-08-04
 
