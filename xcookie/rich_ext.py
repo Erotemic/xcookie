@@ -6,6 +6,7 @@ class FuzzyPrompt(prompt.Prompt):
     """
     The user just needs to enter a non-ambiguous prefix
     """
+
     def process_response(self, value: str) -> str:
         """Normalize the response"""
         assert self.choices is not None

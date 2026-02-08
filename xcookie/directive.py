@@ -1,6 +1,7 @@
 """
 Port and extension of xdoctest directives.
 """
+
 import sys
 import os
 import re
@@ -13,7 +14,7 @@ from collections import namedtuple
 
 
 def named(key, pattern):
-    """ helper for regex """
+    """helper for regex"""
     return '(?P<{}>{})'.format(key, pattern)
 
 
@@ -46,6 +47,7 @@ class Directive(utils.NiceRepr):
     """
     Directives modify the runtime state.
     """
+
     def __init__(self, name, positive=True, args=[], inline=None):
         self.name = name
         self.args = args
@@ -70,8 +72,9 @@ class Directive(utils.NiceRepr):
             Directive: directive: the parsed directives
         """
         # Flag extracted directives as inline iff the text is only comments
-        inline = not all(line.strip().startswith('#')
-                         for line in text.splitlines())
+        inline = not all(
+            line.strip().startswith('#') for line in text.splitlines()
+        )
         #
         for comment in extract_directive_comment(text):
             # remove the first comment character and see if the comment matches
@@ -83,7 +86,9 @@ class Directive(utils.NiceRepr):
                         optparts = _split_opstr(optstr)
                         # optparts = optstr.split(',')
                         for optpart in optparts:
-                            directive = parse_directive_optstr(optpart, commands, inline)
+                            directive = parse_directive_optstr(
+                                optpart, commands, inline
+                            )
                             if directive:
                                 yield directive
 
@@ -97,26 +102,36 @@ class Directive(utils.NiceRepr):
 
     def _unpack_args(self, num):
         from xdoctest.utils import util_deprecation
+
         util_deprecation.schedule_deprecation3(
             modname='xdoctest',
-            name='Directive._unpack_args', type='method',
+            name='Directive._unpack_args',
+            type='method',
             migration='there is no need to use this',
-            deprecate='1.0.0', error='1.1.0', remove='1.2.0'
+            deprecate='1.0.0',
+            error='1.1.0',
+            remove='1.2.0',
         )
         nargs = self.args
         if len(nargs) != 1:
             raise TypeError(
-                '{} directive expected exactly {} argument(s), '
-                'got {}'.format(self.name, num, nargs))
+                '{} directive expected exactly {} argument(s), got {}'.format(
+                    self.name, num, nargs
+                )
+            )
         return self.args
 
     def effect(self, argv=None, environ=None):
         from xdoctest.utils import util_deprecation
+
         util_deprecation.schedule_deprecation3(
             modname='xdoctest',
-            name='Directive.effect', type='method',
+            name='Directive.effect',
+            type='method',
             migration='Use Directive.effects instead',
-            deprecate='1.0.0', error='1.1.0', remove='1.2.0'
+            deprecate='1.0.0',
+            error='1.1.0',
+            remove='1.2.0',
         )
         effects = self.effects(argv=argv, environ=environ)
         if len(effects) > 1:
@@ -185,6 +200,7 @@ def _split_opstr(optstr):
         ['+FOO', 'REQUIRES(foo,bar)', '+ELLIPSIS']
     """
     import re
+
     stack = []
     split_pos = []
     for match in re.finditer(r',|\(|\)', optstr):
@@ -236,7 +252,9 @@ def _is_requires_satisfied(arg, argv=None, environ=None):
     elif arg.startswith('module:'):
         parts = arg.split(':')
         if len(parts) != 2:
-            raise ValueError('xdoctest module REQUIRES directive has too many parts')
+            raise ValueError(
+                'xdoctest module REQUIRES directive has too many parts'
+            )
         # set flag to False (aka SKIP) if the module does not exist
         modname = parts[1]
         flag = _module_exists(modname)
@@ -245,7 +263,9 @@ def _is_requires_satisfied(arg, argv=None, environ=None):
             environ = os.environ
         parts = arg.split(':')
         if len(parts) != 2:
-            raise ValueError('xdoctest env REQUIRES directive has too many parts')
+            raise ValueError(
+                'xdoctest env REQUIRES directive has too many parts'
+            )
         envexpr = parts[1]
         expr_parts = re.split('(==|!=|>=)', envexpr)
         if len(expr_parts) == 1:
@@ -271,6 +291,7 @@ def _is_requires_satisfied(arg, argv=None, environ=None):
         flag = os.name.startswith(arg_lower)
     elif arg_lower in PY_IMPL_TAGS:
         import platform
+
         flag = platform.python_implementation().lower().startswith(arg_lower)
     elif arg_lower in PY_VER_TAGS:
         if sys.version_info[0] == 2:  # nocover
@@ -280,15 +301,21 @@ def _is_requires_satisfied(arg, argv=None, environ=None):
         else:  # nocover
             flag = False
     else:
-        msg = utils.codeblock(
-            '''
+        msg = (
+            utils.codeblock(
+                """
             Argument to REQUIRES directive must be either
             (1) a PLATFORM or OS tag (e.g. win32, darwin, linux),
             (2) a command line flag prefixed with '--', or
             (3) a module prefixed with 'module:'.
             (4) an environment variable prefixed with 'env:'.
             Got arg={!r}
-            ''').replace('\n', ' ').strip().format(arg)
+            """
+            )
+            .replace('\n', ' ')
+            .strip()
+            .format(arg)
+        )
         raise ValueError(msg)
     return flag
 
@@ -306,17 +333,22 @@ class DirectiveExtractor:
         >>> assert len(extracted) == 1
         >>> directive = extracted[0]
     """
+
     def __init__(self, namespace, commands):
         self.commands = commands
         self.namespace = namespace
         directive_patterns = [
             namespace + r':\s*' + named('style2', '.*'),
         ]
-        directive_re = re.compile('|'.join(directive_patterns), flags=re.IGNORECASE)
+        directive_re = re.compile(
+            '|'.join(directive_patterns), flags=re.IGNORECASE
+        )
         self.directive_re = directive_re
 
     def extract(self, text):
-        extracted = list(Directive.extract(text, self.directive_re, self.commands))
+        extracted = list(
+            Directive.extract(text, self.directive_re, self.commands)
+        )
         return extracted
 
 
@@ -326,6 +358,7 @@ _MODNAME_EXISTS_CACHE = {}
 def _module_exists(modname):
     if modname not in _MODNAME_EXISTS_CACHE:
         from xdoctest import static_analysis as static
+
         modpath = static.modname_to_modpath(modname)
         exists_flag = modpath is not None
         _MODNAME_EXISTS_CACHE[modname] = exists_flag
@@ -353,7 +386,7 @@ def parse_directive_optstr(optpart, commands, inline=None):
     paren_pos = optpart.find('(')
     if paren_pos > -1:
         # handle simple paren case.
-        body = optpart[paren_pos + 1:optpart.find(')')]
+        body = optpart[paren_pos + 1 : optpart.find(')')]
         args = [a.strip() for a in body.split(',')]
         # args = [optpart[paren_pos + 1:optpart.find(')')]]
         optpart = optpart[:paren_pos]

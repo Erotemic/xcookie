@@ -48,8 +48,7 @@ class BadgeBuilder:
 
 
 class ReadmeBuilder:
-    def __init__(self):
-        ...
+    def __init__(self): ...
 
 
 def build_readme(self):
@@ -63,7 +62,9 @@ def build_readme(self):
         workflow = 'test_binaries'
     else:
         workflow = 'tests'
-    badges = BadgeBuilder().build_templates(group, repo_name, main_branch, workflow)
+    badges = BadgeBuilder().build_templates(
+        group, repo_name, main_branch, workflow
+    )
 
     # badges['CodeQuality'] = {
     #     'image': f'image:: https://api.codacy.com/project/badge/Grade/4d815305fc014202ba7dea09c4676343',
@@ -98,9 +99,10 @@ def build_readme(self):
             if 'kitware' in self.tags:
                 github_mirror = f'https://github.com/Kitware/{pkg_name}'
                 table.append(['Github (mirror)', github_mirror])
-        pypi_url = f"https://pypi.org/project/{pkg_name}"
+        pypi_url = f'https://pypi.org/project/{pkg_name}'
         table.append(['Pypi', pypi_url])
         import tabulate
+
         tablefmt = 'grid'
         # for tablefmt in tabulate.tabulate_formats:
         #     print(f'tablefmt={tablefmt}')
@@ -111,10 +113,10 @@ def build_readme(self):
     for b in chosen_badges:
         badge = badges[b]
         badge_def = ub.codeblock(
-            f'''
+            f"""
             .. |{b}| image:: {badge['image']}
                 :target: {badge['target']}
-            '''
+            """
         )
         parts.append(badge_def)
 
@@ -141,15 +143,17 @@ def _ibeis_badges(repo_names):
     workflow = 'tests'
     lines = []
     for repo_name in repo_names:
-        badges = BadgeBuilder().build_templates(group, repo_name, main_branch, workflow)
+        badges = BadgeBuilder().build_templates(
+            group, repo_name, main_branch, workflow
+        )
         b = 'GithubActions'
         kw = badges[b]
         badge_name = repo_name + b
         text = ub.codeblock(
-            '''
+            """
             .. |{badge_name}| image:: {image}
                 :target: {target}
-            '''
+            """
         ).format(**kw, badge_name=badge_name)
         lines.append(text)
 

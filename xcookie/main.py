@@ -66,6 +66,7 @@ ExampleUsage:
         --repo_name=audio_restore --repodir=$HOME/code/audio_restore --tags="github,erotemic,purepy" \
         --use_pyproject_requirements=True --use_setup_py=False
 """
+
 import toml
 import shutil
 import ubelt as ub
@@ -87,6 +88,7 @@ class XCookieConfig(scfg.DataConfig):
     """
     The XCookie CLI
     """
+
     __epilog__ = """
     Usage
     -----
@@ -97,92 +99,146 @@ class XCookieConfig(scfg.DataConfig):
     xcookie --repo_name=cookiecutter_binpy --repodir="$HOME"/code/cookiecutter_binpy --tags="github,binpy,gdal"
     """
     __default__ = {
-        'repodir': scfg.Value('.', help='path to the new or existing repo', position=1),
-
+        'repodir': scfg.Value(
+            '.', help='path to the new or existing repo', position=1
+        ),
         'repo_name': scfg.Value(None, help='defaults to ``repodir.name``'),
-        'mod_name': scfg.Value(None, help='The name of the importable Python module. defaults to ``repo_name``'),
-        'pkg_name': scfg.Value(None, help='The distribution project name of the installable Python package (i.e. what you pass to ``pip install``). defaults to ``mod_name``'),
-        'rel_mod_parent_dpath': scfg.Value('.', help=ub.paragraph(
-            '''
+        'mod_name': scfg.Value(
+            None,
+            help='The name of the importable Python module. defaults to ``repo_name``',
+        ),
+        'pkg_name': scfg.Value(
+            None,
+            help='The distribution project name of the installable Python package (i.e. what you pass to ``pip install``). defaults to ``mod_name``',
+        ),
+        'rel_mod_parent_dpath': scfg.Value(
+            '.',
+            help=ub.paragraph(
+                """
             The location of the module directory relative to the repository
             root.  This defaults to simply placing the module in ".", but
             another common pattern is to specify this as "./src".
-            '''
-        )),
-
-        'rotate_secrets': scfg.Value('auto', help='If True will execute secret rotation', isflag=True),
-        'refresh_docs': scfg.Value('auto', help='If True will refresh the docs', isflag=True),
-        'deploy': scfg.Value(True, help='If False, disable all deployment', isflag=True),
-        'deploy_pypi': scfg.Value(True, help='If False, disable pypi deployment', isflag=True),
-        'deploy_tags': scfg.Value(True, help='If False, disable tags deployment', isflag=True),
-        'deploy_artifacts': scfg.Value(True, help='If False, disable github/gitlab deployment', isflag=True),
-        'deploy_gitlab': scfg.Value(True, help='If False, disable gitlab deployment', isflag=True),
-
+            """
+            ),
+        ),
+        'rotate_secrets': scfg.Value(
+            'auto', help='If True will execute secret rotation', isflag=True
+        ),
+        'refresh_docs': scfg.Value(
+            'auto', help='If True will refresh the docs', isflag=True
+        ),
+        'deploy': scfg.Value(
+            True, help='If False, disable all deployment', isflag=True
+        ),
+        'deploy_pypi': scfg.Value(
+            True, help='If False, disable pypi deployment', isflag=True
+        ),
+        'deploy_tags': scfg.Value(
+            True, help='If False, disable tags deployment', isflag=True
+        ),
+        'deploy_artifacts': scfg.Value(
+            True, help='If False, disable github/gitlab deployment', isflag=True
+        ),
+        'deploy_gitlab': scfg.Value(
+            True, help='If False, disable gitlab deployment', isflag=True
+        ),
         'os': scfg.Value('all', help='all or any of win,osx,linux'),
-
-        'is_new': scfg.Value('auto', help=ub.paragraph(
-            '''
+        'is_new': scfg.Value(
+            'auto',
+            help=ub.paragraph(
+                """
             If the repo is detected or specified as being new, then steps to
             create a project for the repo on github/gitlab and other
             initialization procedures will be executed. Otherwise we assume
             that we are updating an existing repo.
-            '''
-        )),
-
-        'init_new_remotes': scfg.Value(True, help=ub.paragraph(
-            '''
+            """
+            ),
+        ),
+        'init_new_remotes': scfg.Value(
+            True,
+            help=ub.paragraph(
+                """
             If True, try to initialize a new repo on the remote if the repo is
             new.
-            '''
-        )),
-
-        'min_python': scfg.Value('3.7', type=str, help='used to infer supported_python_versions'),
-        'max_python': scfg.Value(None, type=str, help='used to infer supported_python_versions'),
-        'main_python': scfg.Value('max', help='The main version of Python to use for version agnostic jobs. A value of max uses the maximum version'),
-
-        'typed': scfg.Value(None, help='Should be None, False, True, partial or full'),
-        'supported_python_versions': scfg.Value('auto', help=ub.paragraph(
-            '''
+            """
+            ),
+        ),
+        'min_python': scfg.Value(
+            '3.7', type=str, help='used to infer supported_python_versions'
+        ),
+        'max_python': scfg.Value(
+            None, type=str, help='used to infer supported_python_versions'
+        ),
+        'main_python': scfg.Value(
+            'max',
+            help='The main version of Python to use for version agnostic jobs. A value of max uses the maximum version',
+        ),
+        'typed': scfg.Value(
+            None, help='Should be None, False, True, partial or full'
+        ),
+        'supported_python_versions': scfg.Value(
+            'auto',
+            help=ub.paragraph(
+                """
             can specify as a list of explicit major.minor versions. Auto will
             use everything above the min_python version
-            ''')),
-
-        'ci_cpython_versions': scfg.Value('auto', help=ub.paragraph(
-            '''
+            """
+            ),
+        ),
+        'ci_cpython_versions': scfg.Value(
+            'auto',
+            help=ub.paragraph(
+                """
             Specify the major.minor CPython versions to use on the CI.
             Will default to the supported_python_versions. E.g. ["3.7", "3.10"]
-            ''')),
-
-        'ci_pypy_versions': scfg.Value('auto', help=ub.paragraph(
-            '''
+            """
+            ),
+        ),
+        'ci_pypy_versions': scfg.Value(
+            'auto',
+            help=ub.paragraph(
+                """
             Specify the major.minor PyPy versions to use on the CI.
             Defaults will depend on purepy vs binpy tags.
-            ''')),
-
-        'ci_blocklist': scfg.Value([], help=ub.paragraph(
-            '''
+            """
+            ),
+        ),
+        'ci_blocklist': scfg.Value(
+            [],
+            help=ub.paragraph(
+                """
             List[Dict] of filters that will remove generated includes. Keys can
             be os or python-version and values are glob strings.
-            ''')),
-
+            """
+            ),
+        ),
         'ci_versions_minimal_strict': scfg.Value('min', help='todo: sus out'),
         'ci_versions_full_strict': scfg.Value('main'),
         'ci_versions_minimal_loose': scfg.Value('main'),
         'ci_versions_full_loose': scfg.Value('*'),
-
-        'remote_host': scfg.Value(None, help='if unspecified, attempt to infer from tags'),
-        'remote_group': scfg.Value(None, help='if unspecified, attempt to infer from tags'),
-
-        'autostage': scfg.Value(False, help='if true, automatically add changes to version control'),
-
-        'visibility': scfg.Value('public', help='or private. Does limit what we can do'),
-
-        'test_env': scfg.Value(None, help='A YAML coercable dictionary of environment variables to use in test stages. (TOTO'),
-
-
+        'remote_host': scfg.Value(
+            None, help='if unspecified, attempt to infer from tags'
+        ),
+        'remote_group': scfg.Value(
+            None, help='if unspecified, attempt to infer from tags'
+        ),
+        'autostage': scfg.Value(
+            False, help='if true, automatically add changes to version control'
+        ),
+        'visibility': scfg.Value(
+            'public', help='or private. Does limit what we can do'
+        ),
+        'test_env': scfg.Value(
+            None,
+            help='A YAML coercible dictionary of environment variables to use in test stages. (TOTO',
+        ),
         'version': scfg.Value(None, help='repo metadata: url for the project'),
-        'url': scfg.Value(None, type=str, help='repo metadata: url for the project'),
-        'author': scfg.Value(None, help='repo metadata: author for the project'),
+        'url': scfg.Value(
+            None, type=str, help='repo metadata: url for the project'
+        ),
+        'author': scfg.Value(
+            None, help='repo metadata: author for the project'
+        ),
         'author_email': scfg.Value(None, help='repo metadata'),
         'description': scfg.Value(None, type=str, help='repo metadata'),
         'license': scfg.Value(None, help='repo metadata'),
@@ -190,24 +246,40 @@ class XCookieConfig(scfg.DataConfig):
         'enable_gpg': scfg.Value(True),
         'defaultbranch': scfg.Value('main'),
         'xdoctest_style': scfg.Value('google', help='type of xdoctest style'),
-        'test_command': scfg.Value('auto', help='The pytest command to run in the CL'),
-
-        'ci_pypi_live_password_varname': scfg.Value('TWINE_PASSWORD', help='variable of the live twine password in your secrets'),
-        'ci_pypi_test_password_varname': scfg.Value('TEST_TWINE_PASSWORD', help='variable of the test twine password in your secrets'),
-
-        'regen': scfg.Value(None, help=ub.paragraph(
-            '''
+        'test_command': scfg.Value(
+            'auto', help='The pytest command to run in the CL'
+        ),
+        'ci_pypi_live_password_varname': scfg.Value(
+            'TWINE_PASSWORD',
+            help='variable of the live twine password in your secrets',
+        ),
+        'ci_pypi_test_password_varname': scfg.Value(
+            'TEST_TWINE_PASSWORD',
+            help='variable of the test twine password in your secrets',
+        ),
+        'regen': scfg.Value(
+            None,
+            help=ub.paragraph(
+                """
             if specified, any modified template file that matches this pattern
             will be considered for re-write
-            ''')),
-
-        'only_generate': scfg.Value(None, alias='only_gen', help=ub.paragraph(
-            '''
-            if specified, onyl generate files matching this multipattern.
-            ''')),
-
-        'tags': scfg.Value('auto', nargs='*', help=ub.paragraph(
-            '''
+            """
+            ),
+        ),
+        'only_generate': scfg.Value(
+            None,
+            alias='only_gen',
+            help=ub.paragraph(
+                """
+            if specified, only generate files matching this multipattern.
+            """
+            ),
+        ),
+        'tags': scfg.Value(
+            'auto',
+            nargs='*',
+            help=ub.paragraph(
+                """
             Tags modify what parts of the template are used.
             Valid tags are:
                 "binpy" - do we build binpy wheels?
@@ -219,38 +291,59 @@ class XCookieConfig(scfg.DataConfig):
                 "postgresql" - add in postgresql dependencies
                 "cv2" - enable the headless hack
                 "notypes" - disable mypy in lint checks
-            ''')),
-
-        'linter': scfg.Value(True, help=ub.paragraph('if true enables lint checks in CI')),
-
-        'skip_autogen': scfg.Value(None, help=ub.paragraph('list of targets to not auto-generate by default')),
-
-        'render_doc_images': scfg.Value(False, help=ub.paragraph(
-            '''
+            """
+            ),
+        ),
+        'linter': scfg.Value(
+            True, help=ub.paragraph('if true enables lint checks in CI')
+        ),
+        'skip_autogen': scfg.Value(
+            None,
+            help=ub.paragraph(
+                'list of targets to not auto-generate by default'
+            ),
+        ),
+        'render_doc_images': scfg.Value(
+            False,
+            help=ub.paragraph(
+                """
             if true, adds kwplot as a dependency to build docs and enable rendering images from doctests.
-            ''')),
-
+            """
+            ),
+        ),
         # TODO: Better mechanism for controlling which of the loose / strict /
         # minimal / full variants will be run.
-        'test_variants': scfg.Value([
-            'full-loose', 'full-strict',
-            'minimal-loose', 'minimal-strict'],
-            help='A list of which CI loose / strict / minimal / full variants to use'),
-
-        'use_vcs': scfg.Value('auto', help=ub.paragraph(
-            '''
+        'test_variants': scfg.Value(
+            ['full-loose', 'full-strict', 'minimal-loose', 'minimal-strict'],
+            help='A list of which CI loose / strict / minimal / full variants to use',
+        ),
+        'use_vcs': scfg.Value(
+            'auto',
+            help=ub.paragraph(
+                """
             Set to False to disable VCS. Will default to True if config has enough information to infer a VCS
-            ''')),
-
-        'use_uv': scfg.Value('auto', help=ub.paragraph('if False use plain pip, otherwise use uv instead')),
-        'use_pyproject_requirements': scfg.Value(False, help=ub.paragraph('experimental new style version testing')),
-        'use_setup_py': scfg.Value(True, help=ub.paragraph(
-            '''
+            """
+            ),
+        ),
+        'use_uv': scfg.Value(
+            'auto',
+            help=ub.paragraph(
+                'if False use plain pip, otherwise use uv instead'
+            ),
+        ),
+        'use_pyproject_requirements': scfg.Value(
+            False, help=ub.paragraph('experimental new style version testing')
+        ),
+        'use_setup_py': scfg.Value(
+            True,
+            help=ub.paragraph(
+                """
             If False, do not generate setup.py and instead emit a fully-specified
             PEP621-compatible pyproject.toml. When True, the legacy setup.py
             will be generated alongside a minimal pyproject.toml.
-            ''')),
-
+            """
+            ),
+        ),
         # ---
         'interactive': scfg.Value(True),
         'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
@@ -321,7 +414,9 @@ class XCookieConfig(scfg.DataConfig):
             if 'erotemic' in self['tags']:
                 self['author_email'] = 'erotemic@gmail.com'
             else:
-                self['author_email'] = ub.cmd('git config user.email')['out'].strip()
+                self['author_email'] = ub.cmd('git config user.email')[
+                    'out'
+                ].strip()
         if self['version'] is None:
             # TODO: read from __init__.py
             # self['version'] = '{mod_dpath}/__init__.py::__version__'
@@ -333,6 +428,7 @@ class XCookieConfig(scfg.DataConfig):
         if self['supported_python_versions'] == 'auto':
             # FIXME: need to resolve after all other info is loaded
             from xcookie.constants import KNOWN_PYTHON_VERSIONS
+
             min_python = str(self['min_python']).lower()
             max_python = str(self['max_python']).lower()
 
@@ -348,8 +444,9 @@ class XCookieConfig(scfg.DataConfig):
                         return False
                 return True
 
-            python_versions = [v for v in KNOWN_PYTHON_VERSIONS
-                               if satisfies_minmax(v)]
+            python_versions = [
+                v for v in KNOWN_PYTHON_VERSIONS if satisfies_minmax(v)
+            ]
             self['supported_python_versions'] = python_versions
 
         if self['ci_cpython_versions'] == 'auto':
@@ -405,7 +502,10 @@ class XCookieConfig(scfg.DataConfig):
 
         setuptools_config = disk_config.get('tool', {}).get('setuptools', {})
         setuptools_packages = setuptools_config.get('packages', [])
-        if isinstance(setuptools_packages, list) and len(setuptools_packages) == 1:
+        if (
+            isinstance(setuptools_packages, list)
+            and len(setuptools_packages) == 1
+        ):
             config['mod_name'] = setuptools_packages[0]
             config['rel_mod_parent_dpath'] = '.'
 
@@ -414,8 +514,11 @@ class XCookieConfig(scfg.DataConfig):
             setuptools_include = setuptools_find_config.get('include')
             if len(setuptools_include) == 1:
                 import glob
+
                 results = list(glob.glob(setuptools_include[0]))
-                results = [r for r in results if '.egg-info' not in r and '-' not in r]
+                results = [
+                    r for r in results if '.egg-info' not in r and '-' not in r
+                ]
                 if len(results) == 1:
                     config['mod_name'] = results[0]
                     config['rel_mod_parent_dpath'] = '.'
@@ -429,6 +532,7 @@ class XCookieConfig(scfg.DataConfig):
         req_py_block = project_block.get('requires-python')
         if req_py_block:
             from xcookie.version_helpers import parse_minimum_python_version
+
             config['min_python'] = parse_minimum_python_version(req_py_block)
 
         return config
@@ -444,6 +548,7 @@ class XCookieConfig(scfg.DataConfig):
         """
         if self['interactive']:
             from rich import prompt
+
             flag = prompt.Confirm.ask(msg)
         else:
             flag = default
@@ -460,6 +565,7 @@ class XCookieConfig(scfg.DataConfig):
         """
         if self['interactive']:
             from xcookie.rich_ext import FuzzyPrompt
+
             answer = FuzzyPrompt.ask(msg, choices=choices)
         else:
             answer = default
@@ -474,7 +580,9 @@ class XCookieConfig(scfg.DataConfig):
         settings = config._load_xcookie_pyproject_settings()
         if settings:
             print(f'settings={settings}')
-            config = XCookieConfig.cli(argv=argv, data=kwargs, default=ub.dict_isect(settings, config))
+            config = XCookieConfig.cli(
+                argv=argv, data=kwargs, default=ub.dict_isect(settings, config)
+            )
         return config
 
     @classmethod
@@ -513,6 +621,7 @@ class XCookieConfig(scfg.DataConfig):
         # xdev.embed()
 
         import rich
+
         rich.print('config = {}'.format(ub.urepr(config, nl=1)))
         # repodir = ub.Path(config['repodir']).absolute()
         # repodir.ensuredir()
@@ -551,9 +660,7 @@ class TemplateApplier:
             xcookie_dpath = ub.Path('~/misc/templates/xcookie').expand()
         self.template_dpath = xcookie_dpath
         self.staging_dpath = ub.Path(self._tmpdir.name)
-        self.remote_info = {
-            'type': 'unknown'
-        }
+        self.remote_info = {'type': 'unknown'}
         self._setup_pip_commands()  # Is this sufficient here?
 
     def apply(self):
@@ -578,6 +685,7 @@ class TemplateApplier:
 
     def autostage(self):
         import git
+
         repo = git.Repo(self.repodir)
 
         # Find untracked files
@@ -595,7 +703,10 @@ class TemplateApplier:
 
     @property
     def rel_mod_dpath(self):
-        return ub.Path(self.config['rel_mod_parent_dpath']) / self.config['mod_name']
+        return (
+            ub.Path(self.config['rel_mod_parent_dpath'])
+            / self.config['mod_name']
+        )
 
     @property
     def mod_dpath(self):
@@ -626,111 +737,233 @@ class TemplateApplier:
         self.template_infos = [
             # {'template': 1, 'overwrite': False, 'fname': '.circleci/config.yml'},
             # {'template': 1, 'overwrite': False, 'fname': '.travis.yml'},
-
-            {'template': 0, 'overwrite': 1, 'fname': 'dev/setup_secrets.sh',
-             'enabled': self.config['enable_gpg'],
-             'input_fname': rc.resource_fpath('setup_secrets.sh.in')
-             },
-
-            {'template': 0, 'overwrite': 0, 'fname': '.gitignore',
-             'input_fname': rc.resource_fpath('gitignore.in') },
+            {
+                'template': 0,
+                'overwrite': 1,
+                'fname': 'dev/setup_secrets.sh',
+                'enabled': self.config['enable_gpg'],
+                'input_fname': rc.resource_fpath('setup_secrets.sh.in'),
+            },
+            {
+                'template': 0,
+                'overwrite': 0,
+                'fname': '.gitignore',
+                'input_fname': rc.resource_fpath('gitignore.in'),
+            },
             # {'template': 1, 'overwrite': 1, 'fname': '.coveragerc'},
-            {'template': 1, 'overwrite': 1, 'fname': '.readthedocs.yml',
-             'dynamic': 'build_readthedocs' },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'fname': '.readthedocs.yml',
+                'dynamic': 'build_readthedocs',
+            },
             # {'template': 0, 'overwrite': 1, 'fname': 'pytest.ini'},
-
-            {'template': 0, 'overwrite': 0, 'fname': 'pyproject.toml',
-             'dynamic': 'build_pyproject'},
-
-            {'template': 1, 'overwrite': 0, 'fname': 'setup.py',
-             # 'input_fname': rc.resource_fpath('setup.py.in'),
-             'dynamic': 'build_setup',
-             'enabled': self.config['use_setup_py'],
-             'perms': 'x'},
-
-            {'template': 0, 'overwrite': 0, 'fname': 'docs/source/index.rst',
-             'dynamic': 'build_docs_index'},
-            {'template': 0, 'overwrite': 0, 'fname': 'README.rst',
-             'dynamic': 'build_readme'},
+            {
+                'template': 0,
+                'overwrite': 0,
+                'fname': 'pyproject.toml',
+                'dynamic': 'build_pyproject',
+            },
+            {
+                'template': 1,
+                'overwrite': 0,
+                'fname': 'setup.py',
+                # 'input_fname': rc.resource_fpath('setup.py.in'),
+                'dynamic': 'build_setup',
+                'enabled': self.config['use_setup_py'],
+                'perms': 'x',
+            },
+            {
+                'template': 0,
+                'overwrite': 0,
+                'fname': 'docs/source/index.rst',
+                'dynamic': 'build_docs_index',
+            },
+            {
+                'template': 0,
+                'overwrite': 0,
+                'fname': 'README.rst',
+                'dynamic': 'build_readme',
+            },
             #
             {'source': 'dynamic', 'overwrite': 0, 'fname': 'CHANGELOG.md'},
-            {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__init__.py'},
+            {
+                'source': 'dynamic',
+                'overwrite': 0,
+                'fname': rel_mod_dpath / '__init__.py',
+            },
             # {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__main__.py'},
-            {'source': 'dynamic', 'overwrite': 0, 'fname': 'tests/test_import.py'},
-
-            {'template': 0, 'overwrite': 1, 'fname': '.github/dependabot.yml', 'tags': 'github',
-             'input_fname': rc.resource_fpath('dependabot.yml.in')},
-
+            {
+                'source': 'dynamic',
+                'overwrite': 0,
+                'fname': 'tests/test_import.py',
+            },
+            {
+                'template': 0,
+                'overwrite': 1,
+                'fname': '.github/dependabot.yml',
+                'tags': 'github',
+                'input_fname': rc.resource_fpath('dependabot.yml.in'),
+            },
             # {'template': 0, 'overwrite': 1,
             #  'tags': 'binpy,github',
             #  'fname': '.github/workflows/test_binaries.yml',
             #  'input_fname': rc.resource_fpath('test_binaries.yml.in')},
-
-            {'template': 1, 'overwrite': 1,
-             'tags': 'github',
-             'fname': '.github/workflows/tests.yml',
-             'dynamic': 'build_github_actions',
-             # 'input_fname': rc.resource_fpath('tests.yml.in')
-             },
-
-            {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,purepy',
-             # 'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')
-             'dynamic': 'build_gitlab_ci'
-             },
-
+            {
+                'template': 1,
+                'overwrite': 1,
+                'tags': 'github',
+                'fname': '.github/workflows/tests.yml',
+                'dynamic': 'build_github_actions',
+                # 'input_fname': rc.resource_fpath('tests.yml.in')
+            },
+            {
+                'template': 0,
+                'overwrite': 1,
+                'fname': '.gitlab-ci.yml',
+                'tags': 'gitlab,purepy',
+                # 'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')
+                'dynamic': 'build_gitlab_ci',
+            },
             # Broken
             # {'template': 0, 'overwrite': 1, 'fname': '.gitlab/rules.yml', 'tags': 'gitlab',
             #  # 'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')
             #  'dynamic': 'build_gitlab_rules'
             #  },
-
-            {'template': 0, 'overwrite': 1, 'fname': '.gitlab-ci.yml', 'tags': 'gitlab,binpy',
-             'dynamic': 'build_gitlab_ci'},
+            {
+                'template': 0,
+                'overwrite': 1,
+                'fname': '.gitlab-ci.yml',
+                'tags': 'gitlab,binpy',
+                'dynamic': 'build_gitlab_ci',
+            },
             # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
-
-            {'template': 1, 'overwrite': 0, 'fname': 'CMakeLists.txt',
-             'tags': 'binpy',
-             'input_fname': rc.resource_fpath('CMakeLists.txt.in')},
-
+            {
+                'template': 1,
+                'overwrite': 0,
+                'fname': 'CMakeLists.txt',
+                'tags': 'binpy',
+                'input_fname': rc.resource_fpath('CMakeLists.txt.in'),
+            },
             # {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh', 'perms': 'x'},
-
-            {'template': 0, 'overwrite': 1, 'fname': 'requirements.txt',  'dynamic': 'build_requirements_txt'},
-            {'template': 1, 'overwrite': 1, 'fname': 'requirements/graphics.txt', 'tags': 'cv2', 'dynamic': 'build_cv2_graphics_requirements_txt'},
-            {'template': 1, 'overwrite': 1, 'fname': 'requirements/headless.txt', 'tags': 'cv2', 'dynamic': 'build_cv2_headless_requirements_txt'},
-            {'template': 1, 'overwrite': 1, 'fname': 'requirements/gdal.txt', 'tags': 'gdal', 'dynamic': 'build_gdal_requirements_txt'},
-
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/optional.txt', 'dynamic': 'build_optional_requirements'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/runtime.txt', 'dynamic': 'build_runtime_requirements'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/tests.txt', 'dynamic': 'build_tests_requirements'},
-            {'template': 0, 'overwrite': 0, 'fname': 'requirements/docs.txt', 'dynamic': 'build_docs_requirements'},
-            {'template': 1, 'overwrite': 1, 'fname': 'docs/source/conf.py', 'dynamic': 'build_docs_conf'},
-            {'template': 1, 'overwrite': 1, 'fname': 'docs/Makefile', 'input_fname': rc.resource_fpath('docs_makefile.in')},
-            {'template': 1, 'overwrite': 1, 'fname': 'docs/make.bat', 'input_fname': rc.resource_fpath('docs_make.bat.in')},
-
+            {
+                'template': 0,
+                'overwrite': 1,
+                'fname': 'requirements.txt',
+                'dynamic': 'build_requirements_txt',
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'fname': 'requirements/graphics.txt',
+                'tags': 'cv2',
+                'dynamic': 'build_cv2_graphics_requirements_txt',
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'fname': 'requirements/headless.txt',
+                'tags': 'cv2',
+                'dynamic': 'build_cv2_headless_requirements_txt',
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'fname': 'requirements/gdal.txt',
+                'tags': 'gdal',
+                'dynamic': 'build_gdal_requirements_txt',
+            },
+            {
+                'template': 0,
+                'overwrite': 0,
+                'fname': 'requirements/optional.txt',
+                'dynamic': 'build_optional_requirements',
+            },
+            {
+                'template': 0,
+                'overwrite': 0,
+                'fname': 'requirements/runtime.txt',
+                'dynamic': 'build_runtime_requirements',
+            },
+            {
+                'template': 0,
+                'overwrite': 0,
+                'fname': 'requirements/tests.txt',
+                'dynamic': 'build_tests_requirements',
+            },
+            {
+                'template': 0,
+                'overwrite': 0,
+                'fname': 'requirements/docs.txt',
+                'dynamic': 'build_docs_requirements',
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'fname': 'docs/source/conf.py',
+                'dynamic': 'build_docs_conf',
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'fname': 'docs/Makefile',
+                'input_fname': rc.resource_fpath('docs_makefile.in'),
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'fname': 'docs/make.bat',
+                'input_fname': rc.resource_fpath('docs_make.bat.in'),
+            },
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
             # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
-
-            {'template': 0, 'overwrite': 1, 'fname': 'publish.sh', 'perms': 'x', 'input_fname': rc.resource_fpath('publish.sh.in')},
-            {'template': 1, 'overwrite': 1, 'fname': 'build_wheels.sh', 'perms': 'x', 'tags': 'binpy'},
-            {'template': 1, 'overwrite': 1, 'fname': 'run_doctests.sh', 'perms': 'x',
-             'dynamic': 'build_run_doctests',
-             },  # TODO: template with xdoctest-style
-
+            {
+                'template': 0,
+                'overwrite': 1,
+                'fname': 'publish.sh',
+                'perms': 'x',
+                'input_fname': rc.resource_fpath('publish.sh.in'),
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'fname': 'build_wheels.sh',
+                'perms': 'x',
+                'tags': 'binpy',
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'fname': 'run_doctests.sh',
+                'perms': 'x',
+                'dynamic': 'build_run_doctests',
+            },  # TODO: template with xdoctest-style
             # TODO: add this back in eventually
             # {'template': 1, 'overwrite': 1, 'fname': 'MANIFEST.in', 'dynamic': 'build_manifest_in'},
-
-            {'template': 0, 'overwrite': 0, 'fname': 'run_linter.sh', 'perms': 'x',
-             'dynamic': 'build_run_linter'},
-
+            {
+                'template': 0,
+                'overwrite': 0,
+                'fname': 'run_linter.sh',
+                'perms': 'x',
+                'dynamic': 'build_run_linter',
+            },
             # TODO: template a clean script
-            {'template': 1, 'overwrite': 0, 'fname': 'run_tests.py',
-             'perms': 'x', 'tags': 'binpy',
-             'input_fname': rc.resource_fpath('run_tests.binpy.py.in')},
-
-            {'template': 1, 'overwrite': 0, 'fname': 'run_tests.py',
-             'perms': 'x', 'tags': 'purepy',
-             'input_fname': rc.resource_fpath('run_tests.purepy.py.in')},
-
+            {
+                'template': 1,
+                'overwrite': 0,
+                'fname': 'run_tests.py',
+                'perms': 'x',
+                'tags': 'binpy',
+                'input_fname': rc.resource_fpath('run_tests.binpy.py.in'),
+            },
+            {
+                'template': 1,
+                'overwrite': 0,
+                'fname': 'run_tests.py',
+                'perms': 'x',
+                'tags': 'purepy',
+                'input_fname': rc.resource_fpath('run_tests.purepy.py.in'),
+            },
         ]
 
         # The user specified some files to not overwrite by default
@@ -764,24 +997,38 @@ class TemplateApplier:
                             is_template = 1
                         else:
                             try:
-                                is_template = int('xcookie' in abs_fpath.read_text())
+                                is_template = int(
+                                    'xcookie' in abs_fpath.read_text()
+                                )
                             except Exception:
                                 is_template = 0
                             # is_template = 0
                         rel_fpath = rel_root / fname
                         # overwrite indicates if we dont expect the user to
                         # make modifications
-                        template_contents.append({
-                            'template': is_template,
-                            'overwrite': False,
-                            'fname': os.fspath(rel_fpath),
-                        })
-            print('template_contents = {}'.format(ub.urepr(sorted(template_contents, key=lambda x: x['fname']), nl=1, sort=0)))
+                        template_contents.append(
+                            {
+                                'template': is_template,
+                                'overwrite': False,
+                                'fname': os.fspath(rel_fpath),
+                            }
+                        )
+            print(
+                'template_contents = {}'.format(
+                    ub.urepr(
+                        sorted(template_contents, key=lambda x: x['fname']),
+                        nl=1,
+                        sort=0,
+                    )
+                )
+            )
             known_fpaths = {d['fname'] for d in self.template_infos}
             exist_fpaths = {d['fname'] for d in template_contents}
             unexpected_fpaths = exist_fpaths - known_fpaths
             if unexpected_fpaths:
-                print(f'WARNING UNREGISTERED unexpected_fpaths={unexpected_fpaths}')
+                print(
+                    f'WARNING UNREGISTERED unexpected_fpaths={unexpected_fpaths}'
+                )
 
     @property
     def tags(self):
@@ -815,16 +1062,21 @@ class TemplateApplier:
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Topic :: Utilities',
             # This should be interpreted as Apache License v2.0
-            'License :: OSI Approved :: Apache Software License',
+            # 'License :: OSI Approved :: Apache Software License',
         ]
 
         disk_config = self.config._load_pyproject_config()
         if disk_config is None:
             disk_config = {}
-        other_classifiers += disk_config.get('project', {}).get('classifiers', [])
+        other_classifiers += disk_config.get('project', {}).get(
+            'classifiers', []
+        )
 
         pyproject_settings = self.config._load_xcookie_pyproject_settings()
-        if pyproject_settings is not None and 'classifiers' in pyproject_settings:
+        if (
+            pyproject_settings is not None
+            and 'classifiers' in pyproject_settings
+        ):
             other_classifiers += pyproject_settings['classifiers']
 
         classifiers = [dev_status] + other_classifiers + version_classifiers
@@ -838,9 +1090,7 @@ class TemplateApplier:
         populated on initialization for tests.
         """
         tags = set(self.config['tags'])
-        self.remote_info = {
-            'type': 'unknown'
-        }
+        self.remote_info = {'type': 'unknown'}
 
         if isinstance(self.config.url, str) and self.config.url.lower() in {'none', 'null'}:
             self.config.url = None
@@ -898,15 +1148,29 @@ class TemplateApplier:
             if 'pyutils' in tags:
                 default_remote_info['group'] = 'pyutils'  # hack
 
-        self.remote_info = ub.udict(default_remote_info) | ub.udict(self.remote_info)
+        self.remote_info = ub.udict(default_remote_info) | ub.udict(
+            self.remote_info
+        )
 
         self.remote_info['repo_name'] = self.config['repo_name']
 
         if 'group' in self.remote_info and 'host' in self.remote_info:
             self.config['remote_host'] = self.remote_info['host']
             self.config['remote_group'] = self.remote_info['group']
-            self.remote_info['url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name']])
-            self.remote_info['git_url'] = '/'.join([self.remote_info['host'], self.remote_info['group'], self.config['repo_name'] + '.git'])
+            self.remote_info['url'] = '/'.join(
+                [
+                    self.remote_info['host'],
+                    self.remote_info['group'],
+                    self.config['repo_name'],
+                ]
+            )
+            self.remote_info['git_url'] = '/'.join(
+                [
+                    self.remote_info['host'],
+                    self.remote_info['group'],
+                    self.config['repo_name'] + '.git',
+                ]
+            )
 
     def setup(self):
         """
@@ -923,7 +1187,9 @@ class TemplateApplier:
             if use_vcs == 'auto':
                 use_vcs = False
             print(f'tags={tags}')
-            print('self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1)))
+            print(
+                'self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1))
+            )
             msg = 'Tags does not include github or gitlab. Cannot use VCS system without that'
             if use_vcs:
                 raise Exception(msg)
@@ -934,7 +1200,9 @@ class TemplateApplier:
             if use_vcs == 'auto':
                 use_vcs = False
             print(f'tags={tags}')
-            print('self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1)))
+            print(
+                'self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1))
+            )
             msg = 'Unknown user / group, specify a tag for a known user. Or a URL in the pyproject.toml [tool.xcookie]'
             if use_vcs:
                 raise Exception(msg)
@@ -957,7 +1225,11 @@ class TemplateApplier:
         task_summary = ub.map_vals(len, tasks)
         if any(task_summary.values()):
             print('task_summary = {}'.format(ub.urepr(task_summary, nl=1)))
-            answer = self.config.prompt('What parts of the patch to apply?', ['yes', 'all', 'some', 'none'], default='yes')
+            answer = self.config.prompt(
+                'What parts of the patch to apply?',
+                ['yes', 'all', 'some', 'none'],
+                default='yes',
+            )
             if answer in {'all', 'yes'}:
                 dirs = {d.parent for s, d in copy_tasks}
                 for d in dirs:
@@ -1000,19 +1272,23 @@ class TemplateApplier:
         #     print('missing = {}'.format(ub.urepr(missing, nl=1)))
         if self.config['is_new']:
             create_new_repo_info = ub.codeblock(
-                f'''
+                f"""
                 TODO: call the APIS
                 git init
                 gh repo create {self.repo_name} --public
                 # https://cli.github.com/manual/gh_repo_create
-                ''')
+                """
+            )
             print(create_new_repo_info)
             import cmd_queue
+
             queue = cmd_queue.Queue.create(cwd=self.repodir)
             git_dpath = self.repodir / '.git'
             if not git_dpath.exists():
                 queue.submit('git init')
-                queue.sync().submit(f'git remote add origin {self.remote_info["url"]}')
+                queue.sync().submit(
+                    f'git remote add origin {self.remote_info["url"]}'
+                )
 
             if 'erotemic' in self.tags:
                 # TODO: ensure this works
@@ -1020,11 +1296,15 @@ class TemplateApplier:
                 # TODO: make an xcookie user configuration where this
                 # information is pulled from.
                 queue.sync().submit('git config --local user.name "Jon Crall"')
-                queue.sync().submit('git config --local user.email "erotemic@gmail.com"')
+                queue.sync().submit(
+                    'git config --local user.email "erotemic@gmail.com"'
+                )
                 # see also:
                 # ~/local/scripts/git-autoconf-gpgsign.sh Erotemic
                 queue.sync().submit('git config --local commit.gpgsign true')
-                queue.sync().submit('git config --local user.signingkey 4AC8B478335ED6ED667715F3622BE571405441B4')
+                queue.sync().submit(
+                    'git config --local user.signingkey 4AC8B478335ED6ED667715F3622BE571405441B4'
+                )
 
             if queue.jobs:
                 queue.rprint()
@@ -1032,7 +1312,9 @@ class TemplateApplier:
                     self.repodir.ensuredir()
                     queue.run()
 
-            if self.config['init_new_remotes'] and self.config.confirm('Do you want to create the repo on the remote?'):
+            if self.config['init_new_remotes'] and self.config.confirm(
+                'Do you want to create the repo on the remote?'
+            ):
                 if 'gitlab' in self.tags:
                     """
                     Requires user do something to load secrets:
@@ -1042,15 +1324,18 @@ class TemplateApplier:
                     export PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
                     """
                     from xcookie.vcs_remotes import GitlabRemote
+
                     vcs_remote = GitlabRemote(
                         proj_name=self.remote_info['repo_name'],
                         proj_group=self.remote_info['group'],
                         url=self.remote_info['host'],
-                        visibility=self.config['visibility'])
+                        visibility=self.config['visibility'],
+                    )
                     vcs_remote.auth()
                     vcs_remote.new_project()
                 elif 'github' in self.tags:
                     from xcookie.vcs_remotes import GithubRemote
+
                     vcs_remote = GithubRemote(self.remote_info['repo_name'])
                     vcs_remote.new_project()
                 else:
@@ -1107,7 +1392,9 @@ class TemplateApplier:
             stage_fpath.ensuredir()
         else:
             stage_fpath.parent.ensuredir()
-            dynamic = info.get('dynamic', '') or info.get('source', '') == 'dynamic'
+            dynamic = (
+                info.get('dynamic', '') or info.get('source', '') == 'dynamic'
+            )
             if dynamic:
                 dynamic_var = info.get('dynamic', '')
                 if dynamic_var == '':
@@ -1127,30 +1414,49 @@ class TemplateApplier:
                 in_fname = info.get('input_fname', path_name)
                 raw_fpath = self.template_dpath / in_fname
                 if not raw_fpath.exists():
-                    raise IOError(f'Template file: raw_fpath={raw_fpath} does not exist')
+                    raise IOError(
+                        f'Template file: raw_fpath={raw_fpath} does not exist'
+                    )
                 shutil.copy2(raw_fpath, stage_fpath)
 
                 self._apply_xcookie_directives(stage_fpath)
 
                 if info['template']:
-                    xdev.sedfile(stage_fpath, 'xcookie', self.repo_name, verbose=0)
-                    xdev.sedfile(stage_fpath, '<mod_name>', self.mod_name, verbose=0)
-                    xdev.sedfile(stage_fpath, '<rel_mod_dpath>', str(self.rel_mod_dpath), verbose=0)
+                    xdev.sedfile(
+                        stage_fpath, 'xcookie', self.repo_name, verbose=0
+                    )
+                    xdev.sedfile(
+                        stage_fpath, '<mod_name>', self.mod_name, verbose=0
+                    )
+                    xdev.sedfile(
+                        stage_fpath,
+                        '<rel_mod_dpath>',
+                        str(self.rel_mod_dpath),
+                        verbose=0,
+                    )
                     # FIXME: use configuration from pyproject.toml
-                    author = ub.cmd('git config --global user.name')['out'].strip()
-                    author_email = ub.cmd('git config --global user.email')['out'].strip()
+                    author = ub.cmd('git config --global user.name')[
+                        'out'
+                    ].strip()
+                    author_email = ub.cmd('git config --global user.email')[
+                        'out'
+                    ].strip()
                     xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
-                    xdev.sedfile(stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0)
+                    xdev.sedfile(
+                        stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0
+                    )
         return info
 
     def _apply_xcookie_directives(self, stage_fpath):
         text = stage_fpath.read_text()
         from xcookie.directive import DirectiveExtractor
+
         namespace = 'xcookie'
         commands = ['UNCOMMENT_IF', 'COMMENT_IF']
         extractor = DirectiveExtractor(namespace, commands)
 
         import re
+
         def comment_line(line):
             """
 
@@ -1243,6 +1549,7 @@ class TemplateApplier:
 
         if 1:
             import pandas as pd
+
             # print('self.staging_infos = {}'.format(ub.urepr(self.staging_infos, nl=1)))
             df = pd.DataFrame(self.staging_infos)
             print(df)
@@ -1268,7 +1575,10 @@ class TemplateApplier:
 
         if self.config['only_generate'] is not None:
             import kwutil
-            onlygen_pat = kwutil.MultiPattern.coerce(self.config['only_generate'])
+
+            onlygen_pat = kwutil.MultiPattern.coerce(
+                self.config['only_generate']
+            )
         else:
             onlygen_pat = None
 
@@ -1291,9 +1601,26 @@ class TemplateApplier:
                     stage_text = stage_fpath.read_text()
                     # TODO: add style when available
                     try:
-                        difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2, style=diff_style) + '...and more'
+                        difftext = (
+                            xdev.difftext(
+                                '',
+                                stage_text[:1000],
+                                colored=1,
+                                context_lines=2,
+                                style=diff_style,
+                            )
+                            + '...and more'
+                        )
                     except Exception:
-                        difftext = xdev.difftext('', stage_text[:1000], colored=1, context_lines=2) + '...and more'
+                        difftext = (
+                            xdev.difftext(
+                                '',
+                                stage_text[:1000],
+                                colored=1,
+                                context_lines=2,
+                            )
+                            + '...and more'
+                        )
                     print(f'<NEW FPATH={repo_fpath}>')
                     print(difftext)
                     print(f'<END FPATH={repo_fpath}>')
@@ -1307,13 +1634,19 @@ class TemplateApplier:
                     difftext = None
                 else:
                     try:
-                        difftext = xdev.difftext(repo_text, stage_text, colored=1,
-                                                 context_lines=1)
+                        difftext = xdev.difftext(
+                            repo_text, stage_text, colored=1, context_lines=1
+                        )
                     except Exception:
-                        difftext = xdev.difftext(repo_text, stage_text, colored=1,
-                                                 context_lines=1, style=diff_style,
-                                                 fromfile=repo_fpath,
-                                                 tofile=repo_fpath)
+                        difftext = xdev.difftext(
+                            repo_text,
+                            stage_text,
+                            colored=1,
+                            context_lines=1,
+                            style=diff_style,
+                            fromfile=repo_fpath,
+                            tofile=repo_fpath,
+                        )
                 if difftext:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:
@@ -1334,6 +1667,7 @@ class TemplateApplier:
 
             if 'x' in info.get('perms', ''):
                 import stat
+
                 if info['repo_fpath'].exists():
                     st = ub.Path(info['repo_fpath']).stat()
                     mode_want = st.st_mode | stat.S_IEXEC
@@ -1366,6 +1700,7 @@ class TemplateApplier:
 
     def refresh_docs(self):
         from xcookie.builders import docs
+
         docs_builder = docs.DocsBuilder(self.config)
 
         docs_dpath = docs_builder.docs_dpath
@@ -1374,7 +1709,12 @@ class TemplateApplier:
 
         ub.cmd(command, verbose=3, check=True, cwd=docs_dpath)
         if self.has_git:
-            ub.cmd(f'git add {docs_auto_outdir}/*.rst', verbose=3, check=True, cwd=docs_dpath)
+            ub.cmd(
+                f'git add {docs_auto_outdir}/*.rst',
+                verbose=3,
+                check=True,
+                cwd=docs_dpath,
+            )
             # ub.cmd('make html', verbose=3, check=True, cwd=docs_dpath)
 
     def rotate_secrets(self):
@@ -1394,8 +1734,10 @@ class TemplateApplier:
             raise Exception
 
         import cmd_queue
-        script = cmd_queue.Queue.create(cwd=self.repodir, backend='serial',
-                                        log=False)
+
+        script = cmd_queue.Queue.create(
+            cwd=self.repodir, backend='serial', log=False
+        )
         script.submit(f'source {setup_secrets_fpath}', log=False)
         script.sync().submit(f'{environ_export}', log=False)
         script.sync().submit('source $(secret_loader.sh)', log=False)
@@ -1421,7 +1763,7 @@ class TemplateApplier:
 
     def print_help_tips(self):
         text = ub.codeblock(
-            f'''
+            f"""
             Things that xcookie might eventually do that you should do for
             yourself for now:
 
@@ -1436,7 +1778,8 @@ class TemplateApplier:
                 # Then make sure you have typed = true in the [tool.xcookie]
                 # section of pyproject.toml and regenerate setup.py
 
-            ''')
+            """
+        )
         print(text)
 
     def build_readthedocs(self):
@@ -1445,6 +1788,7 @@ class TemplateApplier:
             str: templated code
         """
         from xcookie.builders import readthedocs
+
         return readthedocs.build_readthedocs(self)
 
     def build_setup(self):
@@ -1453,6 +1797,7 @@ class TemplateApplier:
             str: templated code
         """
         from xcookie.builders import setup
+
         return setup.build_setup(self)
 
     def build_pyproject(self):
@@ -1461,7 +1806,65 @@ class TemplateApplier:
             str: templated code
         """
         from xcookie.builders import pyproject
+
         return pyproject.build_pyproject(self)
+
+    def format_code(self, text, filename='snippet.py'):
+        """
+        Format Python code using the project's pyproject.toml ruff settings.
+
+        Reads ruff configuration from [tool.ruff] and [tool.ruff.format] sections
+        of the project's pyproject.toml and uses those as defaults for formatting.
+
+        Args:
+            text (str): Python code to format
+            filename (str): Virtual filename for the formatter (default: 'snippet.py')
+
+        Returns:
+            str: Formatted code
+        """
+        from xcookie.util.util_code_format import (
+            format_code as util_format_code,
+            make_backend,
+            RuffFormatConfig,
+        )
+
+        # Read the project's ruff configuration if available
+        disk_config = self.config._load_pyproject_config()
+        ruff_config_dict = disk_config.get('tool', {}).get('ruff', {})
+        ruff_format_dict = ruff_config_dict.get('format', {})
+
+        # Build RuffFormatConfig from the pyproject settings
+        ruff_config_kwargs = {}
+
+        # Map pyproject settings to RuffFormatConfig parameters
+        if 'quote-style' in ruff_format_dict:
+            ruff_config_kwargs['quote_style'] = ruff_format_dict['quote-style']
+        if 'indent-style' in ruff_format_dict:
+            ruff_config_kwargs['indent_style'] = ruff_format_dict['indent-style']
+        if 'skip-magic-trailing-comma' in ruff_format_dict:
+            ruff_config_kwargs['skip_magic_trailing_comma'] = ruff_format_dict[
+                'skip-magic-trailing-comma'
+            ]
+        if 'preview' in ruff_format_dict:
+            ruff_config_kwargs['preview'] = ruff_format_dict['preview']
+        if 'docstring-code-format' in ruff_format_dict:
+            ruff_config_kwargs['docstring_code_format'] = ruff_format_dict[
+                'docstring-code-format'
+            ]
+        if 'docstring-code-line-length' in ruff_format_dict:
+            ruff_config_kwargs['docstring_code_line_length'] = ruff_format_dict[
+                'docstring-code-line-length'
+            ]
+        if 'line-length' in ruff_config_dict:
+            ruff_config_kwargs['line_length'] = ruff_config_dict['line-length']
+
+        # Create the config and backend
+        ruff_config = RuffFormatConfig(**ruff_config_kwargs)
+        backend = make_backend('ruff', ruff_config=ruff_config)
+
+        # Format and return the code
+        return util_format_code(text, backend=backend, filename=filename)
 
     def _setup_pip_commands(self):
         # Hack for uv migration, to get some common variables.  need to clean
@@ -1470,25 +1873,31 @@ class TemplateApplier:
             # Does UV always prefer binary?
             self.PIP_INSTALL = 'python -m uv pip install'
             # self.PIP_INSTALL_PREFER_BINARY = 'python -m uv pip install'
-            self.PIP_INSTALL_PREFER_BINARY = 'python -m pip install --prefer-binary'
+            self.PIP_INSTALL_PREFER_BINARY = (
+                'python -m pip install --prefer-binary'
+            )
             self.UPDATE_PIP = 'python -m pip install pip uv -U'
             # The system uv seems to have an issue on CI
             self.SYSTEM_PIP_INSTALL = 'python -m pip install'
             # self.SYSTEM_PIP_INSTALL = 'python -m uv pip install --system --break-system-packages'
         else:
             self.PIP_INSTALL = 'python -m pip install'
-            self.PIP_INSTALL_PREFER_BINARY = 'python -m pip install --prefer-binary'
+            self.PIP_INSTALL_PREFER_BINARY = (
+                'python -m pip install --prefer-binary'
+            )
             self.UPDATE_PIP = 'python -m pip install pip -U'
             self.SYSTEM_PIP_INSTALL = 'python -m pip install'
 
     def build_github_actions(self):
         from xcookie.builders import github_actions
+
         self._setup_pip_commands()  # Do we need this here?
         text = github_actions.build_github_actions(self)
         return text
 
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci
+
         self._setup_pip_commands()  # Do we need this here?
         return gitlab_ci.build_gitlab_ci(self)
 
@@ -1512,24 +1921,29 @@ class TemplateApplier:
 
     def build_gitlab_rules(self):
         from xcookie.builders import gitlab_ci
+
         return gitlab_ci.build_gitlab_rules(self)
 
     def build_readme(self):
         from xcookie.builders import readme
+
         if not self.config['use_vcs']:
             return None
         return readme.build_readme(self)
 
     def build_docs_index(self):
         from xcookie.builders import docs
+
         return docs.build_docs_index(self)
 
     def build_docs_conf(self):
         from xcookie.builders import docs
+
         return docs.build_docs_conf(self)
 
     def build_docs_requirements(self):
         from xcookie.builders import docs
+
         return docs.build_docs_requirements(self)
 
     # TODO: generate better stub requirements based on common packages
@@ -1586,7 +2000,9 @@ class TemplateApplier:
         )
         return text
 
-    def _build_special_requirements(self, variant, version_defaults, header_lines):
+    def _build_special_requirements(
+        self, variant, version_defaults, header_lines
+    ):
         """
         Example:
             >>> from xcookie.main import *  # NOQA
@@ -1608,7 +2024,9 @@ class TemplateApplier:
             >>> print(chr(10) + 'gdal.txt')
             >>> print(self.build_gdal_requirements_txt())
         """
-        req_lines = ['# Generated dynamically via: ~/code/xcookie/xcookie/main.py::TemplateApplier._build_special_requirements']
+        req_lines = [
+            '# Generated dynamically via: ~/code/xcookie/xcookie/main.py::TemplateApplier._build_special_requirements'
+        ]
         req_lines.extend(header_lines)
         max_pyver = Version(self.config['max_python'] or '4.0')
         min_pyver = Version(self.config['min_python'])
@@ -1621,7 +2039,9 @@ class TemplateApplier:
             skip |= row['pyver_lt'] < min_pyver
             print(lt, ge, skip, min_pyver, max_pyver, row)
             if not skip:
-                req_lines.append(f"{variant}{row['version']} ; python_version < '{lt}' and python_version >= '{ge}'")
+                req_lines.append(
+                    f"{variant}{row['version']} ; python_version < '{lt}' and python_version >= '{ge}'"
+                )
         req_text = '\n'.join(req_lines)
         return req_text
 
@@ -1631,14 +2051,40 @@ class TemplateApplier:
             '# --prefer-binary',
         ]
         version_defaults = [
-            {'version': '>=4.10.0.84', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('4.0')},  # minimal for numpy 2.x
-            {'version': '>=4.5.5.64', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.13')},
-            {'version': '>=4.5.4.58', 'pyver_ge': Version('3.10'), 'pyver_lt': Version('3.11')},
-            {'version': '>=3.4.15.55', 'pyver_ge': Version('3.7'), 'pyver_lt': Version('3.10')},
-            {'version': '>=3.4.13.47', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.7')},
-            {'version': '>=3.4.2.16', 'pyver_ge': Version('2.7'), 'pyver_lt': Version('3.5')},
+            {
+                'version': '>=4.10.0.84',
+                'pyver_ge': Version('3.13'),
+                'pyver_lt': Version('4.0'),
+            },  # minimal for numpy 2.x
+            {
+                'version': '>=4.5.5.64',
+                'pyver_ge': Version('3.11'),
+                'pyver_lt': Version('3.13'),
+            },
+            {
+                'version': '>=4.5.4.58',
+                'pyver_ge': Version('3.10'),
+                'pyver_lt': Version('3.11'),
+            },
+            {
+                'version': '>=3.4.15.55',
+                'pyver_ge': Version('3.7'),
+                'pyver_lt': Version('3.10'),
+            },
+            {
+                'version': '>=3.4.13.47',
+                'pyver_ge': Version('3.6'),
+                'pyver_lt': Version('3.7'),
+            },
+            {
+                'version': '>=3.4.2.16',
+                'pyver_ge': Version('2.7'),
+                'pyver_lt': Version('3.5'),
+            },
         ]
-        return self._build_special_requirements(variant, version_defaults, header_lines)
+        return self._build_special_requirements(
+            variant, version_defaults, header_lines
+        )
 
     def build_cv2_headless_requirements_txt(self):
         variant = 'opencv-python-headless'
@@ -1655,20 +2101,43 @@ class TemplateApplier:
             '--find-links https://girder.github.io/large_image_wheels',
         ]
         version_defaults = [
-            {'version': '>=3.11.3', 'pyver_ge': Version('3.14'), 'pyver_lt': Version('4.0')},
-            {'version': '>=3.10.0', 'pyver_ge': Version('3.13'), 'pyver_lt': Version('3.14')},
-            {'version': '>=3.7.2', 'pyver_ge': Version('3.12'), 'pyver_lt': Version('3.13')},
-            {'version': '>=3.5.2', 'pyver_ge': Version('3.11'), 'pyver_lt': Version('3.12')},
-            {'version': '>=3.4.1,<=3.11.0', 'pyver_ge': Version('3.6'), 'pyver_lt': Version('3.11')},
+            {
+                'version': '>=3.11.3',
+                'pyver_ge': Version('3.14'),
+                'pyver_lt': Version('4.0'),
+            },
+            {
+                'version': '>=3.10.0',
+                'pyver_ge': Version('3.13'),
+                'pyver_lt': Version('3.14'),
+            },
+            {
+                'version': '>=3.7.2',
+                'pyver_ge': Version('3.12'),
+                'pyver_lt': Version('3.13'),
+            },
+            {
+                'version': '>=3.5.2',
+                'pyver_ge': Version('3.11'),
+                'pyver_lt': Version('3.12'),
+            },
+            {
+                'version': '>=3.4.1,<=3.11.0',
+                'pyver_ge': Version('3.6'),
+                'pyver_lt': Version('3.11'),
+            },
         ]
-        return self._build_special_requirements(variant, version_defaults, header_lines)
+        return self._build_special_requirements(
+            variant, version_defaults, header_lines
+        )
 
     def build_run_doctests(self):
         return ub.codeblock(
-            f'''
+            f"""
             #!/usr/bin/env bash
             xdoctest {self.rel_mod_dpath} --style={self.config['xdoctest_style']} all "$@"
-            ''')
+            """
+        )
 
     def lut(self, info):
         """
@@ -1681,7 +2150,7 @@ class TemplateApplier:
         fname = ub.Path(info['fname']).name
         if fname == 'CHANGELOG.md':
             return ub.codeblock(
-                '''
+                """
                 # Changelog
                 We [keep a changelog](https://keepachangelog.com/en/1.0.0/).
                 We aim to adhere to [semantic versioning](https://semver.org/spec/v2.0.0.html).
@@ -1690,18 +2159,21 @@ class TemplateApplier:
 
                 ### Added
                 * Initial version
-                ''')
+                """
+            )
         elif fname == 'test_import.py':
             return ub.codeblock(
-                f'''
+                f"""
                 def test_import():
                     import {self.config['mod_name']}
-                ''')
+                """
+            )
         elif fname == '__main__.py':
             return ub.codeblock(
-                '''
+                """
                 #!/usr/bin/env python
-                ''')
+                """
+            )
         elif fname == '__init__.py':
             return ub.codeblock(
                 f'''
@@ -1716,7 +2188,8 @@ class TemplateApplier:
                 __mkinit__ = """
                 mkinit {info['repo_fpath']}
                 """
-                ''')
+                '''
+            )
         else:
             raise KeyError(fname)
 
@@ -1773,10 +2246,12 @@ class TemplateApplier:
 
 
 def main():
-    XCookieConfig.main(argv={
-        'strict': True,
-        'autocomplete': True,
-    })
+    XCookieConfig.main(
+        argv={
+            'strict': True,
+            'autocomplete': True,
+        }
+    )
 
 
 def _parse_remote_url(url):
@@ -1853,6 +2328,7 @@ class GitURL(str):
 
     def _parse(self):
         import parse
+
         parse.Parser('ssh://{user}')
 
     @property
@@ -1891,7 +2367,7 @@ class GitURL(str):
             elif url.endswith('/.git'):
                 # An ssh protocol to an explicit directory
                 host, rest = url.split(':', 1)
-                parts = rest.rsplit('/',  2)
+                parts = rest.rsplit('/', 2)
                 info['host'] = host
                 info['group'] = parts[0]
                 # info['group'] = ''
@@ -1911,7 +2387,14 @@ class GitURL(str):
 
     def to_git(self):
         info = self.info
-        new_url = 'git@' + info['host']  + ':' + info['group'] + '/' + info['repo_name']
+        new_url = (
+            'git@'
+            + info['host']
+            + ':'
+            + info['group']
+            + '/'
+            + info['repo_name']
+        )
         return self.__class__(new_url)
 
     def to_ssh(self):
@@ -1921,12 +2404,27 @@ class GitURL(str):
             user_part = ''
         else:
             user_part = user + '@'
-        new_url = 'ssh://' + user_part + info['host']  + '/' + info['group'] + '/' + info['repo_name']
+        new_url = (
+            'ssh://'
+            + user_part
+            + info['host']
+            + '/'
+            + info['group']
+            + '/'
+            + info['repo_name']
+        )
         return self.__class__(new_url)
 
     def to_https(self):
         info = self.info
-        new_url = 'https://' + info['host']  + '/' + info['group'] + '/' + info['repo_name']
+        new_url = (
+            'https://'
+            + info['host']
+            + '/'
+            + info['group']
+            + '/'
+            + info['repo_name']
+        )
         return self.__class__(new_url)
 
 

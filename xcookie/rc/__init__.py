@@ -12,6 +12,7 @@ def resource_fpath(fname):
     """
     # https://importlib-resources.readthedocs.io/en/latest/using.html#migrating-from-legacy
     import ubelt as ub
+
     try:
         rc_dpath = ub.Path(importlib_resources.files('xcookie.rc'))
     except Exception:

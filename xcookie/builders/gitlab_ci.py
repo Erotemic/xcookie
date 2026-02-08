@@ -65,7 +65,8 @@ def build_gitlab_rules(self):
                 - if: '$CI_PROJECT_PATH == "{group}/{repo_name}"'
                   when: on_success
                 - when: never
-        ''')
+        '''
+    )
     return text
 
 
@@ -76,8 +77,10 @@ def build_gitlab_rules(self):
 
 def workflow_section():
     from xcookie.util_yaml import Yaml
-    return Yaml.loads(ub.codeblock(
-        '''
+
+    return Yaml.loads(
+        ub.codeblock(
+            """
         rules:
           # Allow merge request pipelines (from main repo and forks)
           - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -87,7 +90,9 @@ def workflow_section():
 
           # Allow branch pipelines for release branch
           - if: '$CI_COMMIT_BRANCH == "release"'
-        '''))
+        """
+        )
+    )
 
 
 def make_purepy_ci_jobs(self):
@@ -124,8 +129,10 @@ def make_purepy_ci_jobs(self):
     body['stages'] = CommentedSeq(stages)
     body.yaml_add_eol_comment('stages', 'TEMPLATE1,c 1')
 
-    common_template = ub.udict(Yaml.loads(ub.codeblock(
-        '''
+    common_template = ub.udict(
+        Yaml.loads(
+            ub.codeblock(
+                """
         tags:
             # Tags define which runners will accept which jobs
             - docker
@@ -146,7 +153,10 @@ def make_purepy_ci_jobs(self):
             paths:
                 - .cache/pip
                 - .cache/uv
-        ''')))
+        """
+            )
+        )
+    )
 
     common_template = CommentedMap(common_template)
     common_template.yaml_set_anchor('common_template')
@@ -203,10 +213,8 @@ def make_purepy_ci_jobs(self):
 
     common_test_template = {
         'stage': 'test',
-
         # Coverage is a regex that will parse the coverage from the test stdout
         'coverage': '/TOTAL.+ ([0-9]{1,3}%)/',
-
         # Skip tests on the release branch, as these were covered in the MR and
         # main. This speeds up deployment and deployment debugging.
         'except': {'refs': ['release']},
@@ -218,7 +226,7 @@ def make_purepy_ci_jobs(self):
     body['.common_test_template'] = common_test_template
 
     setup_venv_template = Yaml.CodeBlock(
-        f'''
+        f"""
         # Setup the correct version of python (which should be the same as this instance)
         python --version  # Print out python version for debugging
         export PYVER=$(python -c "import sys; print(''.join(map(str, sys.version_info[0:2])))")
@@ -229,7 +237,8 @@ def make_purepy_ci_jobs(self):
         {self.PIP_INSTALL} setuptools -U
         {self.PIP_INSTALL} pygments
         python --version  # Print out python version for debugging
-        ''')
+        """
+    )
 
     test_templates = {}
     loose_cv2 = ''
@@ -237,12 +246,15 @@ def make_purepy_ci_jobs(self):
     if 'cv2' in self.tags:
         loose_cv2 = ',headless'
         strict_cv2 = ',headless-strict'
-    all_install_extras = ub.udict({
-        'minimal-loose'  : 'tests' + loose_cv2,
-        'full-loose'     : 'tests,optional' + loose_cv2,
-        'minimal-strict' : 'tests-strict,runtime-strict' + strict_cv2,
-        'full-strict'    : 'tests-strict,runtime-strict,optional-strict' + strict_cv2,
-    })
+    all_install_extras = ub.udict(
+        {
+            'minimal-loose': 'tests' + loose_cv2,
+            'full-loose': 'tests,optional' + loose_cv2,
+            'minimal-strict': 'tests-strict,runtime-strict' + strict_cv2,
+            'full-strict': 'tests-strict,runtime-strict,optional-strict'
+            + strict_cv2,
+        }
+    )
 
     install_extras = ub.udict(all_install_extras) & self.config.test_variants
     for extra_key, extra in install_extras.items():
@@ -261,8 +273,11 @@ def make_purepy_ci_jobs(self):
         else:
             special_install_lines = []
         workspace_dname = 'sandbox'
-        install_and_test_wheel_parts = common_ci.make_install_and_test_wheel_parts(
-            self, wheelhouse_dpath, special_install_lines, workspace_dname)
+        install_and_test_wheel_parts = (
+            common_ci.make_install_and_test_wheel_parts(
+                self, wheelhouse_dpath, special_install_lines, workspace_dname
+            )
+        )
         test_steps = [
             f'export INSTALL_EXTRAS="{extra}"',
         ]
@@ -315,7 +330,7 @@ def make_purepy_ci_jobs(self):
                     'image': main_image,
                     'needs': [
                         build_name,
-                    ]
+                    ],
                 }
                 test_job = CommentedMap(test_job)
                 test_job.add_yaml_merge([(0, common_test_template)])
@@ -330,7 +345,9 @@ def make_purepy_ci_jobs(self):
         for pyver in self.config['ci_cpython_versions']:
             cpver = 'cp' + pyver.replace('.', '')
             if cpver in KNOWN_CPYTHON_DOCKER_IMAGES:
-                swenv_key = f'{cpver}-{opsys}-{arch}'  # software environment key
+                swenv_key = (
+                    f'{cpver}-{opsys}-{arch}'  # software environment key
+                )
                 build_name = f'build/{swenv_key}'
                 build_names.append(build_name)
 
@@ -347,7 +364,7 @@ def make_purepy_ci_jobs(self):
                         'image': KNOWN_CPYTHON_DOCKER_IMAGES[cpver],
                         'needs': [
                             build_name,
-                        ]
+                        ],
                     }
                     test_job = CommentedMap(test_job)
                     test_job.add_yaml_merge([(0, common_test_template)])
@@ -359,13 +376,19 @@ def make_purepy_ci_jobs(self):
         body['lint'] = lint_job
 
     if enable_gpg:
-        gpgsign_job = build_gpg_job(self, common_template, main_image, wheelhouse_dpath)
-        gpgsign_job['needs'] = [{'job': build_name, 'artifacts': True} for build_name in build_names]
+        gpgsign_job = build_gpg_job(
+            self, common_template, main_image, wheelhouse_dpath
+        )
+        gpgsign_job['needs'] = [
+            {'job': build_name, 'artifacts': True} for build_name in build_names
+        ]
         body['gpgsign/wheels'] = gpgsign_job
 
     deploy = self.config['deploy']
     if deploy:
-        deploy_job = build_deploy_job(self, common_template, main_image, wheelhouse_dpath)
+        deploy_job = build_deploy_job(
+            self, common_template, main_image, wheelhouse_dpath
+        )
         body['stages'].append('deploy')
         body['deploy/wheels'] = deploy_job
 
@@ -384,9 +407,9 @@ def make_purepy_ci_jobs(self):
     body_text = Yaml.dumps(body)
 
     header = ub.codeblock(
-        '''
+        """
         # Autogenerated by ~/code/xcookie/xcookie/builders/gitlab_ci.py
-        '''
+        """
     )
     footer = '# end'
     text = header + '\n\n' + body_text + '\n\n' + footer
@@ -410,8 +433,10 @@ def make_binpy_ci_jobs(self):
         stages.append('gpgsign')
     body['stages'] = CommentedSeq(stages)
 
-    common_template = ub.udict(Yaml.loads(ub.codeblock(
-        '''
+    common_template = ub.udict(
+        Yaml.loads(
+            ub.codeblock(
+                """
         tags:
             - docker
             - linux-x86_64
@@ -425,7 +450,10 @@ def make_binpy_ci_jobs(self):
             paths:
                 - .cache/pip
                 - .cache/uv
-        ''')))
+        """
+            )
+        )
+    )
 
     common_template = CommentedMap(common_template)
     common_template.yaml_set_anchor('common_template')
@@ -441,8 +469,9 @@ def make_binpy_ci_jobs(self):
     # is a more efficient way to use podman here.
     podman_image = 'gitlab.kitware.com:4567/computer-vision/ci-docker/podman:v4.9.0-uv0.8.8-python3.12-cuda12.4.1-cudnn-devel-ubuntu22.04'
 
-    cibuildwheel_template = Yaml.loads(ub.codeblock(
-        fr'''
+    cibuildwheel_template = Yaml.loads(
+        ub.codeblock(
+            rf"""
         stage: build
         tags:
             - linux-x86_64
@@ -503,7 +532,9 @@ def make_binpy_ci_jobs(self):
         artifacts:
             paths:
                 - wheelhouse/
-        '''))
+        """
+        )
+    )
 
     cibuildwheel_template = CommentedMap(cibuildwheel_template)
     cibuildwheel_template.yaml_set_anchor('cibuildwheel_template')
@@ -520,7 +551,7 @@ def make_binpy_ci_jobs(self):
     body['.common_test_template'] = common_test_template
 
     setup_venv_template = Yaml.CodeBlock(
-        f'''
+        f"""
         # Setup the correct version of python (which should be the same as this instance)
         python --version  # Print out python version for debugging
         export PYVER=$(python -c "import sys; print(''.join(map(str, sys.version_info[0:2])))")
@@ -531,7 +562,8 @@ def make_binpy_ci_jobs(self):
         {self.PIP_INSTALL} setuptools -U
         {self.PIP_INSTALL} pygments
         python --version  # Print out python version for debugging
-        ''')
+        """
+    )
 
     test_templates = {}
     loose_cv2 = ''
@@ -539,12 +571,15 @@ def make_binpy_ci_jobs(self):
     if 'cv2' in self.tags:
         loose_cv2 = ',headless'
         strict_cv2 = ',headless-strict'
-    all_install_extras = ub.udict({
-        'minimal-loose': 'tests' + loose_cv2,
-        'full-loose': 'tests,optional' + loose_cv2,
-        'minimal-strict': 'tests-strict,runtime-strict' + strict_cv2,
-        'full-strict': 'tests-strict,runtime-strict,optional-strict' + strict_cv2,
-    })
+    all_install_extras = ub.udict(
+        {
+            'minimal-loose': 'tests' + loose_cv2,
+            'full-loose': 'tests,optional' + loose_cv2,
+            'minimal-strict': 'tests-strict,runtime-strict' + strict_cv2,
+            'full-strict': 'tests-strict,runtime-strict,optional-strict'
+            + strict_cv2,
+        }
+    )
 
     install_extras = ub.udict(all_install_extras) & self.config.test_variants
     for extra_key, extra in install_extras.items():
@@ -557,12 +592,17 @@ def make_binpy_ci_jobs(self):
                     f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal-strict.txt',
                 ]
             else:
-                special_install_lines = [f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt']
+                special_install_lines = [
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
+                ]
         else:
             special_install_lines = []
         workspace_dname = 'sandbox'
-        install_and_test_wheel_parts = common_ci.make_install_and_test_wheel_parts(
-            self, wheelhouse_dpath, special_install_lines, workspace_dname)
+        install_and_test_wheel_parts = (
+            common_ci.make_install_and_test_wheel_parts(
+                self, wheelhouse_dpath, special_install_lines, workspace_dname
+            )
+        )
         test_steps = [f'export INSTALL_EXTRAS="{extra}"']
         test_steps += install_and_test_wheel_parts['install_wheel_commands']
         test_steps += install_and_test_wheel_parts['test_wheel_commands']
@@ -595,19 +635,23 @@ def make_binpy_ci_jobs(self):
 
         # fixme: might not be a robust check, e.g. python could release, but
         # packages might not have official wheels yet.
-        needs_prerelease = ('-rc' in image)
+        needs_prerelease = '-rc' in image
         if needs_prerelease:
             if self.config['use_uv']:
                 # TODO: determine if we need torch prereleases or what else
-                extra_environs.update({
-                    'UV_PRERELEASE': 'allow',
-                    'UV_INDEX_STRATEGY': 'unsafe-best-match',
-                    'UV_INDEX': ' '.join([
-                        'https://pypi.org/simple',
-                        'https://download.pytorch.org/whl/nightly/cpu',
-                        # 'https://download.pytorch.org/whl/nightly/cu126',
-                    ])
-                })
+                extra_environs.update(
+                    {
+                        'UV_PRERELEASE': 'allow',
+                        'UV_INDEX_STRATEGY': 'unsafe-best-match',
+                        'UV_INDEX': ' '.join(
+                            [
+                                'https://pypi.org/simple',
+                                'https://download.pytorch.org/whl/nightly/cpu',
+                                # 'https://download.pytorch.org/whl/nightly/cu126',
+                            ]
+                        ),
+                    }
+                )
 
         swenv_key = f'{cpver}-{opsys}-{arch}'
         build_name = f'build/{swenv_key}'
@@ -636,23 +680,29 @@ def make_binpy_ci_jobs(self):
     body.update(jobs)
 
     if enable_gpg:
-        gpgsign_job = build_gpg_job(self, common_template, main_image, wheelhouse_dpath)
-        gpgsign_job['needs'] = [{'job': build_name, 'artifacts': True} for build_name in build_names]
+        gpgsign_job = build_gpg_job(
+            self, common_template, main_image, wheelhouse_dpath
+        )
+        gpgsign_job['needs'] = [
+            {'job': build_name, 'artifacts': True} for build_name in build_names
+        ]
         body['gpgsign/wheels'] = gpgsign_job
 
     deploy = self.config['deploy']
     if deploy:
         body['stages'].append('deploy')
-        deploy_job = build_deploy_job(self, common_template, main_image, wheelhouse_dpath)
+        deploy_job = build_deploy_job(
+            self, common_template, main_image, wheelhouse_dpath
+        )
         body['deploy/wheels'] = deploy_job
 
     body_text = Yaml.dumps(body)
     body = Yaml.loads(body_text)
 
     header = ub.codeblock(
-        '''
+        """
         # Autogenerated by ~/code/xcookie/xcookie/builders/gitlab_ci.py
-        '''
+        """
     )
     footer = '# end'
     text = header + '\n\n' + body_text + '\n\n' + footer
@@ -662,28 +712,41 @@ def make_binpy_ci_jobs(self):
 def build_lint_job(self, common_template, deploy_image):
     from xcookie.util_yaml import Yaml
     from ruamel.yaml.comments import CommentedMap
+
     lint_job = {}
-    lint_job.update(ub.udict(Yaml.loads(ub.codeblock(
-        f'''
+    lint_job.update(
+        ub.udict(
+            Yaml.loads(
+                ub.codeblock(
+                    f"""
         image:
             {deploy_image}
 
         stage:
             lint
-        '''))))
+        """
+                )
+            )
+        )
+    )
 
     # TODO: add mypy if typed.
     # e.g. mypy_check_commands = common_ci.make_mypy_check_parts(self)
     # TODO: only install linting requirements if the file exists.
-    lint_job.update(Yaml.loads(ub.codeblock(
-        f'''
+    lint_job.update(
+        Yaml.loads(
+            ub.codeblock(
+                f"""
         before_script:
             - df -h
         script:
             - {self.UPDATE_PIP}
             - {self.PIP_INSTALL} -r requirements/linting.txt
             - ./run_linter.sh
-        ''')))
+        """
+            )
+        )
+    )
 
     lint_job = CommentedMap(lint_job)
     lint_job.add_yaml_merge([(0, common_template)])
@@ -711,8 +774,11 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
     artifact_pattern = ' '.join(_artifact_patterns)
 
     gpgsign_job = {}
-    gpgsign_job.update(ub.udict(Yaml.loads(ub.codeblock(
-        f'''
+    gpgsign_job.update(
+        ub.udict(
+            Yaml.loads(
+                ub.codeblock(
+                    f"""
         image:
             {deploy_image}
 
@@ -732,12 +798,20 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
                 - master
                 - main
                 - release
-        '''))))
+        """
+                )
+            )
+        )
+    )
 
-    gpgsign_job.update(Yaml.loads(ub.codeblock(
-        '''
+    gpgsign_job.update(
+        Yaml.loads(
+            ub.codeblock(
+                """
         script:
-            - ls ''' + wheelhouse_dpath + '''
+            - ls """
+                + wheelhouse_dpath
+                + """
             - export GPG_EXECUTABLE=gpg
             - export GPG_KEYID=$(cat dev/public_gpg_key)
             - echo "GPG_KEYID = $GPG_KEYID"
@@ -753,11 +827,16 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
             - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
             - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
             - GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
-        ''')))
+        """
+            )
+        )
+    )
     gpgsign_job['script'].append(
         Yaml.CodeBlock(
-            '''
-            WHEEL_PATHS=(''' + dist_pattern + ''')
+            """
+            WHEEL_PATHS=("""
+            + dist_pattern
+            + """)
             WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
             echo "$WHEEL_PATHS_STR"
             for WHEEL_PATH in "${WHEEL_PATHS[@]}"
@@ -768,7 +847,7 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
                 $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH  || echo "hack, the first run of gpg very fails"
                 $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH
             done
-            '''
+            """
         )
     )
     gpgsign_job['script'].append(f'ls {wheelhouse_dpath}')
@@ -782,7 +861,9 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
         # created
         gpgsign_job['artifacts']['paths'].append(f'{wheelhouse_dpath}/*.ots')
         gpgsign_job['script'].append(f'{self.UPDATE_PIP}')
-        gpgsign_job['script'].append(f'{self.PIP_INSTALL} opentimestamps-client')
+        gpgsign_job['script'].append(
+            f'{self.PIP_INSTALL} opentimestamps-client'
+        )
         gpgsign_job['script'].append(f'ots stamp {artifact_pattern}')
     return gpgsign_job
 
@@ -793,8 +874,11 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
     from xcookie.util_yaml import Yaml
 
     deploy_job = {}
-    deploy_job.update(ub.udict(Yaml.loads(ub.codeblock(
-        f'''
+    deploy_job.update(
+        ub.udict(
+            Yaml.loads(
+                ub.codeblock(
+                    f"""
         image:
             {deploy_image}
 
@@ -804,7 +888,11 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
         only:
             refs:
                 - release
-        '''))))
+        """
+                )
+            )
+        )
+    )
     deploy_script = [
         f'{self.UPDATE_PIP}',
         f'{self.PIP_INSTALL} pyopenssl ndg-httpsclient pyasn1 requests[security] setuptools twine -U',
@@ -820,9 +908,11 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
     if self.config['deploy_pypi']:
         deploy_script += [
             Yaml.CodeBlock(
-                '''
+                """
                 set -e
-                WHEEL_PATHS=(''' + dist_pattern + ''')
+                WHEEL_PATHS=("""
+                + dist_pattern
+                + """)
                 WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
                 source dev/secrets_configuration.sh
                 TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}
@@ -833,13 +923,14 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                     twine check $WHEEL_PATH
                     twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH || echo "upload already exists"
                 done
-                ''')
+                """
+            )
         ]
 
     if self.config['deploy_tags']:
         deploy_script += [
             Yaml.CodeBlock(
-                r'''
+                r"""
                 set -e
                 # Have the server git-tag the release and push the tags
                 export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
@@ -865,14 +956,15 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                     git tag $TAG_NAME -m "tarball tag $PROJECT_VERSION"
                     git push --tags "https://git-push-token:${PUSH_TOKEN}@${URL_HOST}"
                 fi
-                ''')
+                """
+            )
         ]
 
     if self.config['deploy_artifacts']:
         # Add artifacts to the package registry
         deploy_script += [
             Yaml.CodeBlock(
-                fr'''
+                rf'''
                 set -e
                 # https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
                 echo "CI_PROJECT_ID=$CI_PROJECT_ID"
@@ -906,7 +998,8 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                     PACKAGE_ARTIFACT_ARRAY+=("$PACKAGE_URL")
                 done
 
-                ''')
+                '''
+            )
         ]
 
         # Create a gitlab release, but only if deploy artifacts AND tags are
@@ -957,7 +1050,7 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                 __note__
             deploy_script += [
                 Yaml.CodeBlock(
-                    r'''
+                    r"""
                     export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
                     echo "PROJECT_VERSION=$PROJECT_VERSION"
                     TAG_NAME="v$PROJECT_VERSION"
@@ -996,7 +1089,8 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                         --data "$RELEASE_DATA_JSON" \
                         --request POST \
                         "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
-                    ''')
+                    """
+                )
             ]
 
     deploy_job['script'] = deploy_script

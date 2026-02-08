@@ -22,6 +22,7 @@ an existing path it reads it. This does not happen by default in longer YAML
 text inputs, but the parser does respect a !include constructor, which does let
 you make nested configs by pointing to other configs.
 """
+
 import io
 import os
 import ubelt as ub
@@ -31,14 +32,15 @@ NEW_RUAMEL = 1
 
 
 class _YamlRepresenter:
-
     @staticmethod
     def str_presenter(dumper, data):
         # https://stackoverflow.com/questions/8640959/how-can-i-control-what-scalar-form-pyyaml-uses-for-my-data
         if len(data.splitlines()) > 1 or '\n' in data:
             text_list = [line.rstrip() for line in data.splitlines()]
             fixed_data = '\n'.join(text_list)
-            return dumper.represent_scalar('tag:yaml.org,2002:str', fixed_data, style='|')
+            return dumper.represent_scalar(
+                'tag:yaml.org,2002:str', fixed_data, style='|'
+            )
         return dumper.represent_scalar('tag:yaml.org,2002:str', data)
 
 
@@ -53,6 +55,7 @@ def _custom_ruaml_loader():
         https://stackoverflow.com/questions/76870413/using-a-custom-loader-with-ruamel-yaml-0-15-0
     """
     import ruamel.yaml
+
     Loader = ruamel.yaml.RoundTripLoader
 
     def _construct_include_tag(self, node):
@@ -62,10 +65,13 @@ def _custom_ruaml_loader():
         else:
             external_fpath = ub.Path(node.value)
             if not external_fpath.exists():
-                raise IOError(f'Included external yaml file {external_fpath} '
-                              'does not exist')
+                raise IOError(
+                    f'Included external yaml file {external_fpath} '
+                    'does not exist'
+                )
             return Yaml.load(node.value)
-    Loader.add_constructor("!include", _construct_include_tag)
+
+    Loader.add_constructor('!include', _construct_include_tag)
     return Loader
 
 
@@ -76,6 +82,7 @@ def _custom_ruaml_dumper():
         https://stackoverflow.com/questions/59635900/ruamel-yaml-custom-commentedmapping-for-custom-tags
     """
     import ruamel.yaml
+
     Dumper = ruamel.yaml.RoundTripDumper
     Dumper.add_representer(str, _YamlRepresenter.str_presenter)
     Dumper.add_representer(ub.udict, Dumper.represent_dict)
@@ -88,6 +95,7 @@ def _custom_pyaml_dumper():
 
     class Dumper(yaml.Dumper):
         pass
+
     # dumper = yaml.dumper.Dumper
     # dumper = yaml.SafeDumper(sort_keys=False)
     # yaml.dump(data, s, Dumper=yaml.SafeDumper, sort_keys=False, width=float("inf"))
@@ -131,17 +139,21 @@ def _custom_new_ruaml_yaml_obj(version=None):
 
     # make a new instance, although you could get the YAML
     # instance from the constructor argument
-    class CustomConstructor(ruamel.yaml.constructor.RoundTripConstructor):
-        ...
+    class CustomConstructor(ruamel.yaml.constructor.RoundTripConstructor): ...
 
-    class CustomRepresenter(ruamel.yaml.representer.RoundTripRepresenter):
-        ...
+    class CustomRepresenter(ruamel.yaml.representer.RoundTripRepresenter): ...
 
     CustomRepresenter.add_representer(str, _YamlRepresenter.str_presenter)
-    CustomRepresenter.add_representer(ub.udict, CustomRepresenter.represent_dict)
+    CustomRepresenter.add_representer(
+        ub.udict, CustomRepresenter.represent_dict
+    )
     CustomRepresenter.add_representer(Counter, CustomRepresenter.represent_dict)
-    CustomRepresenter.add_representer(OrderedDict, CustomRepresenter.represent_dict)
-    CustomRepresenter.add_representer(defaultdict, CustomRepresenter.represent_dict)
+    CustomRepresenter.add_representer(
+        OrderedDict, CustomRepresenter.represent_dict
+    )
+    CustomRepresenter.add_representer(
+        defaultdict, CustomRepresenter.represent_dict
+    )
 
     def _construct_include_tag(self, node):
         print(f'node={node}')
@@ -152,14 +164,17 @@ def _custom_new_ruaml_yaml_obj(version=None):
         else:
             external_fpath = ub.Path(value)
             if not external_fpath.exists():
-                raise IOError(f'Included external yaml file {external_fpath} '
-                              'does not exist')
+                raise IOError(
+                    f'Included external yaml file {external_fpath} '
+                    'does not exist'
+                )
             # Not sure why we can't recurse here...
             # yaml_obj
             # print(f'yaml_obj={yaml_obj}')
             # import xdev
             # xdev.embed()
             return Yaml.load(value)
+
     # Loader = ruamel.yaml.RoundTripLoader
     # Loader.add_constructor("!include", _construct_include_tag)
 
@@ -237,14 +252,20 @@ class Yaml:
                 yaml_obj.dump(data, file)
             else:
                 import ruamel.yaml
+
                 Dumper = _custom_ruaml_dumper()
-                ruamel.yaml.round_trip_dump(data, file, Dumper=Dumper, width=float("inf"))
+                ruamel.yaml.round_trip_dump(
+                    data, file, Dumper=Dumper, width=float('inf')
+                )
         elif backend == 'pyyaml':
             if version is not None:
                 raise NotImplementedError('pyyaml does not support version yet, use ruamel backend')
             import yaml
+
             Dumper = _custom_pyaml_dumper()
-            yaml.dump(data, file, Dumper=Dumper, sort_keys=False, width=float("inf"))
+            yaml.dump(
+                data, file, Dumper=Dumper, sort_keys=False, width=float('inf')
+            )
         else:
             raise KeyError(backend)
         text = file.getvalue()
@@ -288,6 +309,7 @@ class Yaml:
         else:
             if backend == 'ruamel':
                 import ruamel.yaml  # NOQA
+
                 # TODO: seems like there will be a deprecation
                 # from ruamel.yaml import YAML
                 if NEW_RUAMEL:
@@ -297,12 +319,15 @@ class Yaml:
                     # yaml = YAML(typ='unsafe', pure=True)
                     # data = yaml.load(file, Loader=Loader, preserve_quotes=True)
                     Loader = _custom_ruaml_loader()
-                    data = ruamel.yaml.load(file, Loader=Loader, preserve_quotes=True)
+                    data = ruamel.yaml.load(
+                        file, Loader=Loader, preserve_quotes=True
+                    )
                     # data = ruamel.yaml.load(file, Loader=ruamel.yaml.RoundTripLoader, preserve_quotes=True)
             elif backend == 'pyyaml':
                 if version is not None:
                     raise NotImplementedError('pyyaml does not support version yet, use ruamel backend')
                 import yaml
+
                 # data = yaml.load(file, Loader=yaml.SafeLoader)
                 data = yaml.load(file, Loader=yaml.Loader)
             else:
@@ -345,6 +370,7 @@ class Yaml:
         file = io.StringIO(text)
         if backend == 'ruamel':
             import ruamel.yaml  # NOQA
+
             try:
                 data = Yaml.load(file, backend=backend, version=version)
             except ruamel.yaml.parser.ParserError as ex_:
@@ -352,6 +378,7 @@ class Yaml:
                 print(f'YAML ERROR: {ex!r}')
                 try:
                     from xdoctest.utils import add_line_numbers, highlight_code
+
                     lines = text.split('\n')
                     error_line = ex.context_mark.line
                     context_before = 3
@@ -359,7 +386,9 @@ class Yaml:
                     start_line = error_line - context_before
                     stop_line = error_line + context_after
                     show_lines = lines[start_line:stop_line]
-                    show_lines = highlight_code('\n'.join(show_lines), 'YAML').split('\n')
+                    show_lines = highlight_code(
+                        '\n'.join(show_lines), 'YAML'
+                    ).split('\n')
                     lines = add_line_numbers(show_lines, start=start_line + 1)
                     print(f'ex.context_mark.line={ex.context_mark.line + 1}')
                     print(f'ex.context_mark.column={ex.context_mark.column}')
@@ -374,7 +403,9 @@ class Yaml:
         return data
 
     @staticmethod
-    def coerce(data, backend='ruamel', path_policy='existing_file_with_extension'):
+    def coerce(
+        data, backend='ruamel', path_policy='existing_file_with_extension'
+    ):
         """
         Attempt to convert input into a parsed yaml / json data structure.
         If the data looks like a path, it tries to load and parse file contents.
@@ -520,6 +551,7 @@ class Yaml:
             .. [SO56937691] https://stackoverflow.com/questions/56937691/making-yaml-ruamel-yaml-always-dump-lists-inline
         """
         import ruamel.yaml
+
         ret = ruamel.yaml.comments.CommentedSeq(items)
         ret.fa.set_flow_style()
         return ret
@@ -541,12 +573,14 @@ class Yaml:
             >>> print(Yaml.dumps(data))
         """
         import ruamel.yaml
+
         ret = ruamel.yaml.comments.CommentedMap(data)
         return ret
 
     @staticmethod
     def CodeBlock(text):
         import ruamel.yaml
+
         return ruamel.yaml.scalarstring.LiteralScalarString(ub.codeblock(text))
 
 
@@ -557,12 +591,19 @@ def _dev():
     from xcookie import rc
     import ubelt as ub
     import yaml
+
     fpath = rc.resource_fpath('gitlab-ci.purepy.yml.in')
     data = yaml.load(open(fpath, 'r'), yaml.SafeLoader)
     print('data = {}'.format(ub.urepr(data, nl=-1)))
     from xcookie.util_yaml import Yaml
+
     print(Yaml.dumps(data))
 
     import ruamel.yaml
-    data = ruamel.yaml.load(open(fpath, 'r'), Loader=ruamel.yaml.RoundTripLoader, preserve_quotes=True)
+
+    data = ruamel.yaml.load(
+        open(fpath, 'r'),
+        Loader=ruamel.yaml.RoundTripLoader,
+        preserve_quotes=True,
+    )
     print(ruamel.yaml.round_trip_dump(data, Dumper=ruamel.yaml.RoundTripDumper))
