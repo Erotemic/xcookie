@@ -842,6 +842,9 @@ class TemplateApplier:
             'type': 'unknown'
         }
 
+        if isinstance(self.config.url, str) and self.config.url.lower() in {'none', 'null'}:
+            self.config.url = None
+
         if self.config.url is None:
             # if 'github' not in tags and 'gitlab' not in tags:
             # We can infer this if the repo already exists.
