@@ -35,10 +35,15 @@ def test_use_setup_py_false_generates_pep621(tmp_path):
     project_block = pyproject_data['project']
     assert project_block['name'] == config['pkg_name']
     assert 'dependencies' in project_block['dynamic']
-    assert pyproject_data['build-system']['build-backend'] == 'setuptools.build_meta'
+    assert (
+        pyproject_data['build-system']['build-backend']
+        == 'setuptools.build_meta'
+    )
 
     setuptools_dynamic = pyproject_data['tool']['setuptools']['dynamic']
-    assert setuptools_dynamic['dependencies']['file'] == ['requirements/runtime.txt']
+    assert setuptools_dynamic['dependencies']['file'] == [
+        'requirements/runtime.txt'
+    ]
     assert 'tests' in setuptools_dynamic['optional-dependencies']
 
     package_data = pyproject_data['tool']['setuptools']['package-data']

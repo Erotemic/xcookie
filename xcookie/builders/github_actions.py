@@ -28,6 +28,7 @@ class Actions:
         >>> print(type(action))
         >>> print(f'action = {ub.urepr(action, nl=1)}')
     """
+
     action_versions = {
         'checkout': 'actions/checkout@v3',
         'setup-python': 'actions/setup-python@v5',
@@ -36,6 +37,7 @@ class Actions:
     @classmethod
     def _available_action_methods(Actions):
         import types
+
         for attr_name in dir(Actions):
             if not attr_name.startswith('_'):
                 attr = getattr(Actions, attr_name)
@@ -48,6 +50,7 @@ class Actions:
         # List all actions
         # https://api.github.com/repos/pypa/cibuildwheel/releases/latest
         import requests
+
         update_lines = []
         for attr in Actions._available_action_methods():
             action = attr()
@@ -58,7 +61,7 @@ class Actions:
                 data = resp.json()
                 latest = data['tag_name']
                 if current != latest:
-                    update_line = (f'Update: {suffix} from {current} to {latest}')
+                    update_line = f'Update: {suffix} from {current} to {latest}'
                     update_lines.append(update_line)
                     print(update_line)
                     print('data = {}'.format(ub.urepr(data, nl=1)))
@@ -82,17 +85,19 @@ class Actions:
 
     @classmethod
     def checkout(cls, *args, **kwargs):
-        return cls.action({
-            'name': 'Checkout source',
-            'uses': 'actions/checkout@v4.2.2'
-        }, *args, **kwargs)
+        return cls.action(
+            {'name': 'Checkout source', 'uses': 'actions/checkout@v4.2.2'},
+            *args,
+            **kwargs,
+        )
 
     @classmethod
     def setup_python(cls, *args, **kwargs):
-        return cls.action({
-            'name': 'Setup Python',
-            'uses': 'actions/setup-python@v5.6.0'
-        }, *args, **kwargs)
+        return cls.action(
+            {'name': 'Setup Python', 'uses': 'actions/setup-python@v5.6.0'},
+            *args,
+            **kwargs,
+        )
 
     @classmethod
     def codecov_action(cls, *args, **kwargs):
@@ -100,17 +105,22 @@ class Actions:
         References:
             https://github.com/codecov/codecov-action
         """
-        return cls.action({
-            'uses': 'codecov/codecov-action@v5.4.3',
-        }, *args, **kwargs)
+        return cls.action(
+            {
+                'uses': 'codecov/codecov-action@v5.4.3',
+            },
+            *args,
+            **kwargs,
+        )
 
     @classmethod
     def combine_coverage(cls, *args, **kwargs):
-        return cls.action({
-            'name': 'Combine coverage Linux',
-            'if': "runner.os == 'Linux'",
-            'run': ub.codeblock(
-                '''
+        return cls.action(
+            {
+                'name': 'Combine coverage Linux',
+                'if': "runner.os == 'Linux'",
+                'run': ub.codeblock(
+                    """
                 echo '############ PWD'
                 pwd
                 cp .wheelhouse/.coverage* . || true
@@ -123,31 +133,43 @@ class Actions:
                 echo '### The cwd should now have a coverage.xml'
                 ls -altr
                 pwd
-                '''
-            )
-
-        }, *args, **kwargs)
+                """
+                ),
+            },
+            *args,
+            **kwargs,
+        )
 
     @classmethod
     def upload_artifact(cls, *args, **kwargs):
-        return cls.action({
-            'uses': 'actions/upload-artifact@v4.4.0'
-            # Rollback to 3.x due to
-            # https://github.com/actions/upload-artifact/issues/478
-            # todo: migrate
-            # https://github.com/actions/upload-artifact/blob/main/docs/MIGRATION.md#multiple-uploads-to-the-same-named-artifact
-            # 'uses': 'actions/upload-artifact@v3.1.3'
-        }, *args, **kwargs)
+        return cls.action(
+            {
+                'uses': 'actions/upload-artifact@v4.4.0'
+                # Rollback to 3.x due to
+                # https://github.com/actions/upload-artifact/issues/478
+                # todo: migrate
+                # https://github.com/actions/upload-artifact/blob/main/docs/MIGRATION.md#multiple-uploads-to-the-same-named-artifact
+                # 'uses': 'actions/upload-artifact@v3.1.3'
+            },
+            *args,
+            **kwargs,
+        )
 
     @classmethod
     def download_artifact(cls, *args, **kwargs):
-        return cls.action({
-            'uses': 'actions/download-artifact@v4.1.8',
-            # 'uses': 'actions/download-artifact@v2.1.1',
-        }, *args, **kwargs)
+        return cls.action(
+            {
+                'uses': 'actions/download-artifact@v4.1.8',
+                # 'uses': 'actions/download-artifact@v2.1.1',
+            },
+            *args,
+            **kwargs,
+        )
 
     @classmethod
-    def msvc_dev_cmd(cls, *args, osvar=None, bits=None, test_condition=None, **kwargs):
+    def msvc_dev_cmd(
+        cls, *args, osvar=None, bits=None, test_condition=None, **kwargs
+    ):
         if osvar is not None:
             # hack, just keep it this way for now
             windows_con = "${{ startsWith(matrix.os, 'windows-') }}"
@@ -156,19 +178,19 @@ class Actions:
                 # FIXME; we dont want to rely on the cibw_skip variable
                 # kwargs['if'] = "matrix.os == 'windows-latest' && matrix.cibw_skip == '*-win_amd64'"
                 if test_condition is not None:
-                    kwargs['if'] = windows_con + " && " + test_condition
+                    kwargs['if'] = windows_con + ' && ' + test_condition
                 else:
                     kwargs['if'] = windows_con
             else:
                 if test_condition is not None:
-                    kwargs['if'] = windows_con + " && " + test_condition
+                    kwargs['if'] = windows_con + ' && ' + test_condition
                 else:
                     kwargs['if'] = windows_con
 
         if bits is None:
             name = 'Enable MSVC'
         else:
-            name = fr'Enable MSVC {bits}bit'
+            name = rf'Enable MSVC {bits}bit'
             if str(bits) == '64':
                 # As noted in msvc-dev-cmd #90 (and the Action docs), it currently
                 # # assumes `arch=x64`, so we have to manually set it here...
@@ -176,99 +198,119 @@ class Actions:
                     'arch': "${{ contains(matrix.os, 'arm') && 'arm64' || 'x64' }}",
                 }
             elif str(bits) == '32':
-                kwargs['with'] = {
-                    'arch': 'x86'
-                }
+                kwargs['with'] = {'arch': 'x86'}
             else:
                 raise NotImplementedError(str(bits))
 
-        return cls.action({
-            'name': name,
-            'uses': 'ilammy/msvc-dev-cmd@v1',
-        }, *args, **kwargs)
+        return cls.action(
+            {
+                'name': name,
+                'uses': 'ilammy/msvc-dev-cmd@v1',
+            },
+            *args,
+            **kwargs,
+        )
 
     @classmethod
     def setup_qemu(cls, *args, sensible=False, **kwargs):
         if sensible:
-            kwargs.update({
-                'if': "runner.os == 'Linux' && matrix.arch != 'auto'",
-                'with': {
-                    'platforms': 'all'
+            kwargs.update(
+                {
+                    'if': "runner.os == 'Linux' && matrix.arch != 'auto'",
+                    'with': {'platforms': 'all'},
                 }
-            })
+            )
 
         # Emulate aarch64 ppc64le s390x under linux
-        return cls.action({
-            'name': 'Set up QEMU',
-            'uses': 'docker/setup-qemu-action@v3.0.0',
-        }, *args, **kwargs)
+        return cls.action(
+            {
+                'name': 'Set up QEMU',
+                'uses': 'docker/setup-qemu-action@v3.0.0',
+            },
+            *args,
+            **kwargs,
+        )
 
     @classmethod
     def setup_xcode(cls, *args, sensible=False, **kwargs):
         if sensible:
-            kwargs.update({
-                'if': "matrix.os == 'macOS-latest'",
-                'with': {'xcode-version': 'latest-stable'}
-            })
+            kwargs.update(
+                {
+                    'if': "matrix.os == 'macOS-latest'",
+                    'with': {'xcode-version': 'latest-stable'},
+                }
+            )
 
         # Emulate aarch64 ppc64le s390x under linux
-        return cls.action({
-            'name': 'Install Xcode',
-            'uses': 'maxim-lobanov/setup-xcode@v1',
-        }, *args, **kwargs)
+        return cls.action(
+            {
+                'name': 'Install Xcode',
+                'uses': 'maxim-lobanov/setup-xcode@v1',
+            },
+            *args,
+            **kwargs,
+        )
 
     @classmethod
     def setup_ipfs(cls, *args, **kwargs):
         # https://github.com/marketplace/actions/ipfs-setup-action
-        return cls.action({
-            'name': 'Set up IPFS',
-            'uses': 'ibnesayeed/setup-ipfs@0.6.0',
-            'with': {
-                'ipfs_version': '0.14.0',
-                'run_daemon': True,
+        return cls.action(
+            {
+                'name': 'Set up IPFS',
+                'uses': 'ibnesayeed/setup-ipfs@0.6.0',
+                'with': {
+                    'ipfs_version': '0.14.0',
+                    'run_daemon': True,
+                },
             },
-        }, *args, **kwargs)
+            *args,
+            **kwargs,
+        )
 
     @classmethod
     def cibuildwheel(cls, *args, sensible=False, **kwargs):
         if sensible:
-            kwargs.update({
-                'with': {
-                    'output-dir': "wheelhouse",
-                    'config-file': 'pyproject.toml',
-                },
-                'env': {
-                    # 'CIBW_BUILD_VERBOSITY': 1,
-                    'CIBW_SKIP': '${{ matrix.cibw_skip }}',
-
-                    # We're building on Windows-x64, so ARM64 wheels can't be tested
-                    # locally by `cibuildwheel` (don't worry, we're testing them
-                    # later though in `test_binpy_wheels`)
-                    'CIBW_TEST_SKIP': '*-win_arm64',
-                    # 'CIBW_BUILD': '${{ matrix.cibw_build }}',
-                    # 'CIBW_TEST_REQUIRES': '-r requirements/tests.txt'0
-                    # 'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
-                    # configure cibuildwheel to build native archs ('auto'), or emulated ones
-                    'CIBW_ARCHS_LINUX': '${{ matrix.arch }}',
-                    'CIBW_ENVIRONMENT': 'PYTHONUTF8=1',  # for windows
-                    'PYTHONUTF8': '1',  # for windows
-
-                    # TODO: only include this if we are building on windows arm
-                    # `msvc-dev-cmd` sets this envvar, which interferes with
-                    # cross-architecture building...
-                    # just let `cibuildwheel` handle that
-                    'VSCMD_ARG_TGT_ARCH': ''
+            kwargs.update(
+                {
+                    'with': {
+                        'output-dir': 'wheelhouse',
+                        'config-file': 'pyproject.toml',
+                    },
+                    'env': {
+                        # 'CIBW_BUILD_VERBOSITY': 1,
+                        'CIBW_SKIP': '${{ matrix.cibw_skip }}',
+                        # We're building on Windows-x64, so ARM64 wheels can't be tested
+                        # locally by `cibuildwheel` (don't worry, we're testing them
+                        # later though in `test_binpy_wheels`)
+                        'CIBW_TEST_SKIP': '*-win_arm64',
+                        # 'CIBW_BUILD': '${{ matrix.cibw_build }}',
+                        # 'CIBW_TEST_REQUIRES': '-r requirements/tests.txt'0
+                        # 'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
+                        # configure cibuildwheel to build native archs ('auto'), or emulated ones
+                        'CIBW_ARCHS_LINUX': '${{ matrix.arch }}',
+                        'CIBW_ENVIRONMENT': 'PYTHONUTF8=1',  # for windows
+                        'PYTHONUTF8': '1',  # for windows
+                        # TODO: only include this if we are building on windows arm
+                        # `msvc-dev-cmd` sets this envvar, which interferes with
+                        # cross-architecture building...
+                        # just let `cibuildwheel` handle that
+                        'VSCMD_ARG_TGT_ARCH': '',
+                    },
                 }
-            })
+            )
 
         # Emulate aarch64 ppc64le s390x under linux
-        return cls.action({
-            'name': 'Build binary wheels',
-            # 'uses': 'pypa/cibuildwheel@v2.16.2',
-            # 'uses': 'pypa/cibuildwheel@v2.17.0',
-            # 'uses': 'pypa/cibuildwheel@v2.21.0',
-            'uses': 'pypa/cibuildwheel@v3.1.2',
-        }, *args, **kwargs)
+        return cls.action(
+            {
+                'name': 'Build binary wheels',
+                # 'uses': 'pypa/cibuildwheel@v2.16.2',
+                # 'uses': 'pypa/cibuildwheel@v2.17.0',
+                # 'uses': 'pypa/cibuildwheel@v2.21.0',
+                'uses': 'pypa/cibuildwheel@v3.1.2',
+            },
+            *args,
+            **kwargs,
+        )
 
 
 def build_github_actions(self):
@@ -295,45 +337,65 @@ def build_github_actions(self):
     jobs = Yaml.Dict({})
     if self.config.linter:
         jobs['lint_job'] = lint_job(self)
-        jobs['lint_job'].yaml_set_start_comment(ub.codeblock(
-            '''
+        jobs['lint_job'].yaml_set_start_comment(
+            ub.codeblock(
+                """
             ##
             Run quick linting and typing checks.
             To disable all linting add "linter=false" to the xcookie config.
             To disable type checks add "notypes" to the xcookie tags.
             ##
-            '''), indent=4)
+            """
+            ),
+            indent=4,
+        )
 
     if 'purepy' in self.tags:
         name = 'PurePyCI'
         purepy_jobs = Yaml.Dict({})
         if 'nosrcdist' not in self.tags:
             purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
-            purepy_jobs['build_and_test_sdist'].yaml_set_start_comment(ub.codeblock(
-                '''
+            purepy_jobs['build_and_test_sdist'].yaml_set_start_comment(
+                ub.codeblock(
+                    """
                 ##
                 Build the pure python package from source and test it in the
                 same environment.
                 ##
-                '''), indent=4)
+                """
+                ),
+                indent=4,
+            )
 
-        purepy_jobs['build_purepy_wheels'] = Yaml.Dict(build_purewheel_job(self))
-        purepy_jobs['test_purepy_wheels'] = Yaml.Dict(test_wheels_job(self, needs=['build_purepy_wheels']))
+        purepy_jobs['build_purepy_wheels'] = Yaml.Dict(
+            build_purewheel_job(self)
+        )
+        purepy_jobs['test_purepy_wheels'] = Yaml.Dict(
+            test_wheels_job(self, needs=['build_purepy_wheels'])
+        )
 
-        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(ub.codeblock(
-            '''
+        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
             ##
             Build the pure-python wheels independently on a per-platform basis.
             These will be tested later in the build_purepy_wheels step.
             ##
-            '''), indent=4)
-        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(ub.codeblock(
-            '''
+            """
+            ),
+            indent=4,
+        )
+        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
             ##
             Download and test the pure-python wheels that were build in the
             build_purepy_wheels and test them in this independent environment.
             ##
-            '''), indent=4)
+            """
+            ),
+            indent=4,
+        )
 
         deploy_needs = list(purepy_jobs.keys())
         deploy_needs = set(deploy_needs) - {'test_purepy_wheels'}
@@ -343,33 +405,49 @@ def build_github_actions(self):
         binpy_jobs = Yaml.Dict({})
         if 'nosrcdist' not in self.tags:
             binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
-            binpy_jobs['build_and_test_sdist'].yaml_set_start_comment(ub.codeblock(
-                '''
+            binpy_jobs['build_and_test_sdist'].yaml_set_start_comment(
+                ub.codeblock(
+                    """
                 ##
                 Build the binary package from source and test it in the same
                 environment.
                 ##
-                '''), indent=4)
+                """
+                ),
+                indent=4,
+            )
 
-        binpy_jobs['build_binpy_wheels'] = Yaml.Dict(build_binpy_wheels_job(self))
-        binpy_jobs['test_binpy_wheels'] = Yaml.Dict(test_wheels_job(self, needs=['build_binpy_wheels']))
+        binpy_jobs['build_binpy_wheels'] = Yaml.Dict(
+            build_binpy_wheels_job(self)
+        )
+        binpy_jobs['test_binpy_wheels'] = Yaml.Dict(
+            test_wheels_job(self, needs=['build_binpy_wheels'])
+        )
 
-        binpy_jobs['build_binpy_wheels'].yaml_set_start_comment(ub.codeblock(
-            '''
+        binpy_jobs['build_binpy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
             ##
             Build the binary wheels. Note: even though cibuildwheel will test
             them internally here, we will test them independently later in the
             test_binpy_wheels step.
             ##
-            '''), indent=4)
-        binpy_jobs['test_binpy_wheels'].yaml_set_start_comment(ub.codeblock(
-            '''
+            """
+            ),
+            indent=4,
+        )
+        binpy_jobs['test_binpy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
             ##
             Download the previously build binary wheels from the
             build_binpy_wheels step, and test them in an independent
             environment.
             ##
-            '''), indent=4)
+            """
+            ),
+            indent=4,
+        )
         deploy_needs = list(binpy_jobs.keys())
         deploy_needs = set(deploy_needs) - {'test_binpy_wheels'}
         jobs.update(binpy_jobs)
@@ -377,8 +455,12 @@ def build_github_actions(self):
         raise Exception('Need to specify binpy or purepy in tags')
 
     if self.config['deploy']:
-        jobs['test_deploy'] = build_deploy(self, mode='test', needs=deploy_needs)
-        jobs['live_deploy'] = build_deploy(self, mode='live', needs=deploy_needs)
+        jobs['test_deploy'] = build_deploy(
+            self, mode='test', needs=deploy_needs
+        )
+        jobs['live_deploy'] = build_deploy(
+            self, mode='live', needs=deploy_needs
+        )
 
         if 1:
             # New action to create a proper release
@@ -390,7 +472,7 @@ def build_github_actions(self):
 
     # For some reason, it doesn't like the on block
     header = ub.codeblock(
-        f'''
+        f"""
         # This workflow will install Python dependencies, run tests and lint with a variety of Python versions
         # For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
         # Based on ~/code/xcookie/xcookie/rc/tests.yml.in
@@ -404,7 +486,8 @@ def build_github_actions(self):
           pull_request:
             branches: [ {run_on_branches_str} ]
 
-        ''')
+        """
+    )
 
     walker = ub.IndexableWalker(jobs)
     for p, v in walker:
@@ -414,13 +497,11 @@ def build_github_actions(self):
                 v2 = '\n'.join(v)
                 walker[p] = v2
 
-    body = {
-        'jobs': jobs
-    }
+    body = {'jobs': jobs}
 
     if 'erotemic' in self.tags:
         footer = ub.codeblock(
-            r'''
+            r"""
             ###
             # Unfortunately we cant (yet) use the yaml docstring trick here
             # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
@@ -439,7 +520,8 @@ def build_github_actions(self):
             #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET \
             #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
             #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD
-            ''')
+            """
+        )
     else:
         footer = ''
 
@@ -454,38 +536,39 @@ def lint_job(self):
         'runs-on': 'ubuntu-latest',
         'steps': [
             Actions.checkout(),
-            Actions.setup_python({
-                'name': f'Set up Python {main_python_version} for linting',
-                'with': {
-                    'python-version': main_python_version,
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {main_python_version} for linting',
+                    'with': {
+                        'python-version': main_python_version,
+                    },
                 }
-            }),
+            ),
             {
                 'name': 'Install dependencies',
                 'run': ub.codeblock(
-                    f'''
+                    f"""
                     {self.UPDATE_PIP}
                     {self.PIP_INSTALL} flake8
-                    ''')
+                    """
+                ),
             },
             {
                 'name': 'Lint with flake8',
                 'run': ub.codeblock(
-                    f'''
+                    f"""
                     # stop the build if there are Python syntax errors or undefined names
                     flake8 ./{self.rel_mod_dpath} --count --select=E9,F63,F7,F82 --show-source --statistics
-                    ''')
+                    """
+                ),
             },
-        ]
+        ],
     }
 
     if 'notypes' not in self.tags:
         mypy_check_commands = common_ci.make_mypy_check_parts(self)
         job['steps'].append(
-            {
-                'name': 'Typecheck with mypy',
-                'run': mypy_check_commands
-            }
+            {'name': 'Typecheck with mypy', 'run': mypy_check_commands}
         )
     return Yaml.Dict(job)
 
@@ -507,11 +590,16 @@ def build_and_test_sdist_job(self):
             f'{self.UPDATE_PIP}',
             f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/tests.txt',
             f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/runtime.txt',
-            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt' if 'cv2' in self.tags else None,
-            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt' if 'gdal' in self.tags else None,
+            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt'
+            if 'cv2' in self.tags
+            else None,
+            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
+            if 'gdal' in self.tags
+            else None,
         ]
 
     import kwutil
+
     test_env = {}
     user_test_env = kwutil.Yaml.coerce(self.config.test_env, backend='pyyaml')
     if user_test_env:
@@ -522,12 +610,15 @@ def build_and_test_sdist_job(self):
         'runs-on': 'ubuntu-latest',
         'steps': [
             Actions.checkout(),
-            Actions.setup_python({
-                'name': f'Set up Python {main_python_version}',
-                'with': {'python-version': main_python_version}}),
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {main_python_version}',
+                    'with': {'python-version': main_python_version},
+                }
+            ),
             {
                 'name': 'Upgrade pip',
-                'run': [_ for _ in pip_reqs_install_parts if _ is not None]
+                'run': [_ for _ in pip_reqs_install_parts if _ is not None],
             },
             {
                 'name': 'Build sdist',
@@ -540,7 +631,7 @@ def build_and_test_sdist_job(self):
                 'run': [
                     f'ls -al {wheelhouse_dpath}',
                     f'{self.PIP_INSTALL_PREFER_BINARY} {wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz -v',
-                ]
+                ],
             },
             {
                 'name': 'Test minimal loose sdist',
@@ -568,7 +659,7 @@ def build_and_test_sdist_job(self):
                     # TODO: change to test command
                     f'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
                     'cd ..',
-                ]
+                ],
             },
             {
                 'name': 'Test full loose sdist',
@@ -576,7 +667,9 @@ def build_and_test_sdist_job(self):
                 'run': [
                     'pwd',
                     'ls -al',
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt' if 'cv2' in self.tags else 'true',
+                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt'
+                    if 'cv2' in self.tags
+                    else 'true',
                     '# Run in a sandboxed directory',
                     'WORKSPACE_DNAME="testsrcdir_full_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}"',
                     'mkdir -p $WORKSPACE_DNAME',
@@ -591,16 +684,18 @@ def build_and_test_sdist_job(self):
                     # Move coverage file to a new name
                     # 'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
                     'cd ..',
-                ]
+                ],
             },
-            Actions.upload_artifact({
-                'name': 'Upload sdist artifact',
-                'with': {
-                    'name': 'sdist_wheels',
-                    'path': build_parts['artifact']
+            Actions.upload_artifact(
+                {
+                    'name': 'Upload sdist artifact',
+                    'with': {
+                        'name': 'sdist_wheels',
+                        'path': build_parts['artifact'],
+                    },
                 }
-            })
-        ]
+            ),
+        ],
     }
     return Yaml.Dict(job)
 
@@ -623,7 +718,9 @@ def build_binpy_wheels_job(self):
     main_python_version = supported_platform_info['main_python_version']
 
     pyproj_config = self.config._load_pyproject_config()
-    cibw_skip = pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('skip', '')
+    cibw_skip = (
+        pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('skip', '')
+    )
     if isinstance(cibw_skip, list):
         cibw_skip = ' '.join(cibw_skip)
     explicit_skips = ' ' + cibw_skip
@@ -635,7 +732,11 @@ def build_binpy_wheels_job(self):
     if 'win' in self.config['os']:
         if WITH_WIN_32BIT:
             included_runs = [
-                {'os': 'windows-latest', 'arch': 'auto', 'cibw_skip': ("*-win_amd64" + explicit_skips).strip()},
+                {
+                    'os': 'windows-latest',
+                    'arch': 'auto',
+                    'cibw_skip': ('*-win_amd64' + explicit_skips).strip(),
+                },
             ]
         else:
             included_runs = []
@@ -643,14 +744,18 @@ def build_binpy_wheels_job(self):
         included_runs = []
 
     matrix = Yaml.Dict({})
-    matrix.yaml_set_start_comment(ub.codeblock(
-        '''
+    matrix.yaml_set_start_comment(
+        ub.codeblock(
+            """
         Normally, xcookie generates explicit lists of platforms to build / test
         on, but in this case cibuildwheel does that for us, so we need to just
         set the environment variables for cibuildwheel. These are parsed out of
         the standard [tool.cibuildwheel] section in pyproject.toml and set
         explicitly here.
-        '''), indent=8)
+        """
+        ),
+        indent=8,
+    )
 
     # Seems like we dont need explicit macos-13
     # and it could produce issues:
@@ -674,26 +779,36 @@ def build_binpy_wheels_job(self):
     conditional_actions = []
     if 'win' in self.config['os']:
         conditional_actions += [
-            Actions.msvc_dev_cmd(bits=64, osvar='matrix.os', test_condition="${{ contains(matrix.cibw_skip, '*-win32') }}"),
+            Actions.msvc_dev_cmd(
+                bits=64,
+                osvar='matrix.os',
+                test_condition="${{ contains(matrix.cibw_skip, '*-win32') }}",
+            ),
         ]
 
         if WITH_WIN_32BIT:
             conditional_actions += [
-                Actions.msvc_dev_cmd(bits=32, osvar='matrix.os', test_condition="${{ contains(matrix.cibw_skip, '*-win_amd64') }}"),
+                Actions.msvc_dev_cmd(
+                    bits=32,
+                    osvar='matrix.os',
+                    test_condition="${{ contains(matrix.cibw_skip, '*-win_amd64') }}",
+                ),
             ]
 
-    job = Yaml.Dict({
-        'name': '${{ matrix.os }}, arch=${{ matrix.arch }}',
-        'runs-on': '${{ matrix.os }}',
-        'strategy': {
-            'fail-fast': False,
-            'matrix': matrix,
-        },
-        'steps': None,
-    })
+    job = Yaml.Dict(
+        {
+            'name': '${{ matrix.os }}, arch=${{ matrix.arch }}',
+            'runs-on': '${{ matrix.os }}',
+            'strategy': {
+                'fail-fast': False,
+                'matrix': matrix,
+            },
+            'steps': None,
+        }
+    )
 
     job_steps = []
-    #job_steps += [Actions.setup_xcode(sensible=True)]
+    # job_steps += [Actions.setup_xcode(sensible=True)]
 
     # Emulate aarch64 ppc64le s390x under linux
     job_steps += [Actions.checkout()]
@@ -704,7 +819,9 @@ def build_binpy_wheels_job(self):
         # Hack in abi3 support, todo: clean up later.
         abi3_action = Actions.cibuildwheel(sensible=True)
         # TODO: use min python
-        abi3_action['env']['CIBW_CONFIG_SETTINGS'] = '--build-option=--py-limited-api=cp38'
+        abi3_action['env']['CIBW_CONFIG_SETTINGS'] = (
+            '--build-option=--py-limited-api=cp38'
+        )
         abi3_action['env']['CIBW_BUILD'] = 'cp38-*'
 
     job_steps += [
@@ -714,22 +831,22 @@ def build_binpy_wheels_job(self):
     ]
     job_steps += [
         {
-            "name": "Show built files",
-            "shell": "bash",
-            "run": "ls -la wheelhouse"
+            'name': 'Show built files',
+            'shell': 'bash',
+            'run': 'ls -la wheelhouse',
         },
-
-        Actions.setup_python({
-            'name': f'Set up Python {main_python_version} to combine coverage',
-            'if': "runner.os == 'Linux'",
-            'with': {
-                'python-version': main_python_version
+        Actions.setup_python(
+            {
+                'name': f'Set up Python {main_python_version} to combine coverage',
+                'if': "runner.os == 'Linux'",
+                'with': {'python-version': main_python_version},
             }
-        }),
+        ),
         Actions.combine_coverage(),
         # https://github.com/github/docs/issues/6861
-        Actions.codecov_action(Yaml.coerce(
-            '''
+        Actions.codecov_action(
+            Yaml.coerce(
+                """
             name: Codecov Upload
             env:
               HAVE_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
@@ -738,22 +855,27 @@ def build_binpy_wheels_job(self):
             with:
               file: ./coverage.xml
               token: ${{ secrets.CODECOV_TOKEN }}
-            ''')),
-
-        Actions.codecov_action({
-            'name': 'Codecov Upload',
-            'with': {
-                'file': './coverage.xml',
-                'token': '${{ secrets.CODECOV_TOKEN }}',
+            """
+            )
+        ),
+        Actions.codecov_action(
+            {
+                'name': 'Codecov Upload',
+                'with': {
+                    'file': './coverage.xml',
+                    'token': '${{ secrets.CODECOV_TOKEN }}',
+                },
             }
-        }),
-        Actions.upload_artifact({
-            'name': 'Upload wheels artifact',
-            'with': {
-                'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
-                'path': f"./wheelhouse/{self.mod_name}*.whl"
+        ),
+        Actions.upload_artifact(
+            {
+                'name': 'Upload wheels artifact',
+                'with': {
+                    'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
+                    'path': f'./wheelhouse/{self.mod_name}*.whl',
+                },
             }
-        })
+        ),
     ]
     job['steps'] = job_steps
     return job
@@ -776,7 +898,7 @@ def build_purewheel_job(self):
                 'os': ['ubuntu-latest'],  # os_list[0:1],
                 'python-version': [main_python_version],
                 'arch': ['auto'],
-            }
+            },
         },
         'steps': None,
     }
@@ -784,9 +906,9 @@ def build_purewheel_job(self):
     job['steps'] = [
         Actions.checkout(),
         Actions.setup_qemu(sensible=True),
-        Actions.setup_python({
-            'with': {'python-version': '${{ matrix.python-version }}'}
-        }),
+        Actions.setup_python(
+            {'with': {'python-version': '${{ matrix.python-version }}'}}
+        ),
         {
             'name': 'Build pure wheel',
             'shell': 'bash',
@@ -795,16 +917,18 @@ def build_purewheel_job(self):
         {
             'name': 'Show built files',
             'shell': 'bash',
-            'run': f'ls -la {wheelhouse_dpath}'
+            'run': f'ls -la {wheelhouse_dpath}',
         },
-        Actions.upload_artifact({
-            'name': 'Upload wheels artifact',
-            'with': {
-                # 'name': 'wheels',
-                'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
-                'path': build_parts['artifact'],
+        Actions.upload_artifact(
+            {
+                'name': 'Upload wheels artifact',
+                'with': {
+                    # 'name': 'wheels',
+                    'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
+                    'path': build_parts['artifact'],
+                },
             }
-        })
+        ),
     ]
     return job
 
@@ -817,9 +941,16 @@ def test_wheels_job(self, needs=None):
 
     pyproj_config = self.config._load_pyproject_config()
 
-    cibw_windows_build_arches = pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('windows', {}).get('archs', None)
+    cibw_windows_build_arches = (
+        pyproj_config.get('tool', {})
+        .get('cibuildwheel', {})
+        .get('windows', {})
+        .get('archs', None)
+    )
     if cibw_windows_build_arches is not None:
-        cibw_windows_build_arches = [_.lower() for _ in cibw_windows_build_arches]
+        cibw_windows_build_arches = [
+            _.lower() for _ in cibw_windows_build_arches
+        ]
 
         if 'arm64' in cibw_windows_build_arches:
             # If we are building binaries for arm on windows, then
@@ -831,27 +962,40 @@ def test_wheels_job(self, needs=None):
 
     # Map the min/full loose/strict terminology to specific extra packages
     import ubelt as ub
+
     special_loose_tags = []
     if 'cv2' in self.tags:
         special_loose_tags.append('headless')
 
     if self.config['use_pyproject_requirements']:
         special_strict_tags = [t for t in special_loose_tags]
-        install_extra_tags = ub.udict({
-            'minimal-loose'  : ['tests'] + special_loose_tags,
-            'full-loose'     : ['tests', 'optional'] + special_loose_tags,
-            'minimal-strict' : ['tests'] + special_strict_tags,
-            'full-strict'    : ['tests', 'optional'] + special_strict_tags,
-        })
+        install_extra_tags = ub.udict(
+            {
+                'minimal-loose': ['tests'] + special_loose_tags,
+                'full-loose': ['tests', 'optional'] + special_loose_tags,
+                'minimal-strict': ['tests'] + special_strict_tags,
+                'full-strict': ['tests', 'optional'] + special_strict_tags,
+            }
+        )
     else:
         special_strict_tags = [t + '-strict' for t in special_loose_tags]
-        install_extra_tags = ub.udict({
-            'minimal-loose'  : ['tests'] + special_loose_tags,
-            'full-loose'     : ['tests', 'optional'] + special_loose_tags,
-            'minimal-strict' : ['tests-strict', 'runtime-strict'] + special_strict_tags,
-            'full-strict'    : ['tests-strict', 'runtime-strict', 'optional-strict'] + special_strict_tags,
-        })
-    install_extras = ub.udict({k: ','.join(v) for k, v in install_extra_tags.items()})
+        install_extra_tags = ub.udict(
+            {
+                'minimal-loose': ['tests'] + special_loose_tags,
+                'full-loose': ['tests', 'optional'] + special_loose_tags,
+                'minimal-strict': ['tests-strict', 'runtime-strict']
+                + special_strict_tags,
+                'full-strict': [
+                    'tests-strict',
+                    'runtime-strict',
+                    'optional-strict',
+                ]
+                + special_strict_tags,
+            }
+        )
+    install_extras = ub.udict(
+        {k: ','.join(v) for k, v in install_extra_tags.items()}
+    )
 
     special_strict_test_env = {}
     special_loose_test_env = {}
@@ -860,12 +1004,11 @@ def test_wheels_job(self, needs=None):
         # TODO: need to have better logic for gdal strict that doesn't require
         # separate tracked files.
         # special_strict_test_env['gdal-requirement-txt'] = 'requirements-strict/gdal.txt'
-        special_strict_test_env['gdal-requirement-txt'] = 'requirements/gdal-strict.txt'
+        special_strict_test_env['gdal-requirement-txt'] = (
+            'requirements/gdal-strict.txt'
+        )
 
-    platform_basis = [
-        {'os': osname, 'arch': 'auto'}
-        for osname in os_list
-    ]
+    platform_basis = [{'os': osname, 'arch': 'auto'} for osname in os_list]
 
     # Reduce the CI load, don't specify the entire product space
     # arch = 'auto'
@@ -874,8 +1017,11 @@ def test_wheels_job(self, needs=None):
         for extra in install_extras.take(['minimal-strict']):
             for pyver in install_extra_versions['minimal-strict']:
                 item = {
-                    'python-version': pyver, 'install-extras': extra,
-                    **platkw, **special_strict_test_env}
+                    'python-version': pyver,
+                    'install-extras': extra,
+                    **platkw,
+                    **special_strict_test_env,
+                }
                 if self.config['use_pyproject_requirements']:
                     item['uv-resolution'] = 'lowest-direct'
                 include.append(item)
@@ -883,8 +1029,12 @@ def test_wheels_job(self, needs=None):
     for platkw in platform_basis:
         for extra in install_extras.take(['full-strict']):
             for pyver in install_extra_versions['full-strict']:
-                item = {'python-version': pyver, 'install-extras': extra,
-                        **platkw, **special_strict_test_env}
+                item = {
+                    'python-version': pyver,
+                    'install-extras': extra,
+                    **platkw,
+                    **special_strict_test_env,
+                }
                 if self.config['use_pyproject_requirements']:
                     item['uv-resolution'] = 'lowest-direct'
                 include.append(item)
@@ -893,8 +1043,11 @@ def test_wheels_job(self, needs=None):
         for extra in install_extras.take(['minimal-loose']):
             for pyver in install_extra_versions['minimal-loose']:
                 item = {
-                    'python-version': pyver, 'install-extras': extra,
-                    **platkw, **special_loose_test_env}
+                    'python-version': pyver,
+                    'install-extras': extra,
+                    **platkw,
+                    **special_loose_test_env,
+                }
                 if self.config['use_pyproject_requirements']:
                     item['uv-resolution'] = 'highest'
                 include.append(item)
@@ -903,8 +1056,11 @@ def test_wheels_job(self, needs=None):
         for extra in install_extras.take(['full-loose']):
             for pyver in install_extra_versions['full-loose']:
                 item = {
-                    'python-version': pyver, 'install-extras': extra,
-                    **platkw, **special_loose_test_env}
+                    'python-version': pyver,
+                    'install-extras': extra,
+                    **platkw,
+                    **special_loose_test_env,
+                }
                 if self.config['use_pyproject_requirements']:
                     item['uv-resolution'] = 'highest'
                 include.append(item)
@@ -937,7 +1093,13 @@ def test_wheels_job(self, needs=None):
         if item['python-version'] == '3.7' and item['os'] == 'macOS-latest':
             item['os'] = 'macos-13'
 
-        if item['os'] == 'windows-11-arm' and item['python-version'] in {'3.6', '3.7', '3.8', '3.9', '3.10'}:
+        if item['os'] == 'windows-11-arm' and item['python-version'] in {
+            '3.6',
+            '3.7',
+            '3.8',
+            '3.9',
+            '3.10',
+        }:
             # cibuildwheel can't target 3.8 on Window ARM64
             # GitHub doesn't have anything below Python 3.11 on their ARM64
             # machines, so just test the built wheels from 3.11+
@@ -969,40 +1131,53 @@ def test_wheels_job(self, needs=None):
 
         def is_blocked_compiled(item, compiled_rules):
             for crule in compiled_rules:
-                if all(regex.fullmatch(str(item.get(k, ""))) for k, regex in crule.items()):
+                if all(
+                    regex.fullmatch(str(item.get(k, '')))
+                    for k, regex in crule.items()
+                ):
                     return True
             return False
 
         ci_blocklist = Yaml.coerce(self.config.ci_blocklist)
         compiled = compile_rules(ci_blocklist)
-        include = [it for it in include if not is_blocked_compiled(it, compiled)]
+        include = [
+            it for it in include if not is_blocked_compiled(it, compiled)
+        ]
 
     condition = "! startsWith(github.event.ref, 'refs/heads/release')"
-    job = Yaml.Dict({
-        'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
-        'if': condition,
-        'runs-on': '${{ matrix.os }}',
-        'needs': sorted(needs),
-        'strategy': {
-            'fail-fast': False,
-            'matrix': Yaml.Dict({
-                # 'os': os_list,
-                # 'python-version': python_versions_non34,
-                # 'install-extras': list(install_extras.take(['minimal-loose', 'full-loose'])),
-                # 'arch': [
-                #     'auto'
-                # ],
-                'include': include,
-            })
-        },
-        'steps': None,
-    })
+    job = Yaml.Dict(
+        {
+            'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
+            'if': condition,
+            'runs-on': '${{ matrix.os }}',
+            'needs': sorted(needs),
+            'strategy': {
+                'fail-fast': False,
+                'matrix': Yaml.Dict(
+                    {
+                        # 'os': os_list,
+                        # 'python-version': python_versions_non34,
+                        # 'install-extras': list(install_extras.take(['minimal-loose', 'full-loose'])),
+                        # 'arch': [
+                        #     'auto'
+                        # ],
+                        'include': include,
+                    }
+                ),
+            },
+            'steps': None,
+        }
+    )
 
-    job['strategy']['matrix'].yaml_set_start_comment(ub.codeblock(
-        '''
+    job['strategy']['matrix'].yaml_set_start_comment(
+        ub.codeblock(
+            """
         Xcookie generates an explicit list of environments that will be used
         for testing instead of using the more concise matrix notation.
-        '''), indent=8)
+        """
+        ),
+        indent=8,
+    )
 
     # if 1:
     #     # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
@@ -1018,16 +1193,18 @@ def test_wheels_job(self, needs=None):
     #     # get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
     #     # get_modpath_bash = f'python -c "{get_modpath_python}"'
 
-    install_env = {
-        'INSTALL_EXTRAS': '${{ matrix.install-extras }}'
-    }
+    install_env = {'INSTALL_EXTRAS': '${{ matrix.install-extras }}'}
     if self.config['use_pyproject_requirements']:
-        install_env['UV_RESOLUTION'] =  '${{ matrix.uv-resolution }}'
+        install_env['UV_RESOLUTION'] = '${{ matrix.uv-resolution }}'
 
     special_install_lines = []
     if 'gdal' in self.tags:
-        install_env['GDAL_REQUIREMENT_TXT'] = '${{ matrix.gdal-requirement-txt }}'
-        special_install_lines.append(f'{self.PIP_INSTALL} -r "$GDAL_REQUIREMENT_TXT"')
+        install_env['GDAL_REQUIREMENT_TXT'] = (
+            '${{ matrix.gdal-requirement-txt }}'
+        )
+        special_install_lines.append(
+            f'{self.PIP_INSTALL} -r "$GDAL_REQUIREMENT_TXT"'
+        )
 
     if 'ibeis' == self.mod_name:
         custom_before_test_lines = [
@@ -1055,21 +1232,28 @@ def test_wheels_job(self, needs=None):
         ]
     action_steps += [
         Actions.setup_qemu(sensible=True),
-        Actions.setup_python({'with': {'python-version': '${{ matrix.python-version }}'}}),
-        Actions.download_artifact({
-            'name': 'Download wheels',
-            'with': {
-                # 'name': 'wheels',
-                'pattern': 'wheels-*',
-                'merge-multiple': True,
-                'path': 'wheelhouse'
-            }}),
+        Actions.setup_python(
+            {'with': {'python-version': '${{ matrix.python-version }}'}}
+        ),
+        Actions.download_artifact(
+            {
+                'name': 'Download wheels',
+                'with': {
+                    # 'name': 'wheels',
+                    'pattern': 'wheels-*',
+                    'merge-multiple': True,
+                    'path': 'wheelhouse',
+                },
+            }
+        ),
     ]
 
-    workspace_dname = 'testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}'
+    workspace_dname = (
+        'testdir_${CI_PYTHON_VERSION}_${GITHUB_RUN_ID}_${RUNNER_OS}'
+    )
 
     # HACK
-    WITH_COVERAGE = ('ibeis' != self.mod_name)
+    WITH_COVERAGE = 'ibeis' != self.mod_name
     if WITH_COVERAGE:
         custom_after_test_commands = [
             'ls -al',
@@ -1080,22 +1264,29 @@ def test_wheels_job(self, needs=None):
             'ls -al',
         ]
     else:
-        custom_after_test_commands = [
-        ]
+        custom_after_test_commands = []
     install_and_test_wheel_parts = common_ci.make_install_and_test_wheel_parts(
-        self, wheelhouse_dpath, special_install_lines, workspace_dname,
+        self,
+        wheelhouse_dpath,
+        special_install_lines,
+        workspace_dname,
         custom_before_test_lines=custom_before_test_lines,
         custom_after_test_commands=custom_after_test_commands,
     )
 
-    action_steps.append(Actions.action({
-        'name': 'Install wheel ${{ matrix.install-extras }}',
-        'shell': 'bash',
-        'env': install_env,
-        'run': install_and_test_wheel_parts['install_wheel_commands'],
-    }))
+    action_steps.append(
+        Actions.action(
+            {
+                'name': 'Install wheel ${{ matrix.install-extras }}',
+                'shell': 'bash',
+                'env': install_env,
+                'run': install_and_test_wheel_parts['install_wheel_commands'],
+            }
+        )
+    )
 
     import kwutil
+
     test_env = {
         'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}',
     }
@@ -1103,22 +1294,28 @@ def test_wheels_job(self, needs=None):
     if user_test_env:
         test_env.update(user_test_env)
 
-    action_steps.append(Actions.action({
-        'name': 'Test wheel ${{ matrix.install-extras }}',
-        'shell': 'bash',
-        'env': test_env,
-        'run': install_and_test_wheel_parts['test_wheel_commands'],
-    }))
+    action_steps.append(
+        Actions.action(
+            {
+                'name': 'Test wheel ${{ matrix.install-extras }}',
+                'shell': 'bash',
+                'env': test_env,
+                'run': install_and_test_wheel_parts['test_wheel_commands'],
+            }
+        )
+    )
     if WITH_COVERAGE:
         action_steps += [
             Actions.combine_coverage(),
-            Actions.codecov_action({
-                'name': 'Codecov Upload',
-                'with': {
-                    'file': './coverage.xml',
-                    'token': '${{ secrets.CODECOV_TOKEN }}',
+            Actions.codecov_action(
+                {
+                    'name': 'Codecov Upload',
+                    'with': {
+                        'file': './coverage.xml',
+                        'token': '${{ secrets.CODECOV_TOKEN }}',
+                    },
                 }
-            }),
+            ),
         ]
     job['steps'] = action_steps
     return job
@@ -1179,7 +1376,11 @@ def build_deploy(self, mode='live', needs=None):
         repo_name = self.remote_info['repo_name']
         repo_suffix = f'{group}/{repo_name}'  # NOQA
         # https://github.com/orgs/community/discussions/25217
-        is_not_fork_condition = "github.event.pull_request.head.repo.full_name == '" + repo_suffix + "'"
+        is_not_fork_condition = (
+            "github.event.pull_request.head.repo.full_name == '"
+            + repo_suffix
+            + "'"
+        )
         # Note: disabling because this does not seem to work?
         is_not_fork_condition = None
     else:
@@ -1233,9 +1434,12 @@ def build_deploy(self, mode='live', needs=None):
         if 'nosrcdist' not in self.tags:
             _dist_patterns.append(wheelhouse_dpath + '/*.tar.gz')
         dist_pattern = ' '.join(_dist_patterns)
-        run += ub.codeblock(
-            '''
-            WHEEL_PATHS=(''' + dist_pattern + ''')
+        run += (
+            ub.codeblock(
+                """
+            WHEEL_PATHS=("""
+                + dist_pattern
+                + """)
             WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
             echo "$WHEEL_PATHS_STR"
             for WHEEL_PATH in "${WHEEL_PATHS[@]}"
@@ -1247,22 +1451,22 @@ def build_deploy(self, mode='live', needs=None):
                 $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH
             done
             ls -la wheelhouse
-            ''').strip().split('\n')
-
-        artifact_globs.append(
-            f'{wheelhouse_dpath}/*.asc'
+            """
+            )
+            .strip()
+            .split('\n')
         )
+
+        artifact_globs.append(f'{wheelhouse_dpath}/*.asc')
 
         enable_otc = True
         if enable_otc:
             run += [
                 f'{self.SYSTEM_PIP_INSTALL} opentimestamps-client',
                 f'ots stamp {dist_pattern} {wheelhouse_dpath}/*.asc',
-                'ls -la wheelhouse'
+                'ls -la wheelhouse',
             ]
-            artifact_globs.append(
-                f'{wheelhouse_dpath}/*.ots'
-            )
+            artifact_globs.append(f'{wheelhouse_dpath}/*.ots')
 
         if self.config['deploy_pypi']:
             run += [
@@ -1286,33 +1490,36 @@ def build_deploy(self, mode='live', needs=None):
 
     if 'nosrcdist' not in self.tags:
         sdist_wheel_steps = [
-            Actions.download_artifact({
-                'name': 'Download sdist',
-                'with': {
-                    'name': 'sdist_wheels',
-                    'path': wheelhouse_dpath
-                }})
+            Actions.download_artifact(
+                {
+                    'name': 'Download sdist',
+                    'with': {'name': 'sdist_wheels', 'path': wheelhouse_dpath},
+                }
+            )
         ]
     else:
         sdist_wheel_steps = []
 
     deploy_steps = [
         Actions.checkout(name='Checkout source'),
-        Actions.download_artifact({
-            'name': 'Download wheels',
-            'with': {
-                # 'name': 'wheels',
-                'pattern': 'wheels-*',
-                'merge-multiple': True,
-                'path': wheelhouse_dpath
-            }}),
+        Actions.download_artifact(
+            {
+                'name': 'Download wheels',
+                'with': {
+                    # 'name': 'wheels',
+                    'pattern': 'wheels-*',
+                    'merge-multiple': True,
+                    'path': wheelhouse_dpath,
+                },
+            }
+        ),
     ]
     deploy_steps += sdist_wheel_steps
     deploy_steps += [
         {
             'name': 'Show files to upload',
             'shell': 'bash',
-            'run': f'ls -la {wheelhouse_dpath}'
+            'run': f'ls -la {wheelhouse_dpath}',
         }
     ]
 
@@ -1320,24 +1527,28 @@ def build_deploy(self, mode='live', needs=None):
         deploy_steps += [
             # TODO: it might make sense to make this a script that is invoked
             {
-                'name': 'Sign and Publish' if self.config['enable_gpg'] else 'Publish',
+                'name': 'Sign and Publish'
+                if self.config['enable_gpg']
+                else 'Publish',
                 'env': env,
                 'run': run,
             }
         ]
 
     deploy_steps += [
-        Actions.upload_artifact({
-            'name': 'Upload deploy artifacts',
-            'with': {
-                'name': 'deploy_artifacts',
-                'path': chr(10).join(artifact_globs)
+        Actions.upload_artifact(
+            {
+                'name': 'Upload deploy artifacts',
+                'with': {
+                    'name': 'deploy_artifacts',
+                    'path': chr(10).join(artifact_globs),
+                },
             }
-        })
+        )
     ]
 
     job = {
-        'name': f"Deploy {mode.capitalize()}",
+        'name': f'Deploy {mode.capitalize()}',
         'runs-on': 'ubuntu-latest',
         'if': condition,
         'needs': sorted(needs),
@@ -1399,11 +1610,12 @@ def build_github_release(self, needs=None):
         'name': 'Tag Release Commit',
         'if': needs_tag_condition,
         'run': ub.codeblock(
-            '''
+            """
             export VERSION=$(python -c "import setup; print(setup.VERSION)")
             git tag "v$VERSION"
             git push origin "v$VERSION"
-            ''')
+            """
+        ),
     }
 
     # 'release_name', valid inputs are ['body', 'body_path', 'name',
@@ -1426,25 +1638,31 @@ def build_github_release(self, needs=None):
             'draft': True,  # Maybe keep as a draft until we determine this is ok?
             'prerelease': False,
             'files': chr(10).join(artifact_globs),
-        }
+        },
     }
 
     job = {
-        'name': "Create Github Release",
+        'name': 'Create Github Release',
         'if': condition,
         'runs-on': 'ubuntu-latest',
         'permissions': {'contents': 'write'},
         'needs': sorted(needs),
         'steps': [
             Actions.checkout(name='Checkout source'),
-            Actions.download_artifact({'name': 'Download artifacts', 'with': {
-                'name': 'deploy_artifacts',
-                'path': 'wheelhouse'
-            }}),
-            {'name': 'Show files to release', 'shell': 'bash', 'run': 'ls -la wheelhouse'},
+            Actions.download_artifact(
+                {
+                    'name': 'Download artifacts',
+                    'with': {'name': 'deploy_artifacts', 'path': 'wheelhouse'},
+                }
+            ),
+            {
+                'name': 'Show files to release',
+                'shell': 'bash',
+                'run': 'ls -la wheelhouse',
+            },
             write_release_notes_action,
             tag_action,
             release_action,
-        ]
+        ],
     }
     return job

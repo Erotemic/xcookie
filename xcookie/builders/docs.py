@@ -1,6 +1,7 @@
 """
 Template code for building docs including conf.py
 """
+
 import ubelt as ub
 
 
@@ -8,6 +9,7 @@ class DocsBuilder:
     """
     Helper to build sphinx docs related files
     """
+
     def __init__(docs_builder, config):
         """
         Args:
@@ -37,7 +39,10 @@ class DocsBuilder:
         if shrinkuser:
             repodir = repodir.shrinkuser()
             docs_outdir = docs_outdir.shrinkuser()
-        rel_mod_dpath = ub.Path(docs_builder.config['rel_mod_parent_dpath']) / docs_builder.config['mod_name']
+        rel_mod_dpath = (
+            ub.Path(docs_builder.config['rel_mod_parent_dpath'])
+            / docs_builder.config['mod_name']
+        )
         mod_abspath = repodir / rel_mod_dpath
 
         exclude_pattern = None
@@ -48,12 +53,13 @@ class DocsBuilder:
         if exclude_pattern is None:
             invocation = f'sphinx-apidoc --private --separate --force --output-dir {docs_outdir} {mod_abspath}'
         else:
-            invocation = f'sphinx-apidoc --private --separate --force --output-dir {docs_outdir} {mod_abspath} \'{exclude_pattern}\''
+            invocation = f"sphinx-apidoc --private --separate --force --output-dir {docs_outdir} {mod_abspath} '{exclude_pattern}'"
         return invocation
 
 
 def build_docs_index(self):
     import ubelt as ub
+
     parts = []
     tags = set(self.config['tags'])
     mod_name = self.config['mod_name']
@@ -63,25 +69,32 @@ def build_docs_index(self):
     # FIXME: some of these should use package names
 
     if {'gitlab', 'kitware'}.issubset(tags):
-        parts.append(ub.codeblock(
-            f'''
+        parts.append(
+            ub.codeblock(
+                f"""
             :gitlab_url: https://gitlab.kitware.com/computer-vision/{repo_name}
-            '''))
+            """
+            )
+        )
 
     if {'github'}.issubset(tags):
-        parts.append(ub.codeblock(
-            f'''
+        parts.append(
+            ub.codeblock(
+                f"""
             :github_url: {self.config['url']}
-            '''))
+            """
+            )
+        )
 
     logo_part = ub.codeblock(
-        '''
+        """
         .. The large version wont work because github strips rst image rescaling. https://i.imgur.com/AcWVroL.png
             # TODO: Add a logo
             .. image:: https://i.imgur.com/PoYIsWE.png
                :height: 100px
                :align: left
-        ''')
+        """
+    )
 
     this_fpath = str(__file__)
 
@@ -95,23 +108,25 @@ def build_docs_index(self):
     parts.append(title_part)
 
     init_part = ub.codeblock(
-        f'''
+        f"""
         .. The __init__ files contains the top-level documentation overview
         .. automodule:: {mod_name}.__init__
            :show-inheritance:
-        ''')
+        """
+    )
     parts.append(init_part)
 
     if 0:
         usefulness_part = ub.codeblock(
-            '''
+            """
             .. # Computed function usefulness
             .. include:: function_usefulness.rst
-            ''')
+            """
+        )
         parts.append(usefulness_part)
 
     sidebar_part = ub.codeblock(
-        f'''
+        f"""
         .. toctree::
            :maxdepth: 5
 
@@ -125,7 +140,8 @@ def build_docs_index(self):
         * :ref:`genindex`
         * :ref:`modindex`
         * :ref:`search`
-        ''')
+        """
+    )
     parts.append(sidebar_part)
 
     text = '\n\n'.join(parts)
@@ -152,12 +168,16 @@ def build_docs_conf(self):
         'repo_url': self.config.url,
         'author': author_str,
         'year': datetime_mod.datetime.now().year,
-        'repodir_wrt_home': self.repodir.shrinkuser()
+        'repodir_wrt_home': self.repodir.shrinkuser(),
     }
 
-    fmtkw['invoke_apidoc'] = docs_builder.sphinx_apidoc_invocation(shrinkuser=True)
+    fmtkw['invoke_apidoc'] = docs_builder.sphinx_apidoc_invocation(
+        shrinkuser=True
+    )
     fmtkw['docs_dpath_wrt_home'] = docs_builder.docs_dpath.shrinkuser()
-    fmtkw['rel_add_dir'] = docs_builder.docs_auto_outdir.relative_to(docs_builder.docs_dpath)
+    fmtkw['rel_add_dir'] = docs_builder.docs_auto_outdir.relative_to(
+        docs_builder.docs_dpath
+    )
 
     text = ub.codeblock(
         r'''
@@ -567,19 +587,26 @@ def build_docs_conf(self):
 
 
         # -- Extension configuration -------------------------------------------------
-        ''').format(**fmtkw)
+        '''
+    ).format(**fmtkw)
 
     from xcookie import rc
 
     util_text = rc.resource_fpath('conf_ext.py').read_text()
 
     if self.config.render_doc_images:
-        util_text = util_text.replace('render_doc_images = 0', 'render_doc_images = 1')
+        util_text = util_text.replace(
+            'render_doc_images = 0', 'render_doc_images = 1'
+        )
 
     if self.config['repo_name'] == 'kwcoco':
-        util_text = util_text.replace('HACK_FOR_KWCOCO = 0', 'HACK_FOR_KWCOCO = 1')
+        util_text = util_text.replace(
+            'HACK_FOR_KWCOCO = 0', 'HACK_FOR_KWCOCO = 1'
+        )
 
     text = text + '\n' + util_text
+    from xcookie.util.util_code_format import format_code
+    text = format_code(text)
     return text
 
 
@@ -587,7 +614,7 @@ def build_docs_requirements(self):
     import ubelt as ub
 
     docs_requierments = ub.codeblock(
-        '''
+        """
         sphinx>=5.0.1
         sphinx-autobuild>=2021.3.14
         sphinx_rtd_theme >= 1.2.1
@@ -597,7 +624,8 @@ def build_docs_requirements(self):
         myst_parser>=0.18.0
         sphinx-reredirects>=0.0.1
         xdoctest>=1.1.2
-        ''')
+        """
+    )
 
     if self.config.render_doc_images:
         if self.config['mod_name'] != 'kwplot':

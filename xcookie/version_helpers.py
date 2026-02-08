@@ -19,11 +19,11 @@ def parse_minimum_python_version(requires_python: str) -> str | None:
     min_version = None
 
     for spec in spec_set:
-        if spec.operator in (">=", ">", "=="):
+        if spec.operator in ('>=', '>', '=='):
             v = Version(spec.version)
             # If ">" is used, bump by a patch so it's valid
-            if spec.operator == ">":
-                v = Version(f"{v.major}.{v.minor}.{v.micro + 1}")
+            if spec.operator == '>':
+                v = Version(f'{v.major}.{v.minor}.{v.micro + 1}')
             if min_version is None or v < min_version:
                 min_version = v
 
