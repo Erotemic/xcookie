@@ -18,12 +18,13 @@ def make_mypy_check_parts(self):
         pip_install_reqs = f'pip install -r {req_files_text}'
 
     commands = ub.codeblock(
-        f'''
+        f"""
         python -m pip install mypy
         {pip_install_reqs}
         mypy --install-types --non-interactive ./{self.rel_mod_dpath}
         mypy ./{self.rel_mod_dpath}
-        ''')
+        """
+    )
     return commands
 
 
@@ -38,7 +39,7 @@ def make_build_sdist_parts(self, wheelhouse_dpath='wheelhouse'):
 
     build_parts = {
         'commands': commands,
-        'artifact': f"./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz"
+        'artifact': f'./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz',
     }
     return build_parts
 
@@ -54,18 +55,19 @@ def make_build_wheel_parts(self, wheelhouse_dpath='wheelhouse'):
 
     build_wheel_parts = {
         'commands': commands,
-        'artifact': f"./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.whl"
+        'artifact': f'./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.whl',
     }
     return build_wheel_parts
 
 
-def make_install_and_test_wheel_parts(self,
-                                      wheelhouse_dpath,
-                                      special_install_lines,
-                                      workspace_dname,
-                                      custom_before_test_lines=[],
-                                      custom_after_test_commands=[],
-                                      ):
+def make_install_and_test_wheel_parts(
+    self,
+    wheelhouse_dpath,
+    special_install_lines,
+    workspace_dname,
+    custom_before_test_lines=[],
+    custom_after_test_commands=[],
+):
     """
     Builds the YAML common between github actions and gitlab CI to install and
     tests python packages.
@@ -85,8 +87,9 @@ def make_install_and_test_wheel_parts(self,
     # get_mod_version_bash = f'python -c "{get_mod_version_python}"'
 
     import ubelt as ub
+
     get_wheel_fpath_bash = ub.codeblock(
-        f'''
+        f"""
         python -c "if 1:
             import pathlib
             dist_dpath = pathlib.Path('{wheelhouse_dpath}')
@@ -95,13 +98,14 @@ def make_install_and_test_wheel_parts(self,
             fpath = sorted(candidates)[-1]
             print(str(fpath).replace(chr(92), chr(47)))
         "
-        ''')
+        """
+    )
 
     if tuple(map(int, self.config.min_python.split('.'))) >= (3, 8):
         # Not sure why this fails on 3.6 / 3.7?
         # Use less ugly version when we can
         get_mod_version_bash = ub.codeblock(
-            '''
+            """
             python -c "if 1:
                 from pkginfo import Wheel, SDist
                 import pathlib
@@ -110,10 +114,11 @@ def make_install_and_test_wheel_parts(self,
                 item = cls(fpath)
                 print(item.version)
             "
-            ''')
+            """
+        )
     else:
         get_mod_version_bash = ub.codeblock(
-            '''
+            """
             python -c "if 1:
                 from pkginfo import Wheel, SDist
                 import pathlib
@@ -136,7 +141,8 @@ def make_install_and_test_wheel_parts(self,
                 else:
                     print(item.version)
             "
-            ''')
+            """
+        )
     # get_mod_version_bash = ub.codeblock(
     #     r'''
     #     export MOD_VERSION=$(printf "$WHEEL_FPATH" | sed -E 's#.*/[^/]+-([0-9]+\.[0-9]+\.[0-9]+)[-.].*#\1#')
@@ -156,7 +162,7 @@ def make_install_and_test_wheel_parts(self,
     # )
 
     # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath(f'{self.mod_name}'))"
-    get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
+    get_modpath_python = f'import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))'
     get_modpath_bash = f'python -c "{get_modpath_python}"'
 
     test_command = self.config['test_command']
@@ -165,11 +171,13 @@ def make_install_and_test_wheel_parts(self,
         if 'ibeis' == self.mod_name:
             test_command = [
                 'python -m xdoctest $MOD_DPATH --style=google all',
-                'echo "xdoctest command finished"'
+                'echo "xdoctest command finished"',
             ]
         else:
             test_command = [
-                Yaml.CodeBlock('python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --durations=100 --cov="$MOD_NAME" "$MOD_DPATH" ../tests'),
+                Yaml.CodeBlock(
+                    'python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --durations=100 --cov="$MOD_NAME" "$MOD_DPATH" ../tests'
+                ),
                 'echo "pytest command finished, moving the coverage file to the repo root"',
             ]
     else:
@@ -194,50 +202,52 @@ def make_install_and_test_wheel_parts(self,
         ]
 
     # Note: export does not expose the environment variable to subsequent jobs.
-    install_wheel_commands = [
-        'echo "Finding the path to the wheel"',
-        f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',
-        'echo "Installing helpers: update pip"',
-        f'{self.UPDATE_PIP}',
-        *install_helpers,
-        f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
-        f'export MOD_VERSION=$({get_mod_version_bash})',
-    ] + special_install_lines + [
-        'echo "WHEEL_FPATH=$WHEEL_FPATH"',
-        'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
-        'echo "UV_RESOLUTION=$UV_RESOLUTION"',
-        'echo "MOD_VERSION=$MOD_VERSION"',
+    install_wheel_commands = (
+        [
+            'echo "Finding the path to the wheel"',
+            f'ls {wheelhouse_dpath} || echo "{wheelhouse_dpath} does not exist"',
+            'echo "Installing helpers: update pip"',
+            f'{self.UPDATE_PIP}',
+            *install_helpers,
+            f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
+            f'export MOD_VERSION=$({get_mod_version_bash})',
+        ]
+        + special_install_lines
+        + [
+            'echo "WHEEL_FPATH=$WHEEL_FPATH"',
+            'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
+            'echo "UV_RESOLUTION=$UV_RESOLUTION"',
+            'echo "MOD_VERSION=$MOD_VERSION"',
+            # This helps but doesn't solve the problem.
+            # https://github.com/Erotemic/xdoctest/pull/158#discussion_r1697092781
+            # 'echo "Downloading dependencies from pypi"',
+            # f'pip download "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" --dest wheeldownload',
+            # f'echo "Overwriting pypi {self.mod_name} wheel"',
+            # 'cp wheelhouse/* wheeldownload/',
+            # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
+            # TODO: flag to allow prerelease?
+            # f'{self.PIP_INSTALL_PREFER_BINARY} --prerelease=allow "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+            f'{self.PIP_INSTALL_PREFER_BINARY} "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+            'echo "Install finished."',
+        ]
+    )
 
-        # This helps but doesn't solve the problem.
-        # https://github.com/Erotemic/xdoctest/pull/158#discussion_r1697092781
-        # 'echo "Downloading dependencies from pypi"',
-        # f'pip download "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" --dest wheeldownload',
-        # f'echo "Overwriting pypi {self.mod_name} wheel"',
-        # 'cp wheelhouse/* wheeldownload/',
-        # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
-
-        # TODO: flag to allow prerelease?
-        # f'{self.PIP_INSTALL_PREFER_BINARY} --prerelease=allow "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-        f'{self.PIP_INSTALL_PREFER_BINARY} "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-
-        'echo "Install finished."',
-    ]
-
-    test_wheel_commands = [
-        'echo "Creating test sandbox directory"',
-        f'export WORKSPACE_DNAME="{workspace_dname}"',
-        'echo "WORKSPACE_DNAME=$WORKSPACE_DNAME"',
-        'mkdir -p $WORKSPACE_DNAME',
-        'echo "cd-ing into the workspace"',
-        'cd $WORKSPACE_DNAME',
-        'pwd',
-        'ls -altr',
-        # 'pip freeze',
-        '# Get the path to the installed package and run the tests',
-        f'export MOD_DPATH=$({get_modpath_bash})',
-        f'export MOD_NAME={self.mod_name}',
-        Yaml.CodeBlock(
-            '''
+    test_wheel_commands = (
+        [
+            'echo "Creating test sandbox directory"',
+            f'export WORKSPACE_DNAME="{workspace_dname}"',
+            'echo "WORKSPACE_DNAME=$WORKSPACE_DNAME"',
+            'mkdir -p $WORKSPACE_DNAME',
+            'echo "cd-ing into the workspace"',
+            'cd $WORKSPACE_DNAME',
+            'pwd',
+            'ls -altr',
+            # 'pip freeze',
+            '# Get the path to the installed package and run the tests',
+            f'export MOD_DPATH=$({get_modpath_bash})',
+            f'export MOD_NAME={self.mod_name}',
+            Yaml.CodeBlock(
+                """
             echo "
             ---
             MOD_DPATH = $MOD_DPATH
@@ -245,8 +255,13 @@ def make_install_and_test_wheel_parts(self,
             running the pytest command inside the workspace
             ---
             "
-            '''),
-    ] + custom_before_test_lines + test_command + custom_after_test_commands
+            """
+            ),
+        ]
+        + custom_before_test_lines
+        + test_command
+        + custom_after_test_commands
+    )
 
     install_and_test_wheel_parts = {
         'install_wheel_commands': install_wheel_commands,
@@ -285,10 +300,7 @@ def get_supported_platform_info(self):
         # os_list.append('windows-11-arm')
 
     cpython_versions = self.config['ci_cpython_versions']
-    pypy_versions = [
-        f'pypy-{v}'
-        for v in self.config['ci_pypy_versions']
-    ]
+    pypy_versions = [f'pypy-{v}' for v in self.config['ci_pypy_versions']]
     # 3.4 is broken on github actions it seems
     cpython_versions_non34 = [v for v in cpython_versions if v != '3.4']
     supported_py_versions = self.config['supported_python_versions']
@@ -296,7 +308,10 @@ def get_supported_platform_info(self):
         raise Exception('no supported python versions?')
 
     from xcookie import constants
-    INFO_LUT = {row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO}
+
+    INFO_LUT = {
+        row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO
+    }
 
     # Choose which Python version will be the "main" one we use for version
     # agnostic jobs.
@@ -366,5 +381,8 @@ def get_supported_platform_info(self):
         'install_extra_versions': extras_versions,
     }
     import ubelt as ub
-    print(f'supported_platform_info = {ub.urepr(supported_platform_info, nl=1)}')
+
+    print(
+        f'supported_platform_info = {ub.urepr(supported_platform_info, nl=1)}'
+    )
     return supported_platform_info

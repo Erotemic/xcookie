@@ -12,6 +12,7 @@ def test_simple_repo():
 
     if ub.WIN32:
         import pytest
+
         pytest.skip('requires bash')
 
     dpath = ub.Path.appdir('xcookie/tests/test-init/simple_repo')
@@ -28,7 +29,7 @@ def test_simple_repo():
         rotate_secrets=False,
         init_new_remotes=False,
         tags=['github', 'purepy'],
-        interactive=False
+        interactive=False,
     )
     # config = main.XCookieConfig(**kwargs)
     # config['repodir'] = 'fds'
@@ -39,6 +40,7 @@ def test_simple_repo():
         **kwargs
     )
     import xdev
+
     xdev.tree_repr(dpath)
     # from xdev.cli.dirstats import DirectoryWalker
     # walker = DirectoryWalker(dpath, show_nfiles=0,
@@ -50,8 +52,9 @@ def test_simple_repo():
     # ---
     # Write some simple content into the module
     mymod1_fpath = self.mod_dpath / 'mymod1.py'
-    mymod1_fpath.write_text(ub.codeblock(
-        '''
+    mymod1_fpath.write_text(
+        ub.codeblock(
+            '''
         """
         A simple demo module.
         """
@@ -75,15 +78,24 @@ def test_simple_repo():
                 >>> kwplot.show_if_requested()
             """
             return x + y + z
-        '''))
+        '''
+        )
+    )
 
     mymod1_init_fpath = self.mod_dpath / '__init__.py'
     text = mymod1_init_fpath.read_text()
-    text = text.replace('Basic', ub.paragraph(
-        '''
+    text = (
+        text.replace(
+            'Basic',
+            ub.paragraph(
+                """
         Hello world. This is an example documentation written to the module
         dunder init. It should be rendered in the main sphinx apidoc page.
-        ''')) + '\n\n# foobar\n\n'
+        """
+            ),
+        )
+        + '\n\n# foobar\n\n'
+    )
     mymod1_init_fpath.write_text(text)
 
     # We could do mkinit if we wanted.
@@ -99,6 +111,7 @@ def test_simple_repo():
 
     # hack to ensure module is importable before make html
     import os
+
     env = os.environ
     PYTHONPATH = env.get('PYTHONPATH', '').split(os.pathsep)
     PYTHONPATH.insert(0, str(self.mod_dpath.parent.absolute()))
@@ -108,5 +121,6 @@ def test_simple_repo():
     if 0:
         # For Debugging
         import xdev
-        index_html_fpath = (docs_dpath / 'build/html/index.html')
+
+        index_html_fpath = docs_dpath / 'build/html/index.html'
         xdev.startfile(index_html_fpath)

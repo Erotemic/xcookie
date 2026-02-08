@@ -34,9 +34,17 @@ class GitlabRemote:
         self = GitlabRemote('geowatch', 'computer-vision', 'https://gitlab.kitware.com')
 
     """
-    def __init__(self, proj_name, proj_group, url, visibility='public',
-                 private_token='env:PRIVATE_GITLAB_TOKEN'):
+
+    def __init__(
+        self,
+        proj_name,
+        proj_group,
+        url,
+        visibility='public',
+        private_token='env:PRIVATE_GITLAB_TOKEN',
+    ):
         import gitlab  # type: ignore
+
         self.url = url
         self.proj_name = proj_name
         self.proj_path = proj_name
@@ -64,8 +72,11 @@ class GitlabRemote:
     @property
     def project(self):
         group = self.group
-        found = [p for p in group.projects.list(iterator=True)
-                 if p.path.lower() == self.proj_path.lower()]
+        found = [
+            p
+            for p in group.projects.list(iterator=True)
+            if p.path.lower() == self.proj_path.lower()
+        ]
         group_project = _return_one(found)
         project = self.gitlab.projects.get(group_project.id)
         return project
@@ -107,21 +118,23 @@ class GitlabRemote:
         project = self.project
 
         existing_protected_branches = project.protectedbranches.list()
-        expected_protected_branches = [
-            'release', 'main',
-            'master'
-        ]
+        expected_protected_branches = ['release', 'main', 'master']
 
         existing = {b.name for b in existing_protected_branches}
-        missing = [bname for bname in expected_protected_branches
-                   if bname not in existing]
+        missing = [
+            bname
+            for bname in expected_protected_branches
+            if bname not in existing
+        ]
 
         for name in missing:
             # https://docs.gitlab.com/ee/api/protected_branches.html#protect-repository-branches
-            project.protectedbranches.create({
-                'name': name,
-                'allow_force_push': False,
-            })
+            project.protectedbranches.create(
+                {
+                    'name': name,
+                    'allow_force_push': False,
+                }
+            )
         # if hasattr(gitlab.const, 'AccessLevel'):
         #     maintainer = gitlab.const.AccessLevel.MAINTAINER
         # else:
@@ -137,9 +150,21 @@ class GitlabRemote:
         for branch in protected_branches:
             print('---')
             print('branch = {}'.format(ub.urepr(branch, nl=1)))
-            print('branch.push_access_levels = {}'.format(ub.urepr(branch.push_access_levels, nl=1)))
-            print('branch.merge_access_levels = {}'.format(ub.urepr(branch.merge_access_levels, nl=1)))
-            print('branch.allow_force_push = {}'.format(ub.urepr(branch.allow_force_push, nl=1)))
+            print(
+                'branch.push_access_levels = {}'.format(
+                    ub.urepr(branch.push_access_levels, nl=1)
+                )
+            )
+            print(
+                'branch.merge_access_levels = {}'.format(
+                    ub.urepr(branch.merge_access_levels, nl=1)
+                )
+            )
+            print(
+                'branch.allow_force_push = {}'.format(
+                    ub.urepr(branch.allow_force_push, nl=1)
+                )
+            )
         # if 0:
         #         # API does not directly support this, hack it in
         #         post_data = {

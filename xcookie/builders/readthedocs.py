@@ -9,8 +9,9 @@ def build_readthedocs(self):
 
     # https://docs.readthedocs.io/en/stable/config-file/v2.html#build
 
-    default_data = Yaml.loads(ub.codeblock(
-        f'''
+    default_data = Yaml.loads(
+        ub.codeblock(
+            f"""
         # .readthedocs.yml
         # Read the Docs configuration file
         # See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
@@ -47,21 +48,28 @@ def build_readthedocs(self):
 
         #conda:
         #  environment: environment.yml
-        '''))
+        """
+        )
+    )
 
     data = default_data.copy()
 
     if 'cv2' in self.tags:
-        data['python']['install'].insert(0, {'requirements': 'requirements/headless.txt'})
+        data['python']['install'].insert(
+            0, {'requirements': 'requirements/headless.txt'}
+        )
     # else:
     #     if self.config.render_doc_images:
     #         data['python']['install'].insert(0, {'requirements': 'requirements/special-headless.txt'})
 
     if 'gdal' in self.tags:
-        data['python']['install'].insert(0, {'requirements': 'requirements/gdal.txt'})
+        data['python']['install'].insert(
+            0, {'requirements': 'requirements/gdal.txt'}
+        )
 
     # import ruamel
     # text = ruamel.yaml.round_trip_dump(data, Dumper=ruamel.yaml.RoundTripDumper)
     import kwutil
+
     text = kwutil.Yaml.dumps(data)
     return text
