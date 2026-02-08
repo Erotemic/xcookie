@@ -748,6 +748,20 @@ def build_lint_job(self, common_template, deploy_image):
         )
     )
 
+    # Add typechecking commands (mypy + ty by default) unless disabled
+    if 'notypes' not in self.tags:
+        try:
+            typecheck_cmds = common_ci.make_typecheck_parts(self)
+        except Exception:
+            typecheck_cmds = []
+
+        if typecheck_cmds:
+            # Ensure the script key exists and is a list
+            script_list = lint_job.get('script') or []
+            # Extend script with typecheck commands
+            script_list = list(script_list) + typecheck_cmds
+            lint_job['script'] = script_list
+
     lint_job = CommentedMap(lint_job)
     lint_job.add_yaml_merge([(0, common_template)])
 

@@ -566,10 +566,10 @@ def lint_job(self):
     }
 
     if 'notypes' not in self.tags:
-        mypy_check_commands = common_ci.make_mypy_check_parts(self)
-        job['steps'].append(
-            {'name': 'Typecheck with mypy', 'run': mypy_check_commands}
-        )
+        typecheck_cmds = common_ci.make_typecheck_parts(self)
+        # GitHub Actions expects a single string for `run` with newlines
+        run_text = '\n'.join(typecheck_cmds)
+        job['steps'].append({'name': 'Typecheck', 'run': run_text})
     return Yaml.Dict(job)
 
 

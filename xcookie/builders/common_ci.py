@@ -3,9 +3,20 @@ Common subroutines for consistency between gitlab-ci / github actions / etc...
 """
 
 
-def make_mypy_check_parts(self):
+def make_typecheck_parts(self, checkers=None):
+    """
+    Return a list of shell commands to run type checkers.
+
+    By default this will run both `mypy` and `ty` (in that order). The
+    returned value is a list of command strings so callers can adapt it to
+    either GitHub Actions (`run` string) or GitLab CI (`script` list).
+    """
     import ubelt as ub
 
+    if checkers is None:
+        checkers = ['mypy', 'ty']
+
+    # Where to install runtime/type requirements from
     type_requirement_files = [
         # TODO: get this location from the config
         'requirements/runtime.txt'
@@ -17,15 +28,36 @@ def make_mypy_check_parts(self):
     else:
         pip_install_reqs = f'pip install -r {req_files_text}'
 
-    commands = ub.codeblock(
-        f"""
-        python -m pip install mypy
-        {pip_install_reqs}
-        mypy --install-types --non-interactive ./{self.rel_mod_dpath}
-        mypy ./{self.rel_mod_dpath}
-        """
-    )
+    commands = []
+
+    if 'mypy' in checkers:
+        commands += [
+            'python -m pip install mypy',
+            pip_install_reqs,
+            f'mypy --install-types --non-interactive ./{self.rel_mod_dpath}',
+            f'mypy ./{self.rel_mod_dpath}',
+        ]
+
+    if 'ty' in checkers:
+        # Generic support for "ty". Install and run; users can customize
+        # behavior by changing `checkers` or adding config-specific steps.
+        commands += [
+            'python -m pip install ty',
+            pip_install_reqs,
+            f'ty check ./{self.rel_mod_dpath}',
+        ]
+
     return commands
+
+
+def make_mypy_check_parts(self):
+    """Backward-compatible wrapper returning a newline-joined string
+    (preserves previous behavior) for callers that expect a single string.
+    """
+    import ubelt as ub
+
+    parts = make_typecheck_parts(self, checkers=['mypy'])
+    return ub.codeblock('\n'.join(parts))
 
 
 def make_build_sdist_parts(self, wheelhouse_dpath='wheelhouse'):
