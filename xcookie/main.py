@@ -1062,7 +1062,7 @@ class TemplateApplier:
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Topic :: Utilities',
             # This should be interpreted as Apache License v2.0
-            'License :: OSI Approved :: Apache Software License',
+            # 'License :: OSI Approved :: Apache Software License',
         ]
 
         disk_config = self.config._load_pyproject_config()
@@ -1808,6 +1808,63 @@ class TemplateApplier:
         from xcookie.builders import pyproject
 
         return pyproject.build_pyproject(self)
+
+    def format_code(self, text, filename='snippet.py'):
+        """
+        Format Python code using the project's pyproject.toml ruff settings.
+
+        Reads ruff configuration from [tool.ruff] and [tool.ruff.format] sections
+        of the project's pyproject.toml and uses those as defaults for formatting.
+
+        Args:
+            text (str): Python code to format
+            filename (str): Virtual filename for the formatter (default: 'snippet.py')
+
+        Returns:
+            str: Formatted code
+        """
+        from xcookie.util.util_code_format import (
+            format_code as util_format_code,
+            make_backend,
+            RuffFormatConfig,
+        )
+
+        # Read the project's ruff configuration if available
+        disk_config = self.config._load_pyproject_config()
+        ruff_config_dict = disk_config.get('tool', {}).get('ruff', {})
+        ruff_format_dict = ruff_config_dict.get('format', {})
+
+        # Build RuffFormatConfig from the pyproject settings
+        ruff_config_kwargs = {}
+
+        # Map pyproject settings to RuffFormatConfig parameters
+        if 'quote-style' in ruff_format_dict:
+            ruff_config_kwargs['quote_style'] = ruff_format_dict['quote-style']
+        if 'indent-style' in ruff_format_dict:
+            ruff_config_kwargs['indent_style'] = ruff_format_dict['indent-style']
+        if 'skip-magic-trailing-comma' in ruff_format_dict:
+            ruff_config_kwargs['skip_magic_trailing_comma'] = ruff_format_dict[
+                'skip-magic-trailing-comma'
+            ]
+        if 'preview' in ruff_format_dict:
+            ruff_config_kwargs['preview'] = ruff_format_dict['preview']
+        if 'docstring-code-format' in ruff_format_dict:
+            ruff_config_kwargs['docstring_code_format'] = ruff_format_dict[
+                'docstring-code-format'
+            ]
+        if 'docstring-code-line-length' in ruff_format_dict:
+            ruff_config_kwargs['docstring_code_line_length'] = ruff_format_dict[
+                'docstring-code-line-length'
+            ]
+        if 'line-length' in ruff_config_dict:
+            ruff_config_kwargs['line_length'] = ruff_config_dict['line-length']
+
+        # Create the config and backend
+        ruff_config = RuffFormatConfig(**ruff_config_kwargs)
+        backend = make_backend('ruff', ruff_config=ruff_config)
+
+        # Format and return the code
+        return util_format_code(text, backend=backend, filename=filename)
 
     def _setup_pip_commands(self):
         # Hack for uv migration, to get some common variables.  need to clean
