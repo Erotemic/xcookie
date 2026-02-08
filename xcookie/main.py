@@ -177,7 +177,7 @@ class XCookieConfig(scfg.DataConfig):
 
         'visibility': scfg.Value('public', help='or private. Does limit what we can do'),
 
-        'test_env': scfg.Value(None, help='A YAML coercable dictionary of environment variables to use in test stages. (TOTO'),
+        'test_env': scfg.Value(None, help='A YAML coercible dictionary of environment variables to use in test stages. (TOTO'),
 
 
         'version': scfg.Value(None, help='repo metadata: url for the project'),
@@ -203,7 +203,7 @@ class XCookieConfig(scfg.DataConfig):
 
         'only_generate': scfg.Value(None, alias='only_gen', help=ub.paragraph(
             '''
-            if specified, onyl generate files matching this multipattern.
+            if specified, only generate files matching this multipattern.
             ''')),
 
         'tags': scfg.Value('auto', nargs='*', help=ub.paragraph(
