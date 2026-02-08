@@ -287,6 +287,13 @@ class XCookieConfig(scfg.DataConfig):
                 self['os'].add('osx')
                 self['os'].add('linux')
                 self['os'].remove('all')
+            os_normalizer = {
+                'windows': 'win',
+                'win32': 'win',
+                'darwin': 'osx',
+                'apple': 'osx',
+            }
+            self['os'] = [os_normalizer.get(x, x) for x in self['os']]
             self['os'] = sorted(self['os'])
 
         if self['repo_name'] is None:
@@ -834,6 +841,9 @@ class TemplateApplier:
         self.remote_info = {
             'type': 'unknown'
         }
+
+        if isinstance(self.config.url, str) and self.config.url.lower() in {'none', 'null'}:
+            self.config.url = None
 
         if self.config.url is None:
             # if 'github' not in tags and 'gitlab' not in tags:

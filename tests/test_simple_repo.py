@@ -35,7 +35,7 @@ def test_simple_repo():
     # rich.print(f'config = {ub.urepr(config, nl=1)}')
 
     self = main.XCookieConfig.main(
-        cmdline=0,
+        argv=0,
         **kwargs
     )
     import xdev
@@ -90,7 +90,7 @@ def test_simple_repo():
     # ub.cmd(f'mkinit {mymod1_init_fpath} -w', verbose=3)
 
     self = main.XCookieConfig.main(
-        cmdline=0,
+        argv=0,
         **kwargs,
         refresh_docs=True,
         render_doc_images=True,
