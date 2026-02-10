@@ -288,7 +288,6 @@ class Actions:
                         # 'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
                         # configure cibuildwheel to build native archs ('auto'), or emulated ones
                         'CIBW_ARCHS_LINUX': '${{ matrix.arch }}',
-                        'CIBW_ENVIRONMENT': 'PYTHONUTF8=1',  # for windows
                         'PYTHONUTF8': '1',  # for windows
                         # TODO: only include this if we are building on windows arm
                         # `msvc-dev-cmd` sets this envvar, which interferes with
@@ -814,6 +813,13 @@ def build_binpy_wheels_job(self):
     job_steps += [Actions.checkout()]
     job_steps += conditional_actions
 
+    use_vcpkg = 'vcpkg' in self.tags or 'opencv_link' in self.tags
+    opencv_link = 'opencv_link' in self.tags
+    if 'cv2' in self.tags and 'opencv_link' not in self.tags:
+        assert not opencv_link, (
+            'cv2 is runtime-only and must not imply opencv_link'
+        )
+
     USE_ABI3 = False
     if USE_ABI3:
         # Hack in abi3 support, todo: clean up later.
@@ -824,11 +830,150 @@ def build_binpy_wheels_job(self):
         )
         abi3_action['env']['CIBW_BUILD'] = 'cp38-*'
 
+    vcpkg_pre_steps = []
+    vcpkg_post_steps = []
+    if use_vcpkg:
+        vcpkg_pre_steps.append(
+            {
+                'name': 'Set vcpkg cache paths (Windows)',
+                'if': "runner.os == 'Windows'",
+                'shell': 'pwsh',
+                'run': ub.codeblock(
+                    """
+                    "VCPKG_ARCHIVES_DIR=$env:LOCALAPPDATA\\vcpkg\\archives" >> $env:GITHUB_ENV
+                    "VCPKG_DOWNLOADS_DIR=C:\\vcpkg\\downloads" >> $env:GITHUB_ENV
+                    New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\\vcpkg\\archives" | Out-Null
+                    New-Item -ItemType Directory -Force -Path "C:\\vcpkg\\downloads" | Out-Null
+                    """
+                ),
+            }
+        )
+        vcpkg_pre_steps.append(
+            {
+                'name': 'Restore vcpkg caches (Windows)',
+                'if': "runner.os == 'Windows'",
+                'id': 'vcpkg-cache',
+                'uses': 'actions/cache/restore@v4',
+                'with': {
+                    'path': ub.codeblock(
+                        """
+                        ${{ env.VCPKG_ARCHIVES_DIR }}
+                        ${{ env.VCPKG_DOWNLOADS_DIR }}
+                        """
+                    ),
+                    'key': "vcpkg-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'CMakeLists.txt', 'setup.py', 'vcpkg.json', 'vcpkg-configuration.json') }}",
+                    'restore-keys': ub.codeblock(
+                        """
+                        vcpkg-${{ runner.os }}-
+                        """
+                    ),
+                },
+            }
+        )
+        vcpkg_pre_steps.append(
+            {
+                'name': 'Ensure vcpkg (Windows)',
+                'if': "runner.os == 'Windows'",
+                'shell': 'pwsh',
+                'run': ub.codeblock(
+                    """
+                    if (-not (Test-Path "C:\\vcpkg")) {
+                      git clone https://github.com/microsoft/vcpkg C:\\vcpkg
+                    }
+                    Set-Location C:\\vcpkg
+                    .\\bootstrap-vcpkg.bat -disableMetrics
+                    "C:\\vcpkg" | Out-File -FilePath $env:GITHUB_PATH -Append
+                    """
+                ),
+            }
+        )
+        if opencv_link:
+            vcpkg_pre_steps.append(
+                {
+                    'name': 'Install OpenCV via vcpkg (Windows)',
+                    'if': "runner.os == 'Windows'",
+                    'shell': 'pwsh',
+                    'run': ub.codeblock(
+                        """
+                        vcpkg install opencv4:x64-windows
+                        """
+                    ),
+                }
+            )
+        vcpkg_post_steps.append(
+            {
+                'name': 'Save vcpkg caches (Windows, even on failure)',
+                'if': "runner.os == 'Windows' && always()",
+                'uses': 'actions/cache/save@v4',
+                'with': {
+                    'path': ub.codeblock(
+                        """
+                        ${{ env.VCPKG_ARCHIVES_DIR }}
+                        ${{ env.VCPKG_DOWNLOADS_DIR }}
+                        """
+                    ),
+                    'key': '${{ steps.vcpkg-cache.outputs.cache-primary-key }}',
+                },
+            }
+        )
+
+    cibw_action = Actions.cibuildwheel(sensible=True)
+    if use_vcpkg:
+        env = cibw_action['env']
+        if any('windows' in osname for osname in os_list):
+            env['CIBW_ARCHS_WINDOWS'] = 'AMD64'
+        cibw_env_lines = ub.codeblock(
+            """
+            VCPKG_ROOT=C:/vcpkg
+            VCPKG_TARGET_TRIPLET=x64-windows
+            VCPKG_DOWNLOADS=C:/vcpkg/downloads
+            PATH=C:/vcpkg;C:/vcpkg/installed/x64-windows/bin;{PATH}
+            """
+        )
+        if opencv_link:
+            cibw_env_lines = (
+                cibw_env_lines
+                + '\n'
+                + ub.codeblock(
+                    """
+                    OpenCV_DIR=C:/vcpkg/installed/x64-windows/share/opencv4
+                    OpenCV_ROOT=C:/vcpkg/installed/x64-windows
+                    CMAKE_PREFIX_PATH=C:/vcpkg/installed/x64-windows
+                    CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake;-DOpenCV_DIR=C:/vcpkg/installed/x64-windows/share/opencv4
+                    """
+                )
+            )
+        env['CIBW_ENVIRONMENT_WINDOWS'] = cibw_env_lines
+        env['VCPKG_ROOT'] = r'C:\vcpkg'
+        env['VCPKG_TARGET_TRIPLET'] = 'x64-windows'
+
     job_steps += [
         Actions.setup_qemu(sensible=True),
         # abi3_action,
-        Actions.cibuildwheel(sensible=True),
+        *vcpkg_pre_steps,
     ]
+    if use_vcpkg and 'ci_debug_windows_env' in self.tags:
+        job_steps.append(
+            {
+                'name': 'Show cibuildwheel Windows env (Windows)',
+                'if': "runner.os == 'Windows'",
+                'shell': 'bash',
+                'env': {
+                    'CIBW_ENVIRONMENT_WINDOWS': cibw_action['env'].get(
+                        'CIBW_ENVIRONMENT_WINDOWS', ''
+                    )
+                },
+                'run': ub.codeblock(
+                    """
+                    echo "CIBW_ENVIRONMENT_WINDOWS:"
+                    printf '%s\\n' "$CIBW_ENVIRONMENT_WINDOWS"
+                    """
+                ),
+            }
+        )
+    job_steps.append(cibw_action)
+    if vcpkg_post_steps:
+        job_steps += vcpkg_post_steps
     job_steps += [
         {
             'name': 'Show built files',
@@ -1284,6 +1429,48 @@ def test_wheels_job(self, needs=None):
             }
         )
     )
+
+    smoke_enabled = 'win_smoke' in self.tags or 'windows_smoke' in self.tags
+    if smoke_enabled:
+        smoke_run = ub.codeblock(
+            f"""
+            python - <<'PY'
+            import os, sys
+            import pathlib
+
+            ws = os.environ.get("GITHUB_WORKSPACE")
+            if ws:
+                ws_path = pathlib.Path(ws).resolve()
+                new_sys_path = []
+                for entry in sys.path:
+                    if not entry:
+                        new_sys_path.append(entry)
+                        continue
+                    try:
+                        p = pathlib.Path(entry).resolve()
+                        if p.is_relative_to(ws_path):
+                            continue
+                    except Exception:
+                        pass
+                    new_sys_path.append(entry)
+                sys.path[:] = new_sys_path
+
+            import {self.mod_name} as mod
+            print("{self.mod_name}:", mod.__file__)
+
+            PY
+            """
+        )
+        action_steps.append(
+            Actions.action(
+                {
+                    'name': 'Smoke test wheel on Windows',
+                    'if': "runner.os == 'Windows'",
+                    'shell': 'bash',
+                    'run': smoke_run,
+                }
+            )
+        )
 
     import kwutil
 

@@ -290,6 +290,10 @@ class XCookieConfig(scfg.DataConfig):
                 "gdal" - add in our gdal hack # TODO
                 "postgresql" - add in postgresql dependencies
                 "cv2" - enable the headless hack
+                "vcpkg" - enable Windows vcpkg bootstrap/caching
+                "opencv_link" - enable build-time OpenCV link on Windows
+                "win_smoke" / "windows_smoke" - enable Windows smoke test
+                "ci_debug_windows_env" - debug print Windows cibuildwheel env
                 "notypes" - disable mypy in lint checks
             """
             ),

@@ -124,10 +124,26 @@ def make_install_and_test_wheel_parts(
         f"""
         python -c "if 1:
             import pathlib
+            from packaging import tags
+            from packaging.utils import parse_wheel_filename
             dist_dpath = pathlib.Path('{wheelhouse_dpath}')
-            candidates = list(dist_dpath.glob('{self.pkg_fname_prefix}*.whl'))
-            candidates += list(dist_dpath.glob('{self.pkg_fname_prefix}*.tar.gz'))
-            fpath = sorted(candidates)[-1]
+            wheels = sorted(dist_dpath.glob('{self.pkg_fname_prefix}*.whl'))
+            if wheels:
+                sys_tags = set(tags.sys_tags())
+                matching = []
+                for w in wheels:
+                    try:
+                        _, _, _, wheel_tags = parse_wheel_filename(w.name)
+                    except Exception:
+                        continue
+                    if any(t in sys_tags for t in wheel_tags):
+                        matching.append(w)
+                fpath = sorted(matching or wheels)[-1]
+            else:
+                sdists = sorted(dist_dpath.glob('{self.pkg_fname_prefix}*.tar.gz'))
+                if not sdists:
+                    raise SystemExit('No wheel artifacts found in wheelhouse')
+                fpath = sdists[-1]
             print(str(fpath).replace(chr(92), chr(47)))
         "
         """
@@ -223,14 +239,14 @@ def make_install_and_test_wheel_parts(
             'echo "Installing helpers: setuptools"',
             f'{self.PIP_INSTALL} --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
             'echo "Installing helpers: tomli and pkginfo"',
-            f'{self.PIP_INSTALL} --resolution=highest tomli pkginfo',
+            f'{self.PIP_INSTALL} --resolution=highest tomli pkginfo packaging',
         ]
     else:
         install_helpers = [
             'echo "Installing helpers: setuptools"',
             f'{self.PIP_INSTALL} setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
             'echo "Installing helpers: tomli and pkginfo"',
-            f'{self.PIP_INSTALL} tomli pkginfo',
+            f'{self.PIP_INSTALL} tomli pkginfo packaging',
         ]
 
     # Note: export does not expose the environment variable to subsequent jobs.
@@ -344,6 +360,28 @@ def get_supported_platform_info(self):
     INFO_LUT = {
         row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO
     }
+
+    def _parse_pyver_tuple(pyver):
+        parts = [p for p in str(pyver).split('.') if p.isdigit()]
+        return tuple(int(p) for p in parts[:2])
+
+    if 'binpy' in self.config['tags']:
+        min_py = _parse_pyver_tuple(self.config['min_python'])
+        if min_py < (3, 9):
+            raise ValueError(
+                "xcookie does not support generating binpy workflows for Python < 3.9. "
+                "Bump min_python to >= 3.9 or disable binpy."
+            )
+        for ver in supported_py_versions:
+            if _parse_pyver_tuple(ver) < (3, 9):
+                raise ValueError(
+                    f"binpy requested with python-version={ver}, but xcookie requires >=3.9 for binpy"
+                )
+        for ver in cpython_versions:
+            if _parse_pyver_tuple(ver) < (3, 9):
+                raise ValueError(
+                    f"binpy requested with python-version={ver}, but xcookie requires >=3.9 for binpy"
+                )
 
     # Choose which Python version will be the "main" one we use for version
     # agnostic jobs.
