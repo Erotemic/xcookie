@@ -294,7 +294,7 @@ class XCookieConfig(scfg.DataConfig):
                 "opencv_link" - enable build-time OpenCV link on Windows
                 "win_smoke" / "windows_smoke" - enable Windows smoke test
                 "ci_debug_windows_env" - debug print Windows cibuildwheel env
-                "notypes" - disable mypy in lint checks
+                "notypes" - disable type checking in lint checks
             """
             ),
         ),
@@ -1449,6 +1449,12 @@ class TemplateApplier:
                     xdev.sedfile(
                         stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0
                     )
+
+        # Probably inefficient.
+        if stage_fpath.name.endswith('.py'):
+            new_text = self.format_code(stage_fpath.read_text(),
+                                        filename=stage_fpath.name)
+            stage_fpath.write_text(new_text)
         return info
 
     def _apply_xcookie_directives(self, stage_fpath):

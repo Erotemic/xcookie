@@ -86,7 +86,7 @@ class Actions:
     @classmethod
     def checkout(cls, *args, **kwargs):
         return cls.action(
-            {'name': 'Checkout source', 'uses': 'actions/checkout@v4.2.2'},
+            {'name': 'Checkout source', 'uses': 'actions/checkout@v6.0.2'},
             *args,
             **kwargs,
         )
@@ -107,7 +107,7 @@ class Actions:
         """
         return cls.action(
             {
-                'uses': 'codecov/codecov-action@v5.4.3',
+                'uses': 'codecov/codecov-action@v5.5.2',
             },
             *args,
             **kwargs,
@@ -144,7 +144,7 @@ class Actions:
     def upload_artifact(cls, *args, **kwargs):
         return cls.action(
             {
-                'uses': 'actions/upload-artifact@v4.4.0'
+                'uses': 'actions/upload-artifact@v6.0.0'
                 # Rollback to 3.x due to
                 # https://github.com/actions/upload-artifact/issues/478
                 # todo: migrate
@@ -225,7 +225,7 @@ class Actions:
         return cls.action(
             {
                 'name': 'Set up QEMU',
-                'uses': 'docker/setup-qemu-action@v3.0.0',
+                'uses': 'docker/setup-qemu-action@v3.7.0',
             },
             *args,
             **kwargs,
@@ -305,7 +305,7 @@ class Actions:
                 # 'uses': 'pypa/cibuildwheel@v2.16.2',
                 # 'uses': 'pypa/cibuildwheel@v2.17.0',
                 # 'uses': 'pypa/cibuildwheel@v2.21.0',
-                'uses': 'pypa/cibuildwheel@v3.1.2',
+                'uses': 'pypa/cibuildwheel@v3.3.1',
             },
             *args,
             **kwargs,
@@ -564,6 +564,8 @@ def lint_job(self):
         ],
     }
 
+    # TODO: I think we need to install reqs similarly
+    # to how we do it in github here?
     if 'notypes' not in self.tags:
         typecheck_cmds = common_ci.make_typecheck_parts(self)
         # GitHub Actions expects a single string for `run` with newlines
@@ -1418,6 +1420,20 @@ def test_wheels_job(self, needs=None):
         custom_before_test_lines=custom_before_test_lines,
         custom_after_test_commands=custom_after_test_commands,
     )
+
+    if len(self.config['ci_pypy_versions']) > 0 and 'osx' in self.config['os']:
+        # When using pypy on OSX we need to set a MACOSX_DEPLOYMENT_TARGET so any
+        # wheels (e.g. cffi) that it needs to build from source when we pip install
+        # our wheel are built correctly.
+        action_steps.append(
+            Actions.action(
+                {
+                    'name': 'Set macOS deployment target (arm64)',
+                    'if': "runner.os == 'macOS'",
+                    'run': 'echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV',
+                }
+            )
+        )
 
     action_steps.append(
         Actions.action(

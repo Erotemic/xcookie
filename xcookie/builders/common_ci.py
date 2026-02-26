@@ -1,9 +1,10 @@
 """
 Common subroutines for consistency between gitlab-ci / github actions / etc...
 """
+import ubelt as ub
 
 
-def make_typecheck_parts(self, checkers=None):
+def make_typecheck_parts(self):
     """
     Return a list of shell commands to run type checkers.
 
@@ -11,10 +12,16 @@ def make_typecheck_parts(self, checkers=None):
     returned value is a list of command strings so callers can adapt it to
     either GitHub Actions (`run` string) or GitLab CI (`script` list).
     """
-    import ubelt as ub
 
+    # TODO: more control over which type checkers to use.
+    # right now we always enable ty unless notypes is on.
+    # but we should have more sane defaults.
+    checkers = None
     if checkers is None:
-        checkers = ['mypy', 'ty']
+        checkers = ['ty']
+
+    if 'mypy' in self.tags:
+        checkers += ['mypy']
 
     # Where to install runtime/type requirements from
     type_requirement_files = [
@@ -34,7 +41,9 @@ def make_typecheck_parts(self, checkers=None):
         commands += [
             'python -m pip install mypy',
             pip_install_reqs,
-            f'mypy --install-types --non-interactive ./{self.rel_mod_dpath}',
+            # TODO; this likely needs to be replaced with some explicit
+            # registration of what typing requirements are for the library
+            # f'mypy --install-types --non-interactive ./{self.rel_mod_dpath}',
             f'mypy ./{self.rel_mod_dpath}',
         ]
 
@@ -48,16 +57,6 @@ def make_typecheck_parts(self, checkers=None):
         ]
 
     return commands
-
-
-def make_mypy_check_parts(self):
-    """Backward-compatible wrapper returning a newline-joined string
-    (preserves previous behavior) for callers that expect a single string.
-    """
-    import ubelt as ub
-
-    parts = make_typecheck_parts(self, checkers=['mypy'])
-    return ub.codeblock('\n'.join(parts))
 
 
 def make_build_sdist_parts(self, wheelhouse_dpath='wheelhouse'):
@@ -117,8 +116,6 @@ def make_install_and_test_wheel_parts(
     # get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
     # get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
     # get_mod_version_bash = f'python -c "{get_mod_version_python}"'
-
-    import ubelt as ub
 
     get_wheel_fpath_bash = ub.codeblock(
         f"""
@@ -450,7 +447,6 @@ def get_supported_platform_info(self):
         'main_python_version': main_python_version,
         'install_extra_versions': extras_versions,
     }
-    import ubelt as ub
 
     print(
         f'supported_platform_info = {ub.urepr(supported_platform_info, nl=1)}'
