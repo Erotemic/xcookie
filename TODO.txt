@@ -1,3 +1,12 @@
 - [ ] Add option to build the source dist, but not test it. I.e. change `nosrcdist` to `notest-srcdist` or something like that.
 
 - [ ] Add sdist to gitlab binpy repos.
+
+- [ ] Have the option for handling secrets natively with github/gitlab, but also keep the option to use encrypted credentials commited to the repo with one small key that is published to the running service.
+
+- [ ] Have the ability to use more standard github actions when possible.
+
+- [ ] Make it so it is easy to generate a github actions CI that can be used on an existing repo that is running gitlab. There are some small differences here. I want to use this to let my github mirrors of gitlab repos use github actions CI (e.g. kwcoco could really use github actions, as that is where people sometimes contribute to it).
+
+- [ ] Make it easy to run the github actions locally with act. We will want to do this for gitlab eventually, but if we can get the github path working it will be much easier to test general CI because if we do the previous TODO correctly, then testing the github version will be very similar to the gitlab version.
+

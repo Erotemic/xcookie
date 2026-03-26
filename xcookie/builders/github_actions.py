@@ -1109,10 +1109,18 @@ def test_wheels_job(self, needs=None):
 
     # Map the min/full loose/strict terminology to specific extra packages
     import ubelt as ub
+    from xcookie.util_yaml import Yaml
 
     special_loose_tags = []
     if 'cv2' in self.tags:
+        # TODO: can probably have this generate appropriate ci_extras in the
+        # xcookie config?
         special_loose_tags.append('headless')
+
+    # Parse ci_extras configuration if specified
+    ci_extras = {}
+    if self.config.get('ci_extras'):
+        ci_extras = Yaml.loads(self.config['ci_extras'])
 
     if self.config['use_pyproject_requirements']:
         special_strict_tags = [t for t in special_loose_tags]
@@ -1140,6 +1148,25 @@ def test_wheels_job(self, needs=None):
                 + special_strict_tags,
             }
         )
+
+    # Apply ci_extras to the install_extra_tags
+    # ci_extras can specify: 'loose', 'strict', 'minimal-loose', 'full-loose',
+    # 'minimal-strict', 'full-strict'
+    for variant_key, extras_list in ci_extras.items():
+        if variant_key == 'loose':
+            # Apply to all loose variants
+            for key in ['minimal-loose', 'full-loose']:
+                if key in install_extra_tags:
+                    install_extra_tags[key] += extras_list
+        elif variant_key == 'strict':
+            # Apply to all strict variants
+            for key in ['minimal-strict', 'full-strict']:
+                if key in install_extra_tags:
+                    install_extra_tags[key] += extras_list
+        elif variant_key in install_extra_tags:
+            # Apply to specific variant
+            install_extra_tags[variant_key] += extras_list
+
     install_extras = ub.udict(
         {k: ','.join(v) for k, v in install_extra_tags.items()}
     )

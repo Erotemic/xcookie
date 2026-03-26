@@ -321,6 +321,18 @@ class XCookieConfig(scfg.DataConfig):
             ['full-loose', 'full-strict', 'minimal-loose', 'minimal-strict'],
             help='A list of which CI loose / strict / minimal / full variants to use',
         ),
+        'ci_extras': scfg.Value(
+            None,
+            help=ub.paragraph(
+                """
+            A YAML dictionary specifying extra CI test dependencies.
+            Supports keys: 'loose', 'strict', 'minimal-loose', 'full-loose',
+            'minimal-strict', 'full-strict'. Values are lists of extra package names
+            to add to the corresponding test variant.
+            Example: "loose: [tests-binary]" or "full-loose: [tests-binary]"
+            """
+            ),
+        ),
         'use_vcs': scfg.Value(
             'auto',
             help=ub.paragraph(
