@@ -269,7 +269,7 @@ class XCookieConfig(scfg.DataConfig):
         ),
         'only_generate': scfg.Value(
             None,
-            alias='only_gen',
+            alias=['only_gen'],
             help=ub.paragraph(
                 """
             if specified, only generate files matching this multipattern.
@@ -589,7 +589,7 @@ class XCookieConfig(scfg.DataConfig):
         return answer
 
     @classmethod
-    def load_from_cli_and_pyproject(cls, argv=0, **kwargs):
+    def load_from_cli_and_pyproject(cls, argv=False, **kwargs):
         # We load the config multiple times to get the right defaults.
         # ideally we should fix this up
         config = XCookieConfig.cli(argv=argv, data=kwargs, strict=True)

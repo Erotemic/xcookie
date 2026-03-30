@@ -15,5 +15,5 @@ class FuzzyPrompt(prompt.Prompt):
         flags = [c.startswith(got) for c in norm_choices]
         if sum(flags) != 1:
             raise prompt.InvalidResponse(self.validate_error_message)
-        norm = ub.peek(ub.compress(self.choices, flags))
+        norm: str = ub.peek(ub.compress(self.choices, flags))  # type: ignore
         return norm

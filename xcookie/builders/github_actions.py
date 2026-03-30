@@ -80,7 +80,7 @@ class Actions:
             if _ is not None:
                 action.update(_)
         if 'name' in action:
-            reordered = action & ['name', 'uses']
+            reordered = action & ['name', 'uses']  # type: ignore
             action = reordered | (action - reordered)
         return dict(action)
 
@@ -1035,7 +1035,7 @@ def build_purewheel_job(self):
     # os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
     # pypy_versions = supported_platform_info['pypy_versions']
-    job = {
+    job: dict[str, object] = {
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
@@ -1326,7 +1326,7 @@ def test_wheels_job(self, needs=None):
             'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
             'if': condition,
             'runs-on': '${{ matrix.os }}',
-            'needs': sorted(needs),
+            'needs': [] if needs is None else sorted(needs),
             'strategy': {
                 'fail-fast': False,
                 'matrix': Yaml.Dict(
@@ -1715,7 +1715,7 @@ def build_deploy(self, mode='live', needs=None):
         if self.config['deploy_pypi']:
             run = [
                 f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security] twine -U',
-                f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {dist_pattern} --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
+                'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
             ]
         else:
             run = []
@@ -1878,7 +1878,7 @@ def build_github_release(self, needs=None):
         'if': condition,
         'runs-on': 'ubuntu-latest',
         'permissions': {'contents': 'write'},
-        'needs': sorted(needs),
+        'needs': [] if needs is None else sorted(needs),
         'steps': [
             Actions.checkout(name='Checkout source'),
             Actions.download_artifact(

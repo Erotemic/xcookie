@@ -140,9 +140,11 @@ def _custom_new_ruaml_yaml_obj(version=None):
 
     # make a new instance, although you could get the YAML
     # instance from the constructor argument
-    class CustomConstructor(ruamel.yaml.constructor.RoundTripConstructor): ...
+    class CustomConstructor(ruamel.yaml.constructor.RoundTripConstructor):  # type: ignore
+        ...
 
-    class CustomRepresenter(ruamel.yaml.representer.RoundTripRepresenter): ...
+    class CustomRepresenter(ruamel.yaml.representer.RoundTripRepresenter):  # type: ignore
+        ...
 
     CustomRepresenter.add_representer(str, _YamlRepresenter.str_presenter)
     CustomRepresenter.add_representer(
@@ -189,7 +191,7 @@ def _custom_new_ruaml_yaml_obj(version=None):
     yaml_obj.Constructor = CustomConstructor
     yaml_obj.Representer = CustomRepresenter
     yaml_obj.preserve_quotes = True
-    yaml_obj.width = float('inf')
+    yaml_obj.width = float('inf')  # type: ignore
     return yaml_obj
 
 
@@ -378,7 +380,7 @@ class Yaml:
 
             try:
                 data = Yaml.load(file, backend=backend, version=version)
-            except ruamel.yaml.parser.ParserError as ex_:
+            except ruamel.yaml.parser.ParserError as ex_:  # type: ignore
                 ex = ex_
                 print(f'YAML ERROR: {ex!r}')
                 try:
@@ -559,7 +561,7 @@ class Yaml:
         """
         import ruamel.yaml
 
-        ret = ruamel.yaml.comments.CommentedSeq(items)
+        ret = ruamel.yaml.comments.CommentedSeq(items)  # type: ignore
         ret.fa.set_flow_style()
         return ret
 
@@ -581,14 +583,14 @@ class Yaml:
         """
         import ruamel.yaml
 
-        ret = ruamel.yaml.comments.CommentedMap(data)
+        ret = ruamel.yaml.comments.CommentedMap(data)  # type: ignore
         return ret
 
     @staticmethod
     def CodeBlock(text):
         import ruamel.yaml
 
-        return ruamel.yaml.scalarstring.LiteralScalarString(ub.codeblock(text))
+        return ruamel.yaml.scalarstring.LiteralScalarString(ub.codeblock(text))  # type: ignore
 
 
 def _dev():

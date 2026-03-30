@@ -424,7 +424,7 @@ def format_code(
     """
     be: FormatterBackend
     if isinstance(backend, str):
-        be = make_backend(backend)
+        be = make_backend(backend)  # type: ignore
     else:
         be = backend
     return be.format_text(text, filename=filename)

@@ -105,7 +105,7 @@ class Directive(utils.NiceRepr):
     def _unpack_args(self, num):
         from xdoctest.utils import util_deprecation
 
-        util_deprecation.schedule_deprecation3(
+        util_deprecation.schedule_deprecation(
             modname='xdoctest',
             name='Directive._unpack_args',
             type='method',
@@ -126,7 +126,7 @@ class Directive(utils.NiceRepr):
     def effect(self, argv=None, environ=None):
         from xdoctest.utils import util_deprecation
 
-        util_deprecation.schedule_deprecation3(
+        util_deprecation.schedule_deprecation(
             modname='xdoctest',
             name='Directive.effect',
             type='method',
