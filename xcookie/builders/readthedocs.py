@@ -4,8 +4,9 @@ Build the readthedocs yaml file.
 
 
 def build_readthedocs(self):
-    from xcookie.util_yaml import Yaml
     import ubelt as ub
+
+    from xcookie.util_yaml import Yaml
 
     # https://docs.readthedocs.io/en/stable/config-file/v2.html#build
 

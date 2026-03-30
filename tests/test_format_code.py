@@ -1,8 +1,10 @@
 """
 Test the TemplateApplier.format_code method
 """
-import tempfile
+
 import pathlib
+import tempfile
+
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
@@ -103,7 +105,7 @@ def test_format_code_basic_formatting() -> None:
     # Test basic formatting
     test_code = 'import os,sys\nx=  1\nprint("hi")\n'
     formatted = applier.format_code(test_code)
-    
+
     # Should have proper spacing
     assert 'x = 1' in formatted
     # Should use single quotes

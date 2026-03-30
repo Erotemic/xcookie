@@ -59,6 +59,7 @@ class MakeNontransitiveLockfileCLI(scfg.DataConfig):
 
 def parse_uv_compile(lines):
     import re
+
     import networkx as nx
 
     graph = nx.DiGraph()

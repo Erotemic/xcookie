@@ -21,16 +21,15 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import sys
 import textwrap
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
-import json
-
+from urllib.request import Request, urlopen
 
 USES_RE = re.compile(
     # Match things like:
@@ -48,33 +47,37 @@ USES_RE = re.compile(
 # Also note: some "ref" values may be expressions like:
 #   ${{ ... }}
 # We will NOT try to update those.
-DYNAMIC_REF_PREFIXES = ("${{",)
+DYNAMIC_REF_PREFIXES = ('${{',)
 
 
-def _http_get_json(url: str, token: Optional[str] = None, timeout: int = 30) -> dict:
+def _http_get_json(
+    url: str, token: Optional[str] = None, timeout: int = 30
+) -> dict:
     headers = {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "xcookie-action-version-updater",
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'xcookie-action-version-updater',
     }
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers['Authorization'] = f'Bearer {token}'
     req = Request(url, headers=headers)
     with urlopen(req, timeout=timeout) as resp:
         data = resp.read()
-    return json.loads(data.decode("utf-8"))
+    return json.loads(data.decode('utf-8'))
 
 
-def _latest_ref_for_repo(owner_repo: str, token: Optional[str]) -> Optional[str]:
+def _latest_ref_for_repo(
+    owner_repo: str, token: Optional[str]
+) -> Optional[str]:
     """
     Return latest tag name for a repo like "actions/checkout".
     Prefer releases/latest.tag_name, fallback to tags[0].name.
     """
-    base = f"https://api.github.com/repos/{owner_repo}"
+    base = f'https://api.github.com/repos/{owner_repo}'
 
     # 1) releases/latest
     try:
-        rel = _http_get_json(f"{base}/releases/latest", token=token)
-        tag = rel.get("tag_name")
+        rel = _http_get_json(f'{base}/releases/latest', token=token)
+        tag = rel.get('tag_name')
         if tag:
             return tag
     except HTTPError as ex:
@@ -87,9 +90,9 @@ def _latest_ref_for_repo(owner_repo: str, token: Optional[str]) -> Optional[str]
 
     # 2) tags
     try:
-        tags = _http_get_json(f"{base}/tags?per_page=1", token=token)
+        tags = _http_get_json(f'{base}/tags?per_page=1', token=token)
         if isinstance(tags, list) and tags:
-            name = tags[0].get("name")
+            name = tags[0].get('name')
             if name:
                 return name
     except HTTPError as ex:
@@ -107,8 +110,8 @@ def extract_uses(input_text: str) -> List[Tuple[str, str]]:
     """
     found = []
     for m in USES_RE.finditer(input_text):
-        repo = m.group("repo")
-        ref = m.group("ref").strip()
+        repo = m.group('repo')
+        ref = m.group('ref').strip()
         found.append((repo, ref))
     return found
 
@@ -136,7 +139,7 @@ def build_updated_versions(
     for repo, current in sorted(unique.items()):
         if is_dynamic_ref(current):
             if verbose:
-                print(f"[skip dynamic] {repo}@{current}")
+                print(f'[skip dynamic] {repo}@{current}')
             out[repo] = current
             continue
 
@@ -144,25 +147,25 @@ def build_updated_versions(
         if latest is None:
             # couldn't fetch; keep current
             if verbose:
-                print(f"[keep (fetch failed)] {repo}@{current}")
+                print(f'[keep (fetch failed)] {repo}@{current}')
             out[repo] = current
             continue
 
         if verbose:
             if latest != current:
-                print(f"[update] {repo}: {current} -> {latest}")
+                print(f'[update] {repo}: {current} -> {latest}')
             else:
-                print(f"[ok] {repo}: {current}")
+                print(f'[ok] {repo}: {current}')
 
         out[repo] = latest
     return out
 
 
 def render_constants_module(action_versions: Dict[str, str]) -> str:
-    now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    now = dt.datetime.now().astimezone().isoformat(timespec='seconds')
     # Keep it deterministic and nice to read
-    items = "\n".join(
-        f"    {repo!r}: {ref!r},"
+    items = '\n'.join(
+        f'    {repo!r}: {ref!r},'
         for repo, ref in sorted(action_versions.items())
     )
     return textwrap.dedent(
@@ -187,34 +190,41 @@ def render_constants_module(action_versions: Dict[str, str]) -> str:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--input",
+        '--input',
         type=Path,
-        default=Path("~/code/xcookie/xcookie/builders/github_actions.py").expanduser(),
-        help="Path to github_actions.py",
+        default=Path(
+            '~/code/xcookie/xcookie/builders/github_actions.py'
+        ).expanduser(),
+        help='Path to github_actions.py',
     )
     ap.add_argument(
-        "--output",
+        '--output',
         type=Path,
-        default=Path("~/code/xcookie/xcookie/builders/action_versions.py").expanduser(),
-        help="Path to write constants module",
+        default=Path(
+            '~/code/xcookie/xcookie/builders/action_versions.py'
+        ).expanduser(),
+        help='Path to write constants module',
     )
-    ap.add_argument("--quiet", action="store_true", help="Less stdout noise")
+    ap.add_argument('--quiet', action='store_true', help='Less stdout noise')
     args = ap.parse_args(argv)
 
     in_path: Path = args.input
     out_path: Path = args.output
 
     if not in_path.exists():
-        print(f"ERROR: input not found: {in_path}", file=sys.stderr)
+        print(f'ERROR: input not found: {in_path}', file=sys.stderr)
         return 2
 
     text = in_path.read_text()
     uses_pairs = extract_uses(text)
     if not uses_pairs:
-        print(f"ERROR: found no 'uses: owner/repo@ref' entries in {in_path}", file=sys.stderr)
+        print(
+            f"ERROR: found no 'uses: owner/repo@ref' entries in {in_path}",
+            file=sys.stderr,
+        )
         return 3
 
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
     verbose = not args.quiet
 
     versions = build_updated_versions(uses_pairs, token=token, verbose=verbose)
@@ -224,11 +234,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     out_path.write_text(module_text)
 
     if verbose:
-        print(f"\nWrote: {out_path}")
-        print(f"Entries: {len(versions)}")
+        print(f'\nWrote: {out_path}')
+        print(f'Entries: {len(versions)}')
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())
-

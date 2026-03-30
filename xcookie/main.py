@@ -67,14 +67,15 @@ ExampleUsage:
         --use_pyproject_requirements=True --use_setup_py=False
 """
 
-import toml
-import shutil
-import ubelt as ub
-import tempfile
-import scriptconfig as scfg
-import warnings
-import xdev
 import os
+import shutil
+import tempfile
+import warnings
+
+import scriptconfig as scfg
+import toml
+import ubelt as ub
+import xdev
 from packaging.version import parse as Version
 
 
@@ -1108,7 +1109,10 @@ class TemplateApplier:
         tags = set(self.config['tags'])
         self.remote_info = {'type': 'unknown'}
 
-        if isinstance(self.config.url, str) and self.config.url.lower() in {'none', 'null'}:
+        if isinstance(self.config.url, str) and self.config.url.lower() in {
+            'none',
+            'null',
+        }:
             self.config.url = None
 
         if self.config.url is None:
@@ -1464,8 +1468,9 @@ class TemplateApplier:
 
         # Probably inefficient.
         if stage_fpath.name.endswith('.py'):
-            new_text = self.format_code(stage_fpath.read_text(),
-                                        filename=stage_fpath.name)
+            new_text = self.format_code(
+                stage_fpath.read_text(), filename=stage_fpath.name
+            )
             stage_fpath.write_text(new_text)
         return info
 
@@ -1846,9 +1851,11 @@ class TemplateApplier:
             str: Formatted code
         """
         from xcookie.util.util_code_format import (
-            format_code as util_format_code,
-            make_backend,
             RuffFormatConfig,
+            make_backend,
+        )
+        from xcookie.util.util_code_format import (
+            format_code as util_format_code,
         )
 
         # Read the project's ruff configuration if available
@@ -1863,7 +1870,9 @@ class TemplateApplier:
         if 'quote-style' in ruff_format_dict:
             ruff_config_kwargs['quote_style'] = ruff_format_dict['quote-style']
         if 'indent-style' in ruff_format_dict:
-            ruff_config_kwargs['indent_style'] = ruff_format_dict['indent-style']
+            ruff_config_kwargs['indent_style'] = ruff_format_dict[
+                'indent-style'
+            ]
         if 'skip-magic-trailing-comma' in ruff_format_dict:
             ruff_config_kwargs['skip_magic_trailing_comma'] = ruff_format_dict[
                 'skip-magic-trailing-comma'

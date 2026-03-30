@@ -25,8 +25,8 @@ you make nested configs by pointing to other configs.
 
 import io
 import os
-import ubelt as ub
 
+import ubelt as ub
 
 NEW_RUAMEL = 1
 
@@ -134,8 +134,9 @@ def _custom_new_ruaml_yaml_obj(version=None):
         >>> yaml_obj.dump(data2, file)
         >>> print(file.getvalue())
     """
-    import ruamel.yaml
     from collections import Counter, OrderedDict, defaultdict
+
+    import ruamel.yaml
 
     # make a new instance, although you could get the YAML
     # instance from the constructor argument
@@ -259,7 +260,9 @@ class Yaml:
                 )
         elif backend == 'pyyaml':
             if version is not None:
-                raise NotImplementedError('pyyaml does not support version yet, use ruamel backend')
+                raise NotImplementedError(
+                    'pyyaml does not support version yet, use ruamel backend'
+                )
             import yaml
 
             Dumper = _custom_pyaml_dumper()
@@ -325,7 +328,9 @@ class Yaml:
                     # data = ruamel.yaml.load(file, Loader=ruamel.yaml.RoundTripLoader, preserve_quotes=True)
             elif backend == 'pyyaml':
                 if version is not None:
-                    raise NotImplementedError('pyyaml does not support version yet, use ruamel backend')
+                    raise NotImplementedError(
+                        'pyyaml does not support version yet, use ruamel backend'
+                    )
                 import yaml
 
                 # data = yaml.load(file, Loader=yaml.SafeLoader)
@@ -398,7 +403,9 @@ class Yaml:
                 raise
         else:
             if version is not None:
-                raise NotImplementedError('pyyaml does not support version yet, use ruamel backend')
+                raise NotImplementedError(
+                    'pyyaml does not support version yet, use ruamel backend'
+                )
             data = Yaml.load(file, backend=backend)
         return data
 
@@ -588,9 +595,10 @@ def _dev():
     # import yaml
     # yaml
     # https://stackoverflow.com/questions/18065427/generating-anchors-with-pyyaml-dump/36295979#36295979
-    from xcookie import rc
     import ubelt as ub
     import yaml
+
+    from xcookie import rc
 
     fpath = rc.resource_fpath('gitlab-ci.purepy.yml.in')
     data = yaml.load(open(fpath, 'r'), yaml.SafeLoader)

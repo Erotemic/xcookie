@@ -1,6 +1,7 @@
 """
 Common subroutines for consistency between gitlab-ci / github actions / etc...
 """
+
 import ubelt as ub
 
 
@@ -366,18 +367,18 @@ def get_supported_platform_info(self):
         min_py = _parse_pyver_tuple(self.config['min_python'])
         if min_py < (3, 9):
             raise ValueError(
-                "xcookie does not support generating binpy workflows for Python < 3.9. "
-                "Bump min_python to >= 3.9 or disable binpy."
+                'xcookie does not support generating binpy workflows for Python < 3.9. '
+                'Bump min_python to >= 3.9 or disable binpy.'
             )
         for ver in supported_py_versions:
             if _parse_pyver_tuple(ver) < (3, 9):
                 raise ValueError(
-                    f"binpy requested with python-version={ver}, but xcookie requires >=3.9 for binpy"
+                    f'binpy requested with python-version={ver}, but xcookie requires >=3.9 for binpy'
                 )
         for ver in cpython_versions:
             if _parse_pyver_tuple(ver) < (3, 9):
                 raise ValueError(
-                    f"binpy requested with python-version={ver}, but xcookie requires >=3.9 for binpy"
+                    f'binpy requested with python-version={ver}, but xcookie requires >=3.9 for binpy'
                 )
 
     # Choose which Python version will be the "main" one we use for version

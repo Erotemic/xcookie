@@ -2,14 +2,16 @@
 Port and extension of xdoctest directives.
 """
 
-import sys
+import operator
 import os
 import re
+import sys
 import warnings
-import operator
-from xdoctest import utils
-from xdoctest import static_analysis as static
 from collections import namedtuple
+
+from xdoctest import static_analysis as static
+from xdoctest import utils
+
 # from xdoctest import exceptions
 
 

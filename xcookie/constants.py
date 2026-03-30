@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import Dict, List
 
 KNOWN_PYTHON_VERSIONS: List[str] = [
     '2.7',

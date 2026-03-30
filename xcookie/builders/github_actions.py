@@ -1,4 +1,5 @@
 import ubelt as ub
+
 from xcookie.builders import common_ci
 from xcookie.util_yaml import Yaml
 
@@ -1109,6 +1110,7 @@ def test_wheels_job(self, needs=None):
 
     # Map the min/full loose/strict terminology to specific extra packages
     import ubelt as ub
+
     from xcookie.util_yaml import Yaml
 
     special_loose_tags = []
@@ -1294,8 +1296,8 @@ def test_wheels_job(self, needs=None):
         #         if flag:
         #             filtered_include.append(item)
         #     include = filtered_include
-        from fnmatch import translate as glob_to_re
         import re
+        from fnmatch import translate as glob_to_re
 
         def compile_rules(rules):
             return [

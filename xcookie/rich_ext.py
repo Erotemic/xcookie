@@ -1,5 +1,5 @@
-from rich import prompt
 import ubelt as ub
+from rich import prompt
 
 
 class FuzzyPrompt(prompt.Prompt):

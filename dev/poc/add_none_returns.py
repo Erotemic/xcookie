@@ -33,8 +33,7 @@ from typing import Iterable
 
 import libcst as cst
 
-
-PYTHON_SUFFIXES = {".py"}
+PYTHON_SUFFIXES = {'.py'}
 
 
 class ReturnFinder(cst.CSTVisitor):
@@ -91,7 +90,7 @@ class AddNoneReturnTransformer(cst.CSTTransformer):
             return updated_node
 
         return updated_node.with_changes(
-            returns=cst.Annotation(annotation=cst.Name("None"))
+            returns=cst.Annotation(annotation=cst.Name('None'))
         )
 
 
@@ -109,25 +108,25 @@ def iter_python_files(paths: Iterable[Path], recursive: bool) -> Iterable[Path]:
             continue
 
         if path.is_dir():
-            walker = path.rglob("*") if recursive else path.glob("*")
+            walker = path.rglob('*') if recursive else path.glob('*')
             for child in walker:
                 if child.is_file() and child.suffix in PYTHON_SUFFIXES:
                     yield child
 
 
 def unified_diff(old: str, new: str, filename: str) -> str:
-    return "".join(
+    return ''.join(
         difflib.unified_diff(
             old.splitlines(keepends=True),
             new.splitlines(keepends=True),
-            fromfile=f"{filename} (original)",
-            tofile=f"{filename} (updated)",
+            fromfile=f'{filename} (original)',
+            tofile=f'{filename} (updated)',
         )
     )
 
 
 def process_file(path: Path, check: bool, show_diff: bool, write: bool) -> bool:
-    original = path.read_text(encoding="utf-8")
+    original = path.read_text(encoding='utf-8')
     updated = transform_code(original)
 
     changed = updated != original
@@ -136,7 +135,7 @@ def process_file(path: Path, check: bool, show_diff: bool, write: bool) -> bool:
         sys.stdout.write(unified_diff(original, updated, str(path)))
 
     if write and changed:
-        path.write_text(updated, encoding="utf-8")
+        path.write_text(updated, encoding='utf-8')
 
     if check and changed:
         print(str(path))
@@ -147,30 +146,30 @@ def process_file(path: Path, check: bool, show_diff: bool, write: bool) -> bool:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Add `-> None` to functions that have no return annotation "
-            "and no return statement."
+            'Add `-> None` to functions that have no return annotation '
+            'and no return statement.'
         )
     )
     parser.add_argument(
-        "paths",
-        nargs="+",
+        'paths',
+        nargs='+',
         type=Path,
-        help="Python files or directories to process.",
+        help='Python files or directories to process.',
     )
     parser.add_argument(
-        "--check",
-        action="store_true",
-        help="Do not modify files; print files that would change and exit nonzero if any would change.",
+        '--check',
+        action='store_true',
+        help='Do not modify files; print files that would change and exit nonzero if any would change.',
     )
     parser.add_argument(
-        "--diff",
-        action="store_true",
-        help="Print a unified diff for files that would change.",
+        '--diff',
+        action='store_true',
+        help='Print a unified diff for files that would change.',
     )
     parser.add_argument(
-        "--no-recursive",
-        action="store_true",
-        help="Do not recurse into directories.",
+        '--no-recursive',
+        action='store_true',
+        help='Do not recurse into directories.',
     )
     return parser
 
@@ -183,7 +182,7 @@ def main() -> int:
     files = list(iter_python_files(args.paths, recursive=recursive))
 
     if not files:
-        print("No Python files found.", file=sys.stderr)
+        print('No Python files found.', file=sys.stderr)
         return 2
 
     changed_any = False
@@ -199,7 +198,7 @@ def main() -> int:
             )
             changed_any = changed_any or changed
         except Exception as exc:
-            print(f"Error processing {path}: {exc}", file=sys.stderr)
+            print(f'Error processing {path}: {exc}', file=sys.stderr)
             return 2
 
     if args.check and changed_any:
@@ -207,5 +206,5 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())

@@ -45,12 +45,11 @@ Example:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, Optional, Protocol, Union, Literal
 import os
 import subprocess
 import tempfile
-
+from dataclasses import dataclass, field
+from typing import Any, Dict, Literal, Mapping, Optional, Protocol, Union
 
 # -------------------------
 # Exceptions
@@ -71,7 +70,7 @@ class FormatterBackend(Protocol):
 
     name: str
 
-    def format_text(self, text: str, *, filename: str = "snippet.py") -> str:
+    def format_text(self, text: str, *, filename: str = 'snippet.py') -> str:
         """Format a code string and return the formatted string."""
         ...
 
@@ -105,8 +104,8 @@ class RuffFormatConfig:
     """
 
     # [tool.ruff.format]
-    quote_style: Literal["single", "double", "preserve"] = "single"
-    indent_style: Optional[Literal["space", "tab"]] = None
+    quote_style: Literal['single', 'double', 'preserve'] = 'single'
+    indent_style: Optional[Literal['space', 'tab']] = None
     skip_magic_trailing_comma: Optional[bool] = None
     preview: Optional[bool] = None
     docstring_code_format: Optional[bool] = None
@@ -122,30 +121,30 @@ class RuffFormatConfig:
 
 def _toml_quote(s: str) -> str:
     """Minimal TOML string quoting (sufficient for our use-case)."""
-    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
 def _toml_value(v: Any) -> str:
     """Convert a Python scalar into a TOML literal."""
     if isinstance(v, bool):
-        return "true" if v else "false"
+        return 'true' if v else 'false'
     if isinstance(v, int):
         return str(v)
     if isinstance(v, str):
         return _toml_quote(v)
     if v is None:
-        raise ValueError("None is not a valid TOML value here")
-    raise TypeError(f"Unsupported TOML value type: {type(v)!r}")
+        raise ValueError('None is not a valid TOML value here')
+    raise TypeError(f'Unsupported TOML value type: {type(v)!r}')
 
 
 def _toml_table(table: Mapping[str, Any], *, header: str) -> str:
     """Render a TOML table section."""
-    lines = [f"[{header}]"]
+    lines = [f'[{header}]']
     for k, v in table.items():
         if v is None:
             continue
-        lines.append(f"{k} = {_toml_value(v)}")
-    return "\n".join(lines) + "\n"
+        lines.append(f'{k} = {_toml_value(v)}')
+    return '\n'.join(lines) + '\n'
 
 
 def _ruff_config_to_toml(cfg: RuffFormatConfig) -> str:
@@ -158,25 +157,25 @@ def _ruff_config_to_toml(cfg: RuffFormatConfig) -> str:
     # Top-level [tool.ruff]
     tool_table: Dict[str, Any] = dict(cfg.extra_tool)
     if cfg.line_length is not None:
-        tool_table["line-length"] = cfg.line_length
+        tool_table['line-length'] = cfg.line_length
     tool_table = {k: v for k, v in tool_table.items() if v is not None}
 
     # [tool.ruff.format]
     format_table: Dict[str, Any] = {
-        "quote-style": cfg.quote_style,
-        "indent-style": cfg.indent_style,
-        "skip-magic-trailing-comma": cfg.skip_magic_trailing_comma,
-        "preview": cfg.preview,
-        "docstring-code-format": cfg.docstring_code_format,
-        "docstring-code-line-length": cfg.docstring_code_line_length,
+        'quote-style': cfg.quote_style,
+        'indent-style': cfg.indent_style,
+        'skip-magic-trailing-comma': cfg.skip_magic_trailing_comma,
+        'preview': cfg.preview,
+        'docstring-code-format': cfg.docstring_code_format,
+        'docstring-code-line-length': cfg.docstring_code_line_length,
     }
     format_table.update(dict(cfg.extra_format))
     format_table = {k: v for k, v in format_table.items() if v is not None}
 
-    toml = ""
+    toml = ''
     if tool_table:
-        toml += _toml_table(tool_table, header="tool.ruff")
-    toml += _toml_table(format_table, header="tool.ruff.format")
+        toml += _toml_table(tool_table, header='tool.ruff')
+    toml += _toml_table(format_table, header='tool.ruff.format')
     return toml
 
 
@@ -190,10 +189,10 @@ class RuffFormatterBackend:
     """
 
     config: RuffFormatConfig = field(default_factory=RuffFormatConfig)
-    ruff_executable: str = "ruff"
-    name: str = "ruff"
+    ruff_executable: str = 'ruff'
+    name: str = 'ruff'
 
-    def format_text(self, text: str, *, filename: str = "snippet.py") -> str:
+    def format_text(self, text: str, *, filename: str = 'snippet.py') -> str:
         """
         Format code using `ruff format` via stdin.
 
@@ -209,18 +208,18 @@ class RuffFormatterBackend:
         """
         toml = _ruff_config_to_toml(self.config)
 
-        with tempfile.TemporaryDirectory(prefix="util_code_format_") as d:
-            cfg_path = os.path.join(d, "pyproject.toml")
-            with open(cfg_path, "w", encoding="utf-8") as f:
+        with tempfile.TemporaryDirectory(prefix='util_code_format_') as d:
+            cfg_path = os.path.join(d, 'pyproject.toml')
+            with open(cfg_path, 'w', encoding='utf-8') as f:
                 f.write(toml)
 
             cmd = [
                 self.ruff_executable,
-                "format",
-                "-",  # stdin
-                "--stdin-filename",
+                'format',
+                '-',  # stdin
+                '--stdin-filename',
                 filename,
-                "--config",
+                '--config',
                 cfg_path,
             ]
 
@@ -232,15 +231,15 @@ class RuffFormatterBackend:
             )
 
         if p.returncode != 0:
-            msg = "\n".join(
+            msg = '\n'.join(
                 [
-                    "Ruff formatting failed.",
-                    f"Command: {' '.join(cmd)}",
-                    f"Return code: {p.returncode}",
-                    "---- stderr ----",
-                    (p.stderr or "").strip(),
-                    "---- stdout ----",
-                    (p.stdout or "").strip(),
+                    'Ruff formatting failed.',
+                    f'Command: {" ".join(cmd)}',
+                    f'Return code: {p.returncode}',
+                    '---- stderr ----',
+                    (p.stderr or '').strip(),
+                    '---- stdout ----',
+                    (p.stdout or '').strip(),
                 ]
             ).strip()
             raise CodeFormatError(msg)
@@ -276,9 +275,9 @@ class BlackFormatterBackend:
     """Black formatter backend (requires `black` import)."""
 
     config: BlackConfig = field(default_factory=BlackConfig)
-    name: str = "black"
+    name: str = 'black'
 
-    def format_text(self, text: str, *, filename: str = "snippet.py") -> str:
+    def format_text(self, text: str, *, filename: str = 'snippet.py') -> str:
         """
         Format code using Black's Python API.
 
@@ -296,14 +295,14 @@ class BlackFormatterBackend:
             import black  # type: ignore
         except Exception as e:
             raise CodeFormatError(
-                "Black backend requested, but `black` could not be imported. "
-                "Install it (e.g. `pip install black`)."
+                'Black backend requested, but `black` could not be imported. '
+                'Install it (e.g. `pip install black`).'
             ) from e
 
         try:
             mode_kwargs = dict(self.config.mode_kwargs)
             if self.config.line_length is not None:
-                mode_kwargs["line_length"] = self.config.line_length
+                mode_kwargs['line_length'] = self.config.line_length
 
             mode = black.Mode(
                 string_normalization=self.config.string_normalization,
@@ -312,7 +311,7 @@ class BlackFormatterBackend:
             )
             return black.format_str(text, mode=mode)
         except Exception as e:
-            raise CodeFormatError(f"Black formatting failed: {e}") from e
+            raise CodeFormatError(f'Black formatting failed: {e}') from e
 
 
 # -------------------------
@@ -320,16 +319,16 @@ class BlackFormatterBackend:
 # -------------------------
 
 
-BackendName = Literal["ruff", "black"]
+BackendName = Literal['ruff', 'black']
 Backend = Union[BackendName, FormatterBackend]
 
 
 def make_backend(
-    backend: BackendName = "ruff",
+    backend: BackendName = 'ruff',
     *,
     ruff_config: Optional[RuffFormatConfig] = None,
     black_config: Optional[BlackConfig] = None,
-    ruff_executable: str = "ruff",
+    ruff_executable: str = 'ruff',
 ) -> FormatterBackend:
     """
     Convenience factory for formatter backends.
@@ -346,21 +345,21 @@ def make_backend(
     Raises:
         ValueError: If `backend` is unknown.
     """
-    if backend == "ruff":
+    if backend == 'ruff':
         return RuffFormatterBackend(
             config=ruff_config or RuffFormatConfig(),
             ruff_executable=ruff_executable,
         )
-    if backend == "black":
+    if backend == 'black':
         return BlackFormatterBackend(config=black_config or BlackConfig())
-    raise ValueError(f"Unknown backend: {backend!r}")
+    raise ValueError(f'Unknown backend: {backend!r}')
 
 
 def format_code(
     text: str,
     *,
-    backend: Backend = "ruff",
-    filename: str = "snippet.py",
+    backend: Backend = 'ruff',
+    filename: str = 'snippet.py',
 ) -> str:
     """
     Format code using the requested backend.
@@ -386,18 +385,18 @@ def format_code(
     return be.format_text(text, filename=filename)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     sample = 'import os,sys\n\nx=  1\nprint("hi")\n'
-    print("---- input ----")
+    print('---- input ----')
     print(sample)
 
     out = format_code(sample)
-    print("---- ruff output ----")
+    print('---- ruff output ----')
     print(out)
 
     try:
-        out2 = format_code(sample, backend="black")
-        print("---- black output ----")
+        out2 = format_code(sample, backend='black')
+        print('---- black output ----')
         print(out2)
     except CodeFormatError as ex:
-        print("Black not available:", ex)
+        print('Black not available:', ex)
