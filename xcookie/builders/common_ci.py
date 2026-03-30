@@ -147,65 +147,48 @@ def make_install_and_test_wheel_parts(
         """
     )
 
-    if tuple(map(int, self.config.min_python.split('.'))) >= (3, 8):
-        # Not sure why this fails on 3.6 / 3.7?
-        # Use less ugly version when we can
-        get_mod_version_bash = ub.codeblock(
-            """
-            python -c "if 1:
-                from pkginfo import Wheel, SDist
-                import pathlib
-                fpath = '$WHEEL_FPATH'
-                cls = Wheel if fpath.endswith('.whl') else SDist
-                item = cls(fpath)
-                print(item.version)
-            "
-            """
-        )
-    else:
-        get_mod_version_bash = ub.codeblock(
-            """
-            python -c "if 1:
-                from pkginfo import Wheel, SDist
-                import pathlib
-                fpath = '$WHEEL_FPATH'
-                cls = Wheel if fpath.endswith('.whl') else SDist
-                item = cls(fpath)
-                if item.version is None:
-                    import re
-                    # This is very fragile
-                    fname = pathlib.Path(fpath).name
-                    match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
-                    bs = chr(92)
-                    pat = '([0-9]+' + bs + '.[0-9]+' + bs + '.[0-9]+)'
-                    import re
-                    # Not sure why version is None in 3.6 and 3.7
-                    match = re.search(pat, fname)
-                    assert match is not None
-                    version = match.groups()[0]
-                    print(version)
-                else:
-                    print(item.version)
-            "
-            """
-        )
-    # get_mod_version_bash = ub.codeblock(
-    #     r'''
-    #     export MOD_VERSION=$(printf "$WHEEL_FPATH" | sed -E 's#.*/[^/]+-([0-9]+\.[0-9]+\.[0-9]+)[-.].*#\1#')
-    #     '''
-    # )
-    # # Will this help?
-    # get_mod_version_bash = ub.codeblock(
-    #     '''
-    #     python -c "if 1:
-    #         from pkginfo import Wheel, SDist
-    #         import sys
-    #         f=sys.argv[1]
-    #         cls=Wheel if f.endswith('.whl') else SDist
-    #         print(cls(f).version)
-    #     " "$WHEEL_FPATH"
-    #     '''
-    # )
+    # if tuple(map(int, self.config.min_python.split('.'))) >= (3, 8):
+    #     # Not sure why this fails on 3.6 / 3.7?
+    #     # Use less ugly version when we can
+    #     get_mod_version_bash = ub.codeblock(
+    #         """
+    #         python -c "if 1:
+    #             from pkginfo import Wheel, SDist
+    #             import pathlib
+    #             fpath = '$WHEEL_FPATH'
+    #             cls = Wheel if fpath.endswith('.whl') else SDist
+    #             item = cls(fpath)
+    #             print(item.version)
+    #         "
+    #         """
+    #     )
+    # else:
+    #     get_mod_version_bash = ub.codeblock(
+    #         """
+    #         python -c "if 1:
+    #             from pkginfo import Wheel, SDist
+    #             import pathlib
+    #             fpath = '$WHEEL_FPATH'
+    #             cls = Wheel if fpath.endswith('.whl') else SDist
+    #             item = cls(fpath)
+    #             if item.version is None:
+    #                 import re
+    #                 # This is very fragile
+    #                 fname = pathlib.Path(fpath).name
+    #                 match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
+    #                 bs = chr(92)
+    #                 pat = '([0-9]+' + bs + '.[0-9]+' + bs + '.[0-9]+)'
+    #                 import re
+    #                 # Not sure why version is None in 3.6 and 3.7
+    #                 match = re.search(pat, fname)
+    #                 assert match is not None
+    #                 version = match.groups()[0]
+    #                 print(version)
+    #             else:
+    #                 print(item.version)
+    #         "
+    #         """
+    #     )
 
     # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath(f'{self.mod_name}'))"
     get_modpath_python = f'import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))'
@@ -256,14 +239,14 @@ def make_install_and_test_wheel_parts(
             f'{self.UPDATE_PIP}',
             *install_helpers,
             f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
-            f'export MOD_VERSION=$({get_mod_version_bash})',
+            # f'export MOD_VERSION=$({get_mod_version_bash})',
         ]
         + special_install_lines
         + [
             'echo "WHEEL_FPATH=$WHEEL_FPATH"',
             'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
             'echo "UV_RESOLUTION=$UV_RESOLUTION"',
-            'echo "MOD_VERSION=$MOD_VERSION"',
+            # 'echo "MOD_VERSION=$MOD_VERSION"',
             # This helps but doesn't solve the problem.
             # https://github.com/Erotemic/xdoctest/pull/158#discussion_r1697092781
             # 'echo "Downloading dependencies from pypi"',
@@ -273,7 +256,7 @@ def make_install_and_test_wheel_parts(
             # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
             # TODO: flag to allow prerelease?
             # f'{self.PIP_INSTALL_PREFER_BINARY} --prerelease=allow "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+            f'{self.PIP_INSTALL_PREFER_BINARY} "${{WHEEL_FPATH}}[${{INSTALL_EXTRAS}}]"',
             'echo "Install finished."',
         ]
     )
