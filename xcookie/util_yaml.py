@@ -187,7 +187,7 @@ def _custom_new_ruaml_yaml_obj(version=None):
     if version is not None:
         if isinstance(version, str):
             version = tuple(map(int, version.split('.')))
-        yaml_obj.version = version
+        yaml_obj.version = version  # type: ignore
     yaml_obj.Constructor = CustomConstructor
     yaml_obj.Representer = CustomRepresenter
     yaml_obj.preserve_quotes = True
