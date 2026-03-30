@@ -2206,6 +2206,7 @@ class TemplateApplier:
                 """
             )
         elif fname == '__init__.py':
+            mkinit_target = ub.Path(info['repo_fpath']).as_posix()
             return ub.codeblock(
                 f'''
                 """
@@ -2217,7 +2218,7 @@ class TemplateApplier:
                 __url__ = '{self.config['url']}'
 
                 __mkinit__ = """
-                mkinit {info['repo_fpath']}
+                mkinit {mkinit_target}
                 """
                 '''
             )
