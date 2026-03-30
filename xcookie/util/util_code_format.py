@@ -41,6 +41,51 @@ Example:
     >>> out3 = format_code('x=  1\n', backend="black")  # xdoctest: +SKIP
     >>> isinstance(out3, str)  # xdoctest: +SKIP
     True
+
+
+Example:
+    Windows-style generated __init__.py regression:
+
+    >>> # xdoctest: +REQUIRES(module:ruff)
+    >>> import textwrap
+    >>> from xcookie.util.util_code_format import CodeFormatError, format_code
+
+    >>> bad_text = textwrap.dedent(
+    >>>     '''
+    >>>     "Basic"
+    >>>     __version__ = '0.0.1'
+    >>>     __author__ = ''
+    >>>     __author_email__ = ''
+    >>>     __url__ = 'None'
+    >>>     #
+    >>>     __mkinit_.pData\\Local\\Temp\\pytest-of-runneradmin\\pytest-0\\test_use_setup_py_false_genera0\\demo\\demo_mod\\__init__.py
+    >>>     '''
+    >>> ).lstrip()
+    >>> try:
+    >>>     format_code(bad_text, filename='__init__.py')
+    >>> except CodeFormatError:
+    >>>     print('CodeFormatError')
+    CodeFormatError
+
+Example:
+    A Windows path inside a quoted string is fine; the failure is malformed Python
+    source around it, not the path characters themselves.
+
+    >>> # xdoctest: +REQUIRES(module:ruff)
+    >>> import textwrap
+    >>> good_text = textwrap.dedent(
+    >>>     r'''
+    >>>     "Basic"
+    >>>     __version__ = '0.0.1'
+    >>>     __author__ = ''
+    >>>     __author_email__ = ''
+    >>>     __url__ = 'None'
+    >>>     __mkinit__ = 'C:\Temp\demo_mod\__init__.py'
+    >>>     '''
+    >>> ).lstrip()
+    >>> out = format_code(good_text, filename='__init__.py')
+    >>> print(repr(out))
+    >>> assert "__mkinit__ = 'C:\\Temp\\demo_mod\\__init__.py'" in out
 """
 
 from __future__ import annotations

@@ -110,3 +110,48 @@ def test_format_code_basic_formatting() -> None:
     assert 'x = 1' in formatted
     # Should use single quotes
     assert "print('hi')" in formatted
+
+
+def test_generated_init_text_formats_platform_specific(tmp_path) -> None:
+    """
+    Reproduce the generated __init__.py formatting path directly.
+
+    This should currently pass on Linux/macOS and fail on Windows, because
+    Windows paths are injected into the generated __mkinit__ string with
+    backslashes.
+    """
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['github', 'purepy'],
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        use_vcs=False,
+        author='Test Author',
+        author_email='test@example.com',
+        version='0.0.1',
+        url='https://example.com/demo_mod',
+    )
+
+    applier = TemplateApplier(config)
+
+    rel_init_fpath = applier.rel_mod_dpath / '__init__.py'
+    repo_init_fpath = applier.repodir / rel_init_fpath
+
+    info = {
+        'fname': rel_init_fpath,
+        'repo_fpath': repo_init_fpath,
+    }
+
+    text = applier.lut(info)
+    formatted = applier.format_code(text, filename='__init__.py')
+
+    assert '__mkinit__' in formatted
+    assert 'demo_mod' in formatted
