@@ -111,9 +111,10 @@ Notes:
 # sys.path.insert(0, os.path.abspath('.'))
 
 # -- Project information -----------------------------------------------------
-from os.path import dirname, exists, join
-
 import sphinx_rtd_theme
+from os.path import exists
+from os.path import dirname
+from os.path import join
 
 
 def parse_version(fpath):
@@ -1047,7 +1048,7 @@ def postprocess_hyperlinks(app, doctree, docname):
 
 
 def fix_rst_todo_section(lines):
-    new_lines = []
+    # new_lines = []
     for line in lines:
         ...
     ...
