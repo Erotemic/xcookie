@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""
+Update a constants module with the latest versions of GitHub Actions referenced
+in xcookie/builders/github_actions.py.
+
+- Reads github_actions.py
+- Extracts "uses: owner/repo@ref" occurrences
+- Fetches latest tag/release from GitHub API
+- Writes action_versions.py with ACTION_VERSIONS dict
+
+Usage:
+    python update_action_versions.py \
+        --input ~/code/xcookie/xcookie/builders/github_actions.py \
+        --output ~/code/xcookie/xcookie/builders/action_versions.py
+
+Optional:
+    export GITHUB_TOKEN=...   # to avoid low unauth rate limits
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import os
+import re
+import sys
+import textwrap
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+import json
+
+
+USES_RE = re.compile(
+    # Match things like:
+    #   'uses': 'actions/checkout@v4.2.2'
+    #   "uses": "pypa/cibuildwheel@v3.1.2"
+    r"""['"]uses['"]\s*:\s*['"](?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@(?P<ref>[^'"]+)['"]"""
+)
+
+# Some actions don't publish GitHub "releases" (or sometimes do weird tag naming).
+# Strategy:
+#   1) Try /releases/latest
+#   2) Fallback to /tags?per_page=1
+#   3) If still fails, keep current ref.
+#
+# Also note: some "ref" values may be expressions like:
+#   ${{ ... }}
+# We will NOT try to update those.
+DYNAMIC_REF_PREFIXES = ("${{",)
+
+
+def _http_get_json(url: str, token: Optional[str] = None, timeout: int = 30) -> dict:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "xcookie-action-version-updater",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = Request(url, headers=headers)
+    with urlopen(req, timeout=timeout) as resp:
+        data = resp.read()
+    return json.loads(data.decode("utf-8"))
+
+
+def _latest_ref_for_repo(owner_repo: str, token: Optional[str]) -> Optional[str]:
+    """
+    Return latest tag name for a repo like "actions/checkout".
+    Prefer releases/latest.tag_name, fallback to tags[0].name.
+    """
+    base = f"https://api.github.com/repos/{owner_repo}"
+
+    # 1) releases/latest
+    try:
+        rel = _http_get_json(f"{base}/releases/latest", token=token)
+        tag = rel.get("tag_name")
+        if tag:
+            return tag
+    except HTTPError as ex:
+        # 404 is common if no releases
+        if ex.code not in (404, 410):
+            raise
+    except (URLError, TimeoutError):
+        # network issues; let caller decide
+        return None
+
+    # 2) tags
+    try:
+        tags = _http_get_json(f"{base}/tags?per_page=1", token=token)
+        if isinstance(tags, list) and tags:
+            name = tags[0].get("name")
+            if name:
+                return name
+    except HTTPError as ex:
+        if ex.code not in (404, 410):
+            raise
+    except (URLError, TimeoutError):
+        return None
+
+    return None
+
+
+def extract_uses(input_text: str) -> List[Tuple[str, str]]:
+    """
+    Returns list of (repo, ref) pairs.
+    """
+    found = []
+    for m in USES_RE.finditer(input_text):
+        repo = m.group("repo")
+        ref = m.group("ref").strip()
+        found.append((repo, ref))
+    return found
+
+
+def is_dynamic_ref(ref: str) -> bool:
+    ref_strip = ref.lstrip()
+    return any(ref_strip.startswith(p) for p in DYNAMIC_REF_PREFIXES)
+
+
+def build_updated_versions(
+    uses_pairs: Iterable[Tuple[str, str]],
+    token: Optional[str],
+    *,
+    verbose: bool = True,
+) -> Dict[str, str]:
+    """
+    Returns mapping: "owner/repo" -> "tag"
+    """
+    unique: Dict[str, str] = {}
+    for repo, ref in uses_pairs:
+        # only keep first seen current ref for reporting
+        unique.setdefault(repo, ref)
+
+    out: Dict[str, str] = {}
+    for repo, current in sorted(unique.items()):
+        if is_dynamic_ref(current):
+            if verbose:
+                print(f"[skip dynamic] {repo}@{current}")
+            out[repo] = current
+            continue
+
+        latest = _latest_ref_for_repo(repo, token=token)
+        if latest is None:
+            # couldn't fetch; keep current
+            if verbose:
+                print(f"[keep (fetch failed)] {repo}@{current}")
+            out[repo] = current
+            continue
+
+        if verbose:
+            if latest != current:
+                print(f"[update] {repo}: {current} -> {latest}")
+            else:
+                print(f"[ok] {repo}: {current}")
+
+        out[repo] = latest
+    return out
+
+
+def render_constants_module(action_versions: Dict[str, str]) -> str:
+    now = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    # Keep it deterministic and nice to read
+    items = "\n".join(
+        f"    {repo!r}: {ref!r},"
+        for repo, ref in sorted(action_versions.items())
+    )
+    return textwrap.dedent(
+        f"""\
+        # Autogenerated by update_action_versions.py on {now}
+        #
+        # This file centralizes pinned versions for GitHub Actions referenced by
+        # xcookie/builders/github_actions.py
+        #
+        # Keys are "owner/repo" (without the "@").
+        # Values are the ref to pin to (usually a tag like "v4.2.2").
+
+        from __future__ import annotations
+
+        ACTION_VERSIONS = {{
+        {items}
+        }}
+        """
+    )
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--input",
+        type=Path,
+        default=Path("~/code/xcookie/xcookie/builders/github_actions.py").expanduser(),
+        help="Path to github_actions.py",
+    )
+    ap.add_argument(
+        "--output",
+        type=Path,
+        default=Path("~/code/xcookie/xcookie/builders/action_versions.py").expanduser(),
+        help="Path to write constants module",
+    )
+    ap.add_argument("--quiet", action="store_true", help="Less stdout noise")
+    args = ap.parse_args(argv)
+
+    in_path: Path = args.input
+    out_path: Path = args.output
+
+    if not in_path.exists():
+        print(f"ERROR: input not found: {in_path}", file=sys.stderr)
+        return 2
+
+    text = in_path.read_text()
+    uses_pairs = extract_uses(text)
+    if not uses_pairs:
+        print(f"ERROR: found no 'uses: owner/repo@ref' entries in {in_path}", file=sys.stderr)
+        return 3
+
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    verbose = not args.quiet
+
+    versions = build_updated_versions(uses_pairs, token=token, verbose=verbose)
+    module_text = render_constants_module(versions)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(module_text)
+
+    if verbose:
+        print(f"\nWrote: {out_path}")
+        print(f"Entries: {len(versions)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
