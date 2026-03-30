@@ -114,11 +114,11 @@ def test_format_code_basic_formatting() -> None:
 
 def test_generated_init_text_formats_platform_specific(tmp_path) -> None:
     """
-    Reproduce the generated __init__.py formatting path directly.
+    Regression test for formatting the generated ``__init__.py`` template.
 
-    This should currently pass on Linux/macOS and fail on Windows, because
-    Windows paths are injected into the generated __mkinit__ string with
-    backslashes.
+    This covers the path where xcookie builds ``__init__.py`` via ``lut()`` and
+    then formats the generated source. It guards against Windows-specific path
+    escaping bugs in the templated ``__mkinit__`` block.
     """
     from xcookie.main import TemplateApplier, XCookieConfig
 
