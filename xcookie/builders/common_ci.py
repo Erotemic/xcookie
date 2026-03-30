@@ -320,6 +320,7 @@ def get_supported_platform_info(self):
 
     # TODO: maybe allow pinning, or list out what the options are
     # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+    # I think this only matters for github?
     if 'linux' in self.config['os']:
         os_list.append('ubuntu-latest')
     if 'osx' in self.config['os']:
@@ -327,6 +328,13 @@ def get_supported_platform_info(self):
     if 'win' in self.config['os']:
         os_list.append('windows-latest')
         # os_list.append('windows-11-arm')
+
+    if 'binpy-ubuntu-arm' in self.config['tags']:
+        # From TTsangSC:
+        # Overhead of building ARM wheels on Intel Linux nodes is unreasonably high
+        # (20s build time per wheel vs 3m); it's better to just spin another runner
+        # up to build them natively
+        os_list.append('ubuntu-24.04-arm')
 
     cpython_versions = self.config['ci_cpython_versions']
     pypy_versions = [f'pypy-{v}' for v in self.config['ci_pypy_versions']]
