@@ -2124,7 +2124,7 @@ class TemplateApplier:
         ]
         version_defaults = [
             {
-                'version': '>=3.11.3',
+                'version': '>=3.11.3.1',
                 'pyver_ge': Version('3.14'),
                 'pyver_lt': Version('4.0'),
             },

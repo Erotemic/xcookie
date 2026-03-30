@@ -1,4 +1,4 @@
-def test_simple_repo():
+def test_simple_repo() -> None:
     """
     This performs a simple run of xcookie, adds a few dummy files, and builds
     the docs.

@@ -6,7 +6,7 @@ import pathlib
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
-def test_format_code_with_pyproject_settings():
+def test_format_code_with_pyproject_settings() -> None:
     """
     Test that format_code respects quote-style and other settings from
     the project's pyproject.toml
@@ -31,7 +31,7 @@ def test_format_code_with_pyproject_settings():
     assert "x = 'hello world'" in formatted
 
 
-def test_format_code_with_default_settings():
+def test_format_code_with_default_settings() -> None:
     """
     Test that format_code uses reasonable defaults when no
     pyproject.toml exists
@@ -59,7 +59,7 @@ def test_format_code_with_default_settings():
         assert 'y = 2' in formatted
 
 
-def test_format_code_with_line_length():
+def test_format_code_with_line_length() -> None:
     """
     Test that format_code respects line-length setting from pyproject.toml
     """
@@ -83,7 +83,7 @@ def test_format_code_with_line_length():
     assert isinstance(formatted, str)
 
 
-def test_format_code_basic_formatting():
+def test_format_code_basic_formatting() -> None:
     """
     Test that format_code performs basic Python formatting
     """
