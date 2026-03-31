@@ -12,11 +12,12 @@ def resource_fpath(fname):
     """
     # https://importlib-resources.readthedocs.io/en/latest/using.html#migrating-from-legacy
     import ubelt as ub
-
     try:
-        rc_dpath = ub.Path(importlib_resources.files('xcookie.rc'))
+        rc_dpath = ub.Path(importlib_resources.files('xcookie.rc'))  # type: ignore
     except Exception:
         # FIXME: does this work on < 3.9?
-        rc_dpath = ub.Path(ub.modname_to_modpath('xcookie.rc')).absolute()
+        modpath = ub.modname_to_modpath('xcookie.rc')
+        assert modpath is not None
+        rc_dpath = ub.Path(modpath).absolute()
     fpath = rc_dpath / fname
     return fpath

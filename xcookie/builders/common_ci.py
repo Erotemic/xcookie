@@ -2,10 +2,29 @@
 Common subroutines for consistency between gitlab-ci / github actions / etc...
 """
 
+import ubelt as ub
 
-def make_mypy_check_parts(self):
-    import ubelt as ub
 
+def make_typecheck_parts(self):
+    """
+    Return a list of shell commands to run type checkers.
+
+    By default this will run both `mypy` and `ty` (in that order). The
+    returned value is a list of command strings so callers can adapt it to
+    either GitHub Actions (`run` string) or GitLab CI (`script` list).
+    """
+
+    # TODO: more control over which type checkers to use.
+    # right now we always enable ty unless notypes is on.
+    # but we should have more sane defaults.
+    checkers = None
+    if checkers is None:
+        checkers = ['ty']
+
+    if 'mypy' in self.tags:
+        checkers += ['mypy']
+
+    # Where to install runtime/type requirements from
     type_requirement_files = [
         # TODO: get this location from the config
         'requirements/runtime.txt'
@@ -17,14 +36,27 @@ def make_mypy_check_parts(self):
     else:
         pip_install_reqs = f'pip install -r {req_files_text}'
 
-    commands = ub.codeblock(
-        f"""
-        python -m pip install mypy
-        {pip_install_reqs}
-        mypy --install-types --non-interactive ./{self.rel_mod_dpath}
-        mypy ./{self.rel_mod_dpath}
-        """
-    )
+    commands = []
+
+    if 'mypy' in checkers:
+        commands += [
+            'python -m pip install mypy',
+            pip_install_reqs,
+            # TODO; this likely needs to be replaced with some explicit
+            # registration of what typing requirements are for the library
+            # f'mypy --install-types --non-interactive ./{self.rel_mod_dpath}',
+            f'mypy ./{self.rel_mod_dpath}',
+        ]
+
+    if 'ty' in checkers:
+        # Generic support for "ty". Install and run; users can customize
+        # behavior by changing `checkers` or adding config-specific steps.
+        commands += [
+            'python -m pip install ty',
+            pip_install_reqs,
+            f'ty check ./{self.rel_mod_dpath}',
+        ]
+
     return commands
 
 
@@ -86,80 +118,77 @@ def make_install_and_test_wheel_parts(
     # get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
     # get_mod_version_bash = f'python -c "{get_mod_version_python}"'
 
-    import ubelt as ub
-
     get_wheel_fpath_bash = ub.codeblock(
         f"""
         python -c "if 1:
             import pathlib
+            from packaging import tags
+            from packaging.utils import parse_wheel_filename
             dist_dpath = pathlib.Path('{wheelhouse_dpath}')
-            candidates = list(dist_dpath.glob('{self.pkg_fname_prefix}*.whl'))
-            candidates += list(dist_dpath.glob('{self.pkg_fname_prefix}*.tar.gz'))
-            fpath = sorted(candidates)[-1]
+            wheels = sorted(dist_dpath.glob('{self.pkg_fname_prefix}*.whl'))
+            if wheels:
+                sys_tags = set(tags.sys_tags())
+                matching = []
+                for w in wheels:
+                    try:
+                        _, _, _, wheel_tags = parse_wheel_filename(w.name)
+                    except Exception:
+                        continue
+                    if any(t in sys_tags for t in wheel_tags):
+                        matching.append(w)
+                fpath = sorted(matching or wheels)[-1]
+            else:
+                sdists = sorted(dist_dpath.glob('{self.pkg_fname_prefix}*.tar.gz'))
+                if not sdists:
+                    raise SystemExit('No wheel artifacts found in wheelhouse')
+                fpath = sdists[-1]
             print(str(fpath).replace(chr(92), chr(47)))
         "
         """
     )
 
-    if tuple(map(int, self.config.min_python.split('.'))) >= (3, 8):
-        # Not sure why this fails on 3.6 / 3.7?
-        # Use less ugly version when we can
-        get_mod_version_bash = ub.codeblock(
-            """
-            python -c "if 1:
-                from pkginfo import Wheel, SDist
-                import pathlib
-                fpath = '$WHEEL_FPATH'
-                cls = Wheel if fpath.endswith('.whl') else SDist
-                item = cls(fpath)
-                print(item.version)
-            "
-            """
-        )
-    else:
-        get_mod_version_bash = ub.codeblock(
-            """
-            python -c "if 1:
-                from pkginfo import Wheel, SDist
-                import pathlib
-                fpath = '$WHEEL_FPATH'
-                cls = Wheel if fpath.endswith('.whl') else SDist
-                item = cls(fpath)
-                if item.version is None:
-                    import re
-                    # This is very fragile
-                    fname = pathlib.Path(fpath).name
-                    match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
-                    bs = chr(92)
-                    pat = '([0-9]+' + bs + '.[0-9]+' + bs + '.[0-9]+)'
-                    import re
-                    # Not sure why version is None in 3.6 and 3.7
-                    match = re.search(pat, fname)
-                    assert match is not None
-                    version = match.groups()[0]
-                    print(version)
-                else:
-                    print(item.version)
-            "
-            """
-        )
-    # get_mod_version_bash = ub.codeblock(
-    #     r'''
-    #     export MOD_VERSION=$(printf "$WHEEL_FPATH" | sed -E 's#.*/[^/]+-([0-9]+\.[0-9]+\.[0-9]+)[-.].*#\1#')
-    #     '''
-    # )
-    # # Will this help?
-    # get_mod_version_bash = ub.codeblock(
-    #     '''
-    #     python -c "if 1:
-    #         from pkginfo import Wheel, SDist
-    #         import sys
-    #         f=sys.argv[1]
-    #         cls=Wheel if f.endswith('.whl') else SDist
-    #         print(cls(f).version)
-    #     " "$WHEEL_FPATH"
-    #     '''
-    # )
+    # if tuple(map(int, self.config.min_python.split('.'))) >= (3, 8):
+    #     # Not sure why this fails on 3.6 / 3.7?
+    #     # Use less ugly version when we can
+    #     get_mod_version_bash = ub.codeblock(
+    #         """
+    #         python -c "if 1:
+    #             from pkginfo import Wheel, SDist
+    #             import pathlib
+    #             fpath = '$WHEEL_FPATH'
+    #             cls = Wheel if fpath.endswith('.whl') else SDist
+    #             item = cls(fpath)
+    #             print(item.version)
+    #         "
+    #         """
+    #     )
+    # else:
+    #     get_mod_version_bash = ub.codeblock(
+    #         """
+    #         python -c "if 1:
+    #             from pkginfo import Wheel, SDist
+    #             import pathlib
+    #             fpath = '$WHEEL_FPATH'
+    #             cls = Wheel if fpath.endswith('.whl') else SDist
+    #             item = cls(fpath)
+    #             if item.version is None:
+    #                 import re
+    #                 # This is very fragile
+    #                 fname = pathlib.Path(fpath).name
+    #                 match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
+    #                 bs = chr(92)
+    #                 pat = '([0-9]+' + bs + '.[0-9]+' + bs + '.[0-9]+)'
+    #                 import re
+    #                 # Not sure why version is None in 3.6 and 3.7
+    #                 match = re.search(pat, fname)
+    #                 assert match is not None
+    #                 version = match.groups()[0]
+    #                 print(version)
+    #             else:
+    #                 print(item.version)
+    #         "
+    #         """
+    #     )
 
     # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath(f'{self.mod_name}'))"
     get_modpath_python = f'import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))'
@@ -191,14 +220,14 @@ def make_install_and_test_wheel_parts(
             'echo "Installing helpers: setuptools"',
             f'{self.PIP_INSTALL} --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
             'echo "Installing helpers: tomli and pkginfo"',
-            f'{self.PIP_INSTALL} --resolution=highest tomli pkginfo',
+            f'{self.PIP_INSTALL} --resolution=highest tomli pkginfo packaging',
         ]
     else:
         install_helpers = [
             'echo "Installing helpers: setuptools"',
             f'{self.PIP_INSTALL} setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
             'echo "Installing helpers: tomli and pkginfo"',
-            f'{self.PIP_INSTALL} tomli pkginfo',
+            f'{self.PIP_INSTALL} tomli pkginfo packaging',
         ]
 
     # Note: export does not expose the environment variable to subsequent jobs.
@@ -210,14 +239,14 @@ def make_install_and_test_wheel_parts(
             f'{self.UPDATE_PIP}',
             *install_helpers,
             f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
-            f'export MOD_VERSION=$({get_mod_version_bash})',
+            # f'export MOD_VERSION=$({get_mod_version_bash})',
         ]
         + special_install_lines
         + [
             'echo "WHEEL_FPATH=$WHEEL_FPATH"',
             'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
             'echo "UV_RESOLUTION=$UV_RESOLUTION"',
-            'echo "MOD_VERSION=$MOD_VERSION"',
+            # 'echo "MOD_VERSION=$MOD_VERSION"',
             # This helps but doesn't solve the problem.
             # https://github.com/Erotemic/xdoctest/pull/158#discussion_r1697092781
             # 'echo "Downloading dependencies from pypi"',
@@ -227,7 +256,7 @@ def make_install_and_test_wheel_parts(
             # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
             # TODO: flag to allow prerelease?
             # f'{self.PIP_INSTALL_PREFER_BINARY} --prerelease=allow "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
+            f'{self.PIP_INSTALL_PREFER_BINARY} "${{WHEEL_FPATH}}[${{INSTALL_EXTRAS}}]"',
             'echo "Install finished."',
         ]
     )
@@ -291,6 +320,7 @@ def get_supported_platform_info(self):
 
     # TODO: maybe allow pinning, or list out what the options are
     # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+    # I think this only matters for github?
     if 'linux' in self.config['os']:
         os_list.append('ubuntu-latest')
     if 'osx' in self.config['os']:
@@ -298,6 +328,13 @@ def get_supported_platform_info(self):
     if 'win' in self.config['os']:
         os_list.append('windows-latest')
         # os_list.append('windows-11-arm')
+
+    if 'binpy-ubuntu-arm' in self.config['tags']:
+        # From TTsangSC:
+        # Overhead of building ARM wheels on Intel Linux nodes is unreasonably high
+        # (20s build time per wheel vs 3m); it's better to just spin another runner
+        # up to build them natively
+        os_list.append('ubuntu-24.04-arm')
 
     cpython_versions = self.config['ci_cpython_versions']
     pypy_versions = [f'pypy-{v}' for v in self.config['ci_pypy_versions']]
@@ -312,6 +349,28 @@ def get_supported_platform_info(self):
     INFO_LUT = {
         row['version']: row for row in constants.KNOWN_PYTHON_VERSION_INFO
     }
+
+    def _parse_pyver_tuple(pyver):
+        parts = [p for p in str(pyver).split('.') if p.isdigit()]
+        return tuple(int(p) for p in parts[:2])
+
+    if 'binpy' in self.config['tags']:
+        min_py = _parse_pyver_tuple(self.config['min_python'])
+        if min_py < (3, 9):
+            raise ValueError(
+                'xcookie does not support generating binpy workflows for Python < 3.9. '
+                'Bump min_python to >= 3.9 or disable binpy.'
+            )
+        for ver in supported_py_versions:
+            if _parse_pyver_tuple(ver) < (3, 9):
+                raise ValueError(
+                    f'binpy requested with python-version={ver}, but xcookie requires >=3.9 for binpy'
+                )
+        for ver in cpython_versions:
+            if _parse_pyver_tuple(ver) < (3, 9):
+                raise ValueError(
+                    f'binpy requested with python-version={ver}, but xcookie requires >=3.9 for binpy'
+                )
 
     # Choose which Python version will be the "main" one we use for version
     # agnostic jobs.
@@ -380,7 +439,6 @@ def get_supported_platform_info(self):
         'main_python_version': main_python_version,
         'install_extra_versions': extras_versions,
     }
-    import ubelt as ub
 
     print(
         f'supported_platform_info = {ub.urepr(supported_platform_info, nl=1)}'

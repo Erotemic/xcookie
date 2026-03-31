@@ -67,14 +67,15 @@ ExampleUsage:
         --use_pyproject_requirements=True --use_setup_py=False
 """
 
-import toml
-import shutil
-import ubelt as ub
-import tempfile
-import scriptconfig as scfg
-import warnings
-import xdev
 import os
+import shutil
+import tempfile
+import warnings
+
+import scriptconfig as scfg
+import toml
+import ubelt as ub
+import xdev
 from packaging.version import parse as Version
 
 
@@ -268,7 +269,7 @@ class XCookieConfig(scfg.DataConfig):
         ),
         'only_generate': scfg.Value(
             None,
-            alias='only_gen',
+            alias=['only_gen'],
             help=ub.paragraph(
                 """
             if specified, only generate files matching this multipattern.
@@ -290,7 +291,11 @@ class XCookieConfig(scfg.DataConfig):
                 "gdal" - add in our gdal hack # TODO
                 "postgresql" - add in postgresql dependencies
                 "cv2" - enable the headless hack
-                "notypes" - disable mypy in lint checks
+                "vcpkg" - enable Windows vcpkg bootstrap/caching
+                "opencv_link" - enable build-time OpenCV link on Windows
+                "win_smoke" / "windows_smoke" - enable Windows smoke test
+                "ci_debug_windows_env" - debug print Windows cibuildwheel env
+                "notypes" - disable type checking in lint checks
             """
             ),
         ),
@@ -316,6 +321,18 @@ class XCookieConfig(scfg.DataConfig):
         'test_variants': scfg.Value(
             ['full-loose', 'full-strict', 'minimal-loose', 'minimal-strict'],
             help='A list of which CI loose / strict / minimal / full variants to use',
+        ),
+        'ci_extras': scfg.Value(
+            None,
+            help=ub.paragraph(
+                """
+            A YAML dictionary specifying extra CI test dependencies.
+            Supports keys: 'loose', 'strict', 'minimal-loose', 'full-loose',
+            'minimal-strict', 'full-strict'. Values are lists of extra package names
+            to add to the corresponding test variant.
+            Example: "loose: [tests-binary]" or "full-loose: [tests-binary]"
+            """
+            ),
         ),
         'use_vcs': scfg.Value(
             'auto',
@@ -572,7 +589,7 @@ class XCookieConfig(scfg.DataConfig):
         return answer
 
     @classmethod
-    def load_from_cli_and_pyproject(cls, argv=0, **kwargs):
+    def load_from_cli_and_pyproject(cls, argv=False, **kwargs):
         # We load the config multiple times to get the right defaults.
         # ideally we should fix this up
         config = XCookieConfig.cli(argv=argv, data=kwargs, strict=True)
@@ -1092,7 +1109,10 @@ class TemplateApplier:
         tags = set(self.config['tags'])
         self.remote_info = {'type': 'unknown'}
 
-        if isinstance(self.config.url, str) and self.config.url.lower() in {'none', 'null'}:
+        if isinstance(self.config.url, str) and self.config.url.lower() in {
+            'none',
+            'null',
+        }:
             self.config.url = None
 
         if self.config.url is None:
@@ -1445,6 +1465,13 @@ class TemplateApplier:
                     xdev.sedfile(
                         stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0
                     )
+
+        # Probably inefficient.
+        if stage_fpath.name.endswith('.py'):
+            new_text = self.format_code(
+                stage_fpath.read_text(), filename=stage_fpath.name
+            )
+            stage_fpath.write_text(new_text)
         return info
 
     def _apply_xcookie_directives(self, stage_fpath):
@@ -1824,9 +1851,11 @@ class TemplateApplier:
             str: Formatted code
         """
         from xcookie.util.util_code_format import (
-            format_code as util_format_code,
-            make_backend,
             RuffFormatConfig,
+            make_backend,
+        )
+        from xcookie.util.util_code_format import (
+            format_code as util_format_code,
         )
 
         # Read the project's ruff configuration if available
@@ -1841,7 +1870,9 @@ class TemplateApplier:
         if 'quote-style' in ruff_format_dict:
             ruff_config_kwargs['quote_style'] = ruff_format_dict['quote-style']
         if 'indent-style' in ruff_format_dict:
-            ruff_config_kwargs['indent_style'] = ruff_format_dict['indent-style']
+            ruff_config_kwargs['indent_style'] = ruff_format_dict[
+                'indent-style'
+            ]
         if 'skip-magic-trailing-comma' in ruff_format_dict:
             ruff_config_kwargs['skip_magic_trailing_comma'] = ruff_format_dict[
                 'skip-magic-trailing-comma'
@@ -2102,7 +2133,7 @@ class TemplateApplier:
         ]
         version_defaults = [
             {
-                'version': '>=3.11.3',
+                'version': '>=3.11.3.1',
                 'pyver_ge': Version('3.14'),
                 'pyver_lt': Version('4.0'),
             },
@@ -2175,6 +2206,7 @@ class TemplateApplier:
                 """
             )
         elif fname == '__init__.py':
+            mkinit_target = ub.Path(info['repo_fpath']).as_posix()
             return ub.codeblock(
                 f'''
                 """
@@ -2186,7 +2218,7 @@ class TemplateApplier:
                 __url__ = '{self.config['url']}'
 
                 __mkinit__ = """
-                mkinit {info['repo_fpath']}
+                mkinit {mkinit_target}
                 """
                 '''
             )

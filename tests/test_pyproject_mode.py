@@ -1,7 +1,7 @@
 import toml
 
 
-def test_use_setup_py_false_generates_pep621(tmp_path):
+def test_use_setup_py_false_generates_pep621(tmp_path) -> None:
     """
     When setup.py generation is disabled, ensure we emit a PEP 621 style
     pyproject.toml and do not stage a setup.py file.

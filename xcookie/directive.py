@@ -2,14 +2,16 @@
 Port and extension of xdoctest directives.
 """
 
-import sys
+import operator
 import os
 import re
+import sys
 import warnings
-import operator
-from xdoctest import utils
-from xdoctest import static_analysis as static
 from collections import namedtuple
+
+from xdoctest import static_analysis as static
+from xdoctest import utils
+
 # from xdoctest import exceptions
 
 
@@ -103,7 +105,7 @@ class Directive(utils.NiceRepr):
     def _unpack_args(self, num):
         from xdoctest.utils import util_deprecation
 
-        util_deprecation.schedule_deprecation3(
+        util_deprecation.schedule_deprecation(
             modname='xdoctest',
             name='Directive._unpack_args',
             type='method',
@@ -124,7 +126,7 @@ class Directive(utils.NiceRepr):
     def effect(self, argv=None, environ=None):
         from xdoctest.utils import util_deprecation
 
-        util_deprecation.schedule_deprecation3(
+        util_deprecation.schedule_deprecation(
             modname='xdoctest',
             name='Directive.effect',
             type='method',

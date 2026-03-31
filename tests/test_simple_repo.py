@@ -1,4 +1,4 @@
-def test_simple_repo():
+def test_simple_repo() -> None:
     """
     This performs a simple run of xcookie, adds a few dummy files, and builds
     the docs.
@@ -35,10 +35,7 @@ def test_simple_repo():
     # config['repodir'] = 'fds'
     # rich.print(f'config = {ub.urepr(config, nl=1)}')
 
-    self = main.XCookieConfig.main(
-        argv=0,
-        **kwargs
-    )
+    self = main.XCookieConfig.main(argv=0, **kwargs)
     import xdev
 
     xdev.tree_repr(dpath)

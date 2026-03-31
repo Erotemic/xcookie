@@ -1,7 +1,9 @@
 def build_setup(self):
-    from xcookie import rc
-    import ubelt as ub
     import re
+
+    import ubelt as ub
+
+    from xcookie import rc
     # from distutils.version import Version
     # from packaging.version import parse as Version
 
@@ -233,5 +235,6 @@ def build_setup(self):
     # print(text)
 
     from xcookie.util.util_code_format import format_code
+
     text = format_code(text)
     return text

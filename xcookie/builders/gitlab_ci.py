@@ -1,4 +1,5 @@
 import ubelt as ub
+
 from xcookie.builders import common_ci
 
 
@@ -246,17 +247,60 @@ def make_purepy_ci_jobs(self):
     if 'cv2' in self.tags:
         loose_cv2 = ',headless'
         strict_cv2 = ',headless-strict'
+
+    # Parse ci_extras configuration if specified
+    from xcookie.util_yaml import Yaml
+
+    ci_extras = {}
+    if self.config.get('ci_extras'):
+        ci_extras = Yaml.loads(self.config['ci_extras'])
+
+    # Build the base install extras dictionary
     all_install_extras = ub.udict(
         {
-            'minimal-loose': 'tests' + loose_cv2,
-            'full-loose': 'tests,optional' + loose_cv2,
-            'minimal-strict': 'tests-strict,runtime-strict' + strict_cv2,
-            'full-strict': 'tests-strict,runtime-strict,optional-strict'
-            + strict_cv2,
+            'minimal-loose': ['tests']
+            + ([loose_cv2.strip(',')] if loose_cv2 else []),
+            'full-loose': ['tests', 'optional']
+            + ([loose_cv2.strip(',')] if loose_cv2 else []),
+            'minimal-strict': ['tests-strict', 'runtime-strict']
+            + ([strict_cv2.strip(',')] if strict_cv2 else []),
+            'full-strict': ['tests-strict', 'runtime-strict', 'optional-strict']
+            + ([strict_cv2.strip(',')] if strict_cv2 else []),
         }
     )
 
-    install_extras = ub.udict(all_install_extras) & self.config.test_variants
+    # Apply ci_extras to the install_extra_tags
+    # ci_extras can specify: 'loose', 'strict', 'minimal-loose', 'full-loose',
+    # 'minimal-strict', 'full-strict'
+    for variant_key, extras_list in ci_extras.items():
+        if variant_key == 'loose':
+            # Apply to all loose variants
+            for key in ['minimal-loose', 'full-loose']:
+                if key in all_install_extras:
+                    all_install_extras[key] = (
+                        all_install_extras[key] + extras_list
+                    )
+        elif variant_key == 'strict':
+            # Apply to all strict variants
+            for key in ['minimal-strict', 'full-strict']:
+                if key in all_install_extras:
+                    all_install_extras[key] = (
+                        all_install_extras[key] + extras_list
+                    )
+        elif variant_key in all_install_extras:
+            # Apply to specific variant
+            all_install_extras[variant_key] = (
+                all_install_extras[variant_key] + extras_list
+            )
+
+    # Convert back to comma-separated strings
+    all_install_extras_str = ub.udict(
+        {k: ','.join(v) for k, v in all_install_extras.items()}
+    )
+
+    install_extras = (
+        ub.udict(all_install_extras_str) & self.config.test_variants
+    )
     for extra_key, extra in install_extras.items():
         if 'gdal' in self.tags:
             if extra_key.endswith('-strict'):
@@ -710,8 +754,9 @@ def make_binpy_ci_jobs(self):
 
 
 def build_lint_job(self, common_template, deploy_image):
-    from xcookie.util_yaml import Yaml
     from ruamel.yaml.comments import CommentedMap
+
+    from xcookie.util_yaml import Yaml
 
     lint_job = {}
     lint_job.update(
@@ -730,8 +775,6 @@ def build_lint_job(self, common_template, deploy_image):
         )
     )
 
-    # TODO: add mypy if typed.
-    # e.g. mypy_check_commands = common_ci.make_mypy_check_parts(self)
     # TODO: only install linting requirements if the file exists.
     lint_job.update(
         Yaml.loads(
@@ -748,6 +791,15 @@ def build_lint_job(self, common_template, deploy_image):
         )
     )
 
+    # Add typechecking commands (mypy + ty by default) unless disabled
+    if 'notypes' not in self.tags:
+        typecheck_cmds = common_ci.make_typecheck_parts(self)
+        # Ensure the script key exists and is a list
+        script_list = lint_job.get('script') or []
+        # Extend script with typecheck commands
+        script_list = list(script_list) + typecheck_cmds
+        lint_job['script'] = script_list
+
     lint_job = CommentedMap(lint_job)
     lint_job.add_yaml_merge([(0, common_template)])
 
@@ -758,6 +810,7 @@ def build_lint_job(self, common_template, deploy_image):
 def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
     # import ruamel.yaml
     from ruamel.yaml.comments import CommentedMap
+
     from xcookie.util_yaml import Yaml
 
     _dist_patterns = []
@@ -871,6 +924,7 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
 def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
     # import ruamel.yaml
     from ruamel.yaml.comments import CommentedMap
+
     from xcookie.util_yaml import Yaml
 
     deploy_job = {}

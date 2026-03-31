@@ -1,5 +1,5 @@
-import ubelt as ub
 import toml
+import ubelt as ub
 
 
 def build_pyproject(self):

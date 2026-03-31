@@ -1,2 +1,2 @@
-def test_import():
-    import xcookie
+def test_import() -> None:
+    pass

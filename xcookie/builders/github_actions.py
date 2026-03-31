@@ -1,4 +1,5 @@
 import ubelt as ub
+
 from xcookie.builders import common_ci
 from xcookie.util_yaml import Yaml
 
@@ -79,14 +80,14 @@ class Actions:
             if _ is not None:
                 action.update(_)
         if 'name' in action:
-            reordered = action & ['name', 'uses']
+            reordered = action & ['name', 'uses']  # type: ignore
             action = reordered | (action - reordered)
         return dict(action)
 
     @classmethod
     def checkout(cls, *args, **kwargs):
         return cls.action(
-            {'name': 'Checkout source', 'uses': 'actions/checkout@v4.2.2'},
+            {'name': 'Checkout source', 'uses': 'actions/checkout@v6.0.2'},
             *args,
             **kwargs,
         )
@@ -107,7 +108,7 @@ class Actions:
         """
         return cls.action(
             {
-                'uses': 'codecov/codecov-action@v5.4.3',
+                'uses': 'codecov/codecov-action@v5.5.2',
             },
             *args,
             **kwargs,
@@ -144,7 +145,7 @@ class Actions:
     def upload_artifact(cls, *args, **kwargs):
         return cls.action(
             {
-                'uses': 'actions/upload-artifact@v4.4.0'
+                'uses': 'actions/upload-artifact@v6.0.0'
                 # Rollback to 3.x due to
                 # https://github.com/actions/upload-artifact/issues/478
                 # todo: migrate
@@ -225,7 +226,7 @@ class Actions:
         return cls.action(
             {
                 'name': 'Set up QEMU',
-                'uses': 'docker/setup-qemu-action@v3.0.0',
+                'uses': 'docker/setup-qemu-action@v3.7.0',
             },
             *args,
             **kwargs,
@@ -288,7 +289,6 @@ class Actions:
                         # 'CIBW_TEST_COMMAND': 'python {project}/run_tests.py',
                         # configure cibuildwheel to build native archs ('auto'), or emulated ones
                         'CIBW_ARCHS_LINUX': '${{ matrix.arch }}',
-                        'CIBW_ENVIRONMENT': 'PYTHONUTF8=1',  # for windows
                         'PYTHONUTF8': '1',  # for windows
                         # TODO: only include this if we are building on windows arm
                         # `msvc-dev-cmd` sets this envvar, which interferes with
@@ -306,7 +306,7 @@ class Actions:
                 # 'uses': 'pypa/cibuildwheel@v2.16.2',
                 # 'uses': 'pypa/cibuildwheel@v2.17.0',
                 # 'uses': 'pypa/cibuildwheel@v2.21.0',
-                'uses': 'pypa/cibuildwheel@v3.1.2',
+                'uses': 'pypa/cibuildwheel@v3.3.1',
             },
             *args,
             **kwargs,
@@ -565,11 +565,13 @@ def lint_job(self):
         ],
     }
 
+    # TODO: I think we need to install reqs similarly
+    # to how we do it in github here?
     if 'notypes' not in self.tags:
-        mypy_check_commands = common_ci.make_mypy_check_parts(self)
-        job['steps'].append(
-            {'name': 'Typecheck with mypy', 'run': mypy_check_commands}
-        )
+        typecheck_cmds = common_ci.make_typecheck_parts(self)
+        # GitHub Actions expects a single string for `run` with newlines
+        run_text = '\n'.join(typecheck_cmds)
+        job['steps'].append({'name': 'Typecheck', 'run': run_text})
     return Yaml.Dict(job)
 
 
@@ -814,6 +816,13 @@ def build_binpy_wheels_job(self):
     job_steps += [Actions.checkout()]
     job_steps += conditional_actions
 
+    use_vcpkg = 'vcpkg' in self.tags or 'opencv_link' in self.tags
+    opencv_link = 'opencv_link' in self.tags
+    if 'cv2' in self.tags and 'opencv_link' not in self.tags:
+        assert not opencv_link, (
+            'cv2 is runtime-only and must not imply opencv_link'
+        )
+
     USE_ABI3 = False
     if USE_ABI3:
         # Hack in abi3 support, todo: clean up later.
@@ -824,11 +833,150 @@ def build_binpy_wheels_job(self):
         )
         abi3_action['env']['CIBW_BUILD'] = 'cp38-*'
 
+    vcpkg_pre_steps = []
+    vcpkg_post_steps = []
+    if use_vcpkg:
+        vcpkg_pre_steps.append(
+            {
+                'name': 'Set vcpkg cache paths (Windows)',
+                'if': "runner.os == 'Windows'",
+                'shell': 'pwsh',
+                'run': ub.codeblock(
+                    """
+                    "VCPKG_ARCHIVES_DIR=$env:LOCALAPPDATA\\vcpkg\\archives" >> $env:GITHUB_ENV
+                    "VCPKG_DOWNLOADS_DIR=C:\\vcpkg\\downloads" >> $env:GITHUB_ENV
+                    New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\\vcpkg\\archives" | Out-Null
+                    New-Item -ItemType Directory -Force -Path "C:\\vcpkg\\downloads" | Out-Null
+                    """
+                ),
+            }
+        )
+        vcpkg_pre_steps.append(
+            {
+                'name': 'Restore vcpkg caches (Windows)',
+                'if': "runner.os == 'Windows'",
+                'id': 'vcpkg-cache',
+                'uses': 'actions/cache/restore@v4',
+                'with': {
+                    'path': ub.codeblock(
+                        """
+                        ${{ env.VCPKG_ARCHIVES_DIR }}
+                        ${{ env.VCPKG_DOWNLOADS_DIR }}
+                        """
+                    ),
+                    'key': "vcpkg-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'CMakeLists.txt', 'setup.py', 'vcpkg.json', 'vcpkg-configuration.json') }}",
+                    'restore-keys': ub.codeblock(
+                        """
+                        vcpkg-${{ runner.os }}-
+                        """
+                    ),
+                },
+            }
+        )
+        vcpkg_pre_steps.append(
+            {
+                'name': 'Ensure vcpkg (Windows)',
+                'if': "runner.os == 'Windows'",
+                'shell': 'pwsh',
+                'run': ub.codeblock(
+                    """
+                    if (-not (Test-Path "C:\\vcpkg")) {
+                      git clone https://github.com/microsoft/vcpkg C:\\vcpkg
+                    }
+                    Set-Location C:\\vcpkg
+                    .\\bootstrap-vcpkg.bat -disableMetrics
+                    "C:\\vcpkg" | Out-File -FilePath $env:GITHUB_PATH -Append
+                    """
+                ),
+            }
+        )
+        if opencv_link:
+            vcpkg_pre_steps.append(
+                {
+                    'name': 'Install OpenCV via vcpkg (Windows)',
+                    'if': "runner.os == 'Windows'",
+                    'shell': 'pwsh',
+                    'run': ub.codeblock(
+                        """
+                        vcpkg install opencv4:x64-windows
+                        """
+                    ),
+                }
+            )
+        vcpkg_post_steps.append(
+            {
+                'name': 'Save vcpkg caches (Windows, even on failure)',
+                'if': "runner.os == 'Windows' && always()",
+                'uses': 'actions/cache/save@v4',
+                'with': {
+                    'path': ub.codeblock(
+                        """
+                        ${{ env.VCPKG_ARCHIVES_DIR }}
+                        ${{ env.VCPKG_DOWNLOADS_DIR }}
+                        """
+                    ),
+                    'key': '${{ steps.vcpkg-cache.outputs.cache-primary-key }}',
+                },
+            }
+        )
+
+    cibw_action = Actions.cibuildwheel(sensible=True)
+    if use_vcpkg:
+        env = cibw_action['env']
+        if any('windows' in osname for osname in os_list):
+            env['CIBW_ARCHS_WINDOWS'] = 'AMD64'
+        cibw_env_lines = ub.codeblock(
+            """
+            VCPKG_ROOT=C:/vcpkg
+            VCPKG_TARGET_TRIPLET=x64-windows
+            VCPKG_DOWNLOADS=C:/vcpkg/downloads
+            PATH=C:/vcpkg;C:/vcpkg/installed/x64-windows/bin;{PATH}
+            """
+        )
+        if opencv_link:
+            cibw_env_lines = (
+                cibw_env_lines
+                + '\n'
+                + ub.codeblock(
+                    """
+                    OpenCV_DIR=C:/vcpkg/installed/x64-windows/share/opencv4
+                    OpenCV_ROOT=C:/vcpkg/installed/x64-windows
+                    CMAKE_PREFIX_PATH=C:/vcpkg/installed/x64-windows
+                    CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake;-DOpenCV_DIR=C:/vcpkg/installed/x64-windows/share/opencv4
+                    """
+                )
+            )
+        env['CIBW_ENVIRONMENT_WINDOWS'] = cibw_env_lines
+        env['VCPKG_ROOT'] = r'C:\vcpkg'
+        env['VCPKG_TARGET_TRIPLET'] = 'x64-windows'
+
     job_steps += [
         Actions.setup_qemu(sensible=True),
         # abi3_action,
-        Actions.cibuildwheel(sensible=True),
+        *vcpkg_pre_steps,
     ]
+    if use_vcpkg and 'ci_debug_windows_env' in self.tags:
+        job_steps.append(
+            {
+                'name': 'Show cibuildwheel Windows env (Windows)',
+                'if': "runner.os == 'Windows'",
+                'shell': 'bash',
+                'env': {
+                    'CIBW_ENVIRONMENT_WINDOWS': cibw_action['env'].get(
+                        'CIBW_ENVIRONMENT_WINDOWS', ''
+                    )
+                },
+                'run': ub.codeblock(
+                    """
+                    echo "CIBW_ENVIRONMENT_WINDOWS:"
+                    printf '%s\\n' "$CIBW_ENVIRONMENT_WINDOWS"
+                    """
+                ),
+            }
+        )
+    job_steps.append(cibw_action)
+    if vcpkg_post_steps:
+        job_steps += vcpkg_post_steps
     job_steps += [
         {
             'name': 'Show built files',
@@ -887,7 +1035,7 @@ def build_purewheel_job(self):
     # os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
     # pypy_versions = supported_platform_info['pypy_versions']
-    job = {
+    job: dict[str, object] = {
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
@@ -963,9 +1111,18 @@ def test_wheels_job(self, needs=None):
     # Map the min/full loose/strict terminology to specific extra packages
     import ubelt as ub
 
+    from xcookie.util_yaml import Yaml
+
     special_loose_tags = []
     if 'cv2' in self.tags:
+        # TODO: can probably have this generate appropriate ci_extras in the
+        # xcookie config?
         special_loose_tags.append('headless')
+
+    # Parse ci_extras configuration if specified
+    ci_extras = {}
+    if self.config.get('ci_extras'):
+        ci_extras = Yaml.loads(self.config['ci_extras'])
 
     if self.config['use_pyproject_requirements']:
         special_strict_tags = [t for t in special_loose_tags]
@@ -993,6 +1150,25 @@ def test_wheels_job(self, needs=None):
                 + special_strict_tags,
             }
         )
+
+    # Apply ci_extras to the install_extra_tags
+    # ci_extras can specify: 'loose', 'strict', 'minimal-loose', 'full-loose',
+    # 'minimal-strict', 'full-strict'
+    for variant_key, extras_list in ci_extras.items():
+        if variant_key == 'loose':
+            # Apply to all loose variants
+            for key in ['minimal-loose', 'full-loose']:
+                if key in install_extra_tags:
+                    install_extra_tags[key] += extras_list
+        elif variant_key == 'strict':
+            # Apply to all strict variants
+            for key in ['minimal-strict', 'full-strict']:
+                if key in install_extra_tags:
+                    install_extra_tags[key] += extras_list
+        elif variant_key in install_extra_tags:
+            # Apply to specific variant
+            install_extra_tags[variant_key] += extras_list
+
     install_extras = ub.udict(
         {k: ','.join(v) for k, v in install_extra_tags.items()}
     )
@@ -1120,8 +1296,8 @@ def test_wheels_job(self, needs=None):
         #         if flag:
         #             filtered_include.append(item)
         #     include = filtered_include
-        from fnmatch import translate as glob_to_re
         import re
+        from fnmatch import translate as glob_to_re
 
         def compile_rules(rules):
             return [
@@ -1150,7 +1326,7 @@ def test_wheels_job(self, needs=None):
             'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
             'if': condition,
             'runs-on': '${{ matrix.os }}',
-            'needs': sorted(needs),
+            'needs': [] if needs is None else sorted(needs),
             'strategy': {
                 'fail-fast': False,
                 'matrix': Yaml.Dict(
@@ -1274,6 +1450,20 @@ def test_wheels_job(self, needs=None):
         custom_after_test_commands=custom_after_test_commands,
     )
 
+    if len(self.config['ci_pypy_versions']) > 0 and 'osx' in self.config['os']:
+        # When using pypy on OSX we need to set a MACOSX_DEPLOYMENT_TARGET so any
+        # wheels (e.g. cffi) that it needs to build from source when we pip install
+        # our wheel are built correctly.
+        action_steps.append(
+            Actions.action(
+                {
+                    'name': 'Set macOS deployment target (arm64)',
+                    'if': "runner.os == 'macOS'",
+                    'run': 'echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV',
+                }
+            )
+        )
+
     action_steps.append(
         Actions.action(
             {
@@ -1284,6 +1474,48 @@ def test_wheels_job(self, needs=None):
             }
         )
     )
+
+    smoke_enabled = 'win_smoke' in self.tags or 'windows_smoke' in self.tags
+    if smoke_enabled:
+        smoke_run = ub.codeblock(
+            f"""
+            python - <<'PY'
+            import os, sys
+            import pathlib
+
+            ws = os.environ.get("GITHUB_WORKSPACE")
+            if ws:
+                ws_path = pathlib.Path(ws).resolve()
+                new_sys_path = []
+                for entry in sys.path:
+                    if not entry:
+                        new_sys_path.append(entry)
+                        continue
+                    try:
+                        p = pathlib.Path(entry).resolve()
+                        if p.is_relative_to(ws_path):
+                            continue
+                    except Exception:
+                        pass
+                    new_sys_path.append(entry)
+                sys.path[:] = new_sys_path
+
+            import {self.mod_name} as mod
+            print("{self.mod_name}:", mod.__file__)
+
+            PY
+            """
+        )
+        action_steps.append(
+            Actions.action(
+                {
+                    'name': 'Smoke test wheel on Windows',
+                    'if': "runner.os == 'Windows'",
+                    'shell': 'bash',
+                    'run': smoke_run,
+                }
+            )
+        )
 
     import kwutil
 
@@ -1483,7 +1715,7 @@ def build_deploy(self, mode='live', needs=None):
         if self.config['deploy_pypi']:
             run = [
                 f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security] twine -U',
-                f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {dist_pattern} --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
+                'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
             ]
         else:
             run = []
@@ -1646,7 +1878,7 @@ def build_github_release(self, needs=None):
         'if': condition,
         'runs-on': 'ubuntu-latest',
         'permissions': {'contents': 'write'},
-        'needs': sorted(needs),
+        'needs': [] if needs is None else sorted(needs),
         'steps': [
             Actions.checkout(name='Checkout source'),
             Actions.download_artifact(
