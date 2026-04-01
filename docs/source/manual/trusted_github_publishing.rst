@@ -108,7 +108,7 @@ For the current xcookie GitHub workflow layout, the relevant file is:
 
 .. code-block:: text
 
-    .github/workflows/tests.yml
+    .github/workflows/release.yml
 
 3. Register a trusted publisher on PyPI
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -128,7 +128,7 @@ When configuring the publisher, use:
 
 * Owner: the GitHub organization or user
 * Repository name: the repository name
-* Workflow filename: ``.github/workflows/tests.yml``
+* Workflow filename: ``.github/workflows/release.yml``
 
 If you are using GitHub protected environments, also set the matching
 environment name in PyPI.
@@ -150,7 +150,7 @@ Use the same:
 
 * Owner
 * Repository name
-* Workflow filename: ``.github/workflows/tests.yml``
+* Workflow filename: ``.github/workflows/release.yml``
 
 5. Run a non-release push and check TestPyPI
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

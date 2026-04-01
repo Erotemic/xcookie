@@ -313,164 +313,7 @@ class Actions:
         )
 
 
-def build_github_actions(self):
-    """
-    Ignore:
-        cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.lint
-        cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.build_and_test_sdist
-        cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .jobs.deploy
-        cat ~/code/xcookie/xcookie/rc/tests.yml.in | yq  .
-
-    CommandLine:
-        xdoctest -m xcookie.builders.github_actions build_github_actions
-
-    Example:
-        >>> from xcookie.builders.github_actions import *  # NOQA
-        >>> from xcookie.main import XCookieConfig
-        >>> from xcookie.main import TemplateApplier
-        >>> config = XCookieConfig(tags=['purepy'], repo_name='mymod')
-        >>> config['ci_cpython_versions'] = config['ci_cpython_versions'][-2:]
-        >>> self = TemplateApplier(config)
-        >>> text = build_github_actions(self)
-        >>> print(ub.highlight_code(text, 'yaml'))
-    """
-    jobs = Yaml.Dict({})
-    if self.config.linter:
-        jobs['lint_job'] = lint_job(self)
-        jobs['lint_job'].yaml_set_start_comment(
-            ub.codeblock(
-                """
-            ##
-            Run quick linting and typing checks.
-            To disable all linting add "linter=false" to the xcookie config.
-            To disable type checks add "notypes" to the xcookie tags.
-            ##
-            """
-            ),
-            indent=4,
-        )
-
-    if 'purepy' in self.tags:
-        name = 'PurePyCI'
-        purepy_jobs = Yaml.Dict({})
-        if 'nosrcdist' not in self.tags:
-            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
-            purepy_jobs['build_and_test_sdist'].yaml_set_start_comment(
-                ub.codeblock(
-                    """
-                ##
-                Build the pure python package from source and test it in the
-                same environment.
-                ##
-                """
-                ),
-                indent=4,
-            )
-
-        purepy_jobs['build_purepy_wheels'] = Yaml.Dict(
-            build_purewheel_job(self)
-        )
-        purepy_jobs['test_purepy_wheels'] = Yaml.Dict(
-            test_wheels_job(self, needs=['build_purepy_wheels'])
-        )
-
-        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(
-            ub.codeblock(
-                """
-            ##
-            Build the pure-python wheels independently on a per-platform basis.
-            These will be tested later in the build_purepy_wheels step.
-            ##
-            """
-            ),
-            indent=4,
-        )
-        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(
-            ub.codeblock(
-                """
-            ##
-            Download and test the pure-python wheels that were build in the
-            build_purepy_wheels and test them in this independent environment.
-            ##
-            """
-            ),
-            indent=4,
-        )
-
-        deploy_needs = list(purepy_jobs.keys())
-        deploy_needs = set(deploy_needs) - {'test_purepy_wheels'}
-        jobs.update(purepy_jobs)
-    elif 'binpy' in self.tags:
-        name = 'BinPyCI'
-        binpy_jobs = Yaml.Dict({})
-        if 'nosrcdist' not in self.tags:
-            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
-            binpy_jobs['build_and_test_sdist'].yaml_set_start_comment(
-                ub.codeblock(
-                    """
-                ##
-                Build the binary package from source and test it in the same
-                environment.
-                ##
-                """
-                ),
-                indent=4,
-            )
-
-        binpy_jobs['build_binpy_wheels'] = Yaml.Dict(
-            build_binpy_wheels_job(self)
-        )
-        binpy_jobs['test_binpy_wheels'] = Yaml.Dict(
-            test_wheels_job(self, needs=['build_binpy_wheels'])
-        )
-
-        binpy_jobs['build_binpy_wheels'].yaml_set_start_comment(
-            ub.codeblock(
-                """
-            ##
-            Build the binary wheels. Note: even though cibuildwheel will test
-            them internally here, we will test them independently later in the
-            test_binpy_wheels step.
-            ##
-            """
-            ),
-            indent=4,
-        )
-        binpy_jobs['test_binpy_wheels'].yaml_set_start_comment(
-            ub.codeblock(
-                """
-            ##
-            Download the previously build binary wheels from the
-            build_binpy_wheels step, and test them in an independent
-            environment.
-            ##
-            """
-            ),
-            indent=4,
-        )
-        deploy_needs = list(binpy_jobs.keys())
-        deploy_needs = set(deploy_needs) - {'test_binpy_wheels'}
-        jobs.update(binpy_jobs)
-    else:
-        raise Exception('Need to specify binpy or purepy in tags')
-
-    if self.config['deploy']:
-        jobs['test_deploy'] = build_deploy(
-            self, mode='test', needs=deploy_needs
-        )
-        jobs['live_deploy'] = build_deploy(
-            self, mode='live', needs=deploy_needs
-        )
-
-        if 1:
-            # New action to create a proper release
-            jobs['release'] = build_github_release(self, needs=['live_deploy'])
-
-    defaultbranch = self.config['defaultbranch']
-    run_on_branches = ub.oset([defaultbranch, 'main'])
-    run_on_branches_str = ', '.join(run_on_branches)
-
-    # For some reason, it doesn't like the on block
+def _render_workflow_text(name, on_lines, jobs, footer=''):
     header = ub.codeblock(
         f"""
         # This workflow will install Python dependencies, run tests and lint with a variety of Python versions
@@ -482,23 +325,22 @@ def build_github_actions(self):
         name: {name}
 
         on:
-          push:
-          pull_request:
-            branches: [ {run_on_branches_str} ]
-
         """
     )
+    on_text = ub.indent(ub.codeblock(on_lines).strip(), '  ')
 
     walker = ub.IndexableWalker(jobs)
     for p, v in walker:
         k = p[-1]
-        if k == 'run':
-            if isinstance(v, list):
-                v2 = '\n'.join(v)
-                walker[p] = v2
+        if k == 'run' and isinstance(v, list):
+            walker[p] = '\n'.join(v)
 
     body = {'jobs': jobs}
+    text = header + on_text + '\n\n' + Yaml.dumps(body) + '\n\n' + footer
+    return text
 
+
+def _build_github_footer(self):
     if 'erotemic' in self.tags:
         if self.config.get('ci_pypi_trusted_publishing', False):
             footer = ub.codeblock(
@@ -546,10 +388,240 @@ def build_github_actions(self):
             )
     else:
         footer = ''
+    return footer
 
-    text = header + '\n\n' + Yaml.dumps(body) + '\n\n' + footer
-    return text
 
+def _collect_test_jobs(self):
+    jobs = Yaml.Dict({})
+    if self.config.linter:
+        jobs['lint_job'] = lint_job(self)
+        jobs['lint_job'].yaml_set_start_comment(
+            ub.codeblock(
+                """
+            ##
+            Run quick linting and typing checks.
+            To disable all linting add "linter=false" to the xcookie config.
+            To disable type checks add "notypes" to the xcookie tags.
+            ##
+            """
+            ),
+            indent=4,
+        )
+
+    if 'purepy' in self.tags:
+        name = 'PurePyCI'
+        purepy_jobs = Yaml.Dict({})
+        if 'nosrcdist' not in self.tags:
+            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
+            purepy_jobs['build_and_test_sdist'].yaml_set_start_comment(
+                ub.codeblock(
+                    """
+                ##
+                Build the pure python package from source and test it in the
+                same environment.
+                ##
+                """
+                ),
+                indent=4,
+            )
+
+        purepy_jobs['build_purepy_wheels'] = Yaml.Dict(
+            build_purewheel_job(self)
+        )
+        purepy_jobs['test_purepy_wheels'] = Yaml.Dict(
+            test_wheels_job(self, needs=['build_purepy_wheels'])
+        )
+
+        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
+            ##
+            Build the pure-python wheels independently on a per-platform basis.
+            These will be tested later in the test_purepy_wheels step.
+            ##
+            """
+            ),
+            indent=4,
+        )
+        purepy_jobs['test_purepy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
+            ##
+            Download and test the pure-python wheels that were built in the
+            build_purepy_wheels step in this independent environment.
+            ##
+            """
+            ),
+            indent=4,
+        )
+
+        jobs.update(purepy_jobs)
+    elif 'binpy' in self.tags:
+        name = 'BinPyCI'
+        binpy_jobs = Yaml.Dict({})
+        if 'nosrcdist' not in self.tags:
+            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
+            binpy_jobs['build_and_test_sdist'].yaml_set_start_comment(
+                ub.codeblock(
+                    """
+                ##
+                Build the binary package from source and test it in the same
+                environment.
+                ##
+                """
+                ),
+                indent=4,
+            )
+
+        binpy_jobs['build_binpy_wheels'] = Yaml.Dict(
+            build_binpy_wheels_job(self)
+        )
+        binpy_jobs['test_binpy_wheels'] = Yaml.Dict(
+            test_wheels_job(self, needs=['build_binpy_wheels'])
+        )
+
+        binpy_jobs['build_binpy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
+            ##
+            Build the binary wheels. Note: even though cibuildwheel will test
+            them internally here, we will test them independently later in the
+            test_binpy_wheels step.
+            ##
+            """
+            ),
+            indent=4,
+        )
+        binpy_jobs['test_binpy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
+            ##
+            Download the previously built binary wheels from the
+            build_binpy_wheels step, and test them in an independent
+            environment.
+            ##
+            """
+            ),
+            indent=4,
+        )
+        jobs.update(binpy_jobs)
+    else:
+        raise Exception('Need to specify binpy or purepy in tags')
+
+    return name, jobs
+
+
+def _collect_release_jobs(self):
+    jobs = Yaml.Dict({})
+    release_build_needs = []
+
+    if 'purepy' in self.tags:
+        name = 'PurePyRelease'
+        if 'nosrcdist' not in self.tags:
+            jobs['build_sdist'] = build_sdist_job(self)
+            jobs['build_sdist'].yaml_set_start_comment(
+                ub.codeblock(
+                    """
+                ##
+                Build the sdist artifact used by the release workflow.
+                This workflow intentionally builds artifacts but does not run the
+                full test matrix.
+                ##
+                """
+                ),
+                indent=4,
+            )
+            release_build_needs.append('build_sdist')
+
+        jobs['build_purepy_wheels'] = Yaml.Dict(
+            build_purewheel_job(self)
+        )
+        jobs['build_purepy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
+            ##
+            Build the pure-python wheels used by the release workflow.
+            ##
+            """
+            ),
+            indent=4,
+        )
+        release_build_needs.append('build_purepy_wheels')
+
+    elif 'binpy' in self.tags:
+        name = 'BinPyRelease'
+        if 'nosrcdist' not in self.tags:
+            jobs['build_sdist'] = build_sdist_job(self)
+            jobs['build_sdist'].yaml_set_start_comment(
+                ub.codeblock(
+                    """
+                ##
+                Build the sdist artifact used by the release workflow.
+                This workflow intentionally builds artifacts but does not run the
+                full test matrix.
+                ##
+                """
+                ),
+                indent=4,
+            )
+            release_build_needs.append('build_sdist')
+
+        jobs['build_binpy_wheels'] = Yaml.Dict(
+            build_binpy_wheels_release_job(self)
+        )
+        jobs['build_binpy_wheels'].yaml_set_start_comment(
+            ub.codeblock(
+                """
+            ##
+            Build binary wheels used by the release workflow.
+            ##
+            """
+            ),
+            indent=4,
+        )
+        release_build_needs.append('build_binpy_wheels')
+    else:
+        raise Exception('Need to specify binpy or purepy in tags')
+
+    return name, jobs, release_build_needs
+
+
+def build_github_actions(self):
+    # Backwards-compatible wrapper for older call sites.
+    return build_github_actions_tests(self)
+
+
+def build_github_actions_tests(self):
+    name, jobs = _collect_test_jobs(self)
+    defaultbranch = self.config['defaultbranch']
+    run_on_branches = ub.oset([defaultbranch, 'main'])
+    run_on_branches_str = ', '.join(run_on_branches)
+    on_lines = f"""
+    push:
+    pull_request:
+      branches: [ {run_on_branches_str} ]
+    """
+    return _render_workflow_text(name, on_lines, jobs, footer='')
+
+
+def build_github_actions_release(self):
+    name, jobs, release_build_needs = _collect_release_jobs(self)
+
+    if self.config['deploy']:
+        jobs['test_deploy'] = build_deploy(
+            self, mode='test', needs=release_build_needs
+        )
+        jobs['live_deploy'] = build_deploy(
+            self, mode='live', needs=release_build_needs
+        )
+        jobs['release'] = build_github_release(self, needs=['live_deploy'])
+
+    on_lines = """
+    push:
+    workflow_dispatch:
+    """
+    footer = _build_github_footer(self)
+    return _render_workflow_text(name, on_lines, jobs, footer=footer)
 
 def lint_job(self):
     supported_platform_info = common_ci.get_supported_platform_info(self)
@@ -1100,6 +1172,120 @@ def build_purewheel_job(self):
             }
         ),
     ]
+    return job
+
+
+
+def build_sdist_job(self):
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    main_python_version = supported_platform_info['main_python_version']
+    wheelhouse_dpath = 'wheelhouse'
+    build_parts = common_ci.make_build_sdist_parts(self, wheelhouse_dpath)
+
+    job = {
+        'name': 'Build sdist',
+        'runs-on': 'ubuntu-latest',
+        'steps': [
+            Actions.checkout(),
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {main_python_version}',
+                    'with': {'python-version': main_python_version},
+                }
+            ),
+            {
+                'name': 'Build sdist',
+                'shell': 'bash',
+                'run': build_parts['commands'],
+            },
+            {
+                'name': 'Show built files',
+                'shell': 'bash',
+                'run': f'ls -la {wheelhouse_dpath}',
+            },
+            Actions.upload_artifact(
+                {
+                    'name': 'Upload sdist artifact',
+                    'with': {
+                        'name': 'sdist_wheels',
+                        'path': build_parts['artifact'],
+                    },
+                }
+            ),
+        ],
+    }
+    return Yaml.Dict(job)
+
+
+def build_binpy_wheels_release_job(self):
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    os_list = supported_platform_info['os_list']
+
+    pyproj_config = self.config._load_pyproject_config()
+    cibw_skip = (
+        pyproj_config.get('tool', {}).get('cibuildwheel', {}).get('skip', '')
+    )
+    if isinstance(cibw_skip, list):
+        cibw_skip = ' '.join(cibw_skip)
+    explicit_skips = ' ' + cibw_skip
+
+    matrix = Yaml.Dict({})
+    matrix.yaml_set_start_comment(
+        ub.codeblock(
+            """
+        Normally, xcookie generates explicit lists of platforms to build / test
+        on, but in this case cibuildwheel does that for us, so we need to just
+        set the environment variables for cibuildwheel. These are parsed out of
+        the standard [tool.cibuildwheel] section in pyproject.toml and set
+        explicitly here.
+        """
+        ),
+        indent=8,
+    )
+    matrix['os'] = os_list
+    matrix['cibw_skip'] = [explicit_skips.strip()]
+    matrix['arch'] = ['auto']
+
+    conditional_actions = []
+    if 'win' in self.config['os']:
+        conditional_actions += [
+            Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
+        ]
+
+    job = Yaml.Dict(
+        {
+            'name': '${{ matrix.os }}, arch=${{ matrix.arch }}',
+            'runs-on': '${{ matrix.os }}',
+            'strategy': {
+                'fail-fast': False,
+                'matrix': matrix,
+            },
+            'steps': None,
+        }
+    )
+
+    job_steps = []
+    job_steps += [Actions.checkout()]
+    job_steps += conditional_actions
+    job_steps += [
+        Actions.setup_qemu(sensible=True),
+        Actions.cibuildwheel(sensible=True),
+        {
+            'name': 'Show built files',
+            'shell': 'bash',
+            'run': 'ls -la wheelhouse',
+        },
+        Actions.upload_artifact(
+            {
+                'name': 'Upload wheels artifact',
+                'with': {
+                    'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
+                    'path': f'./wheelhouse/{self.mod_name}*.whl',
+                },
+            }
+        ),
+    ]
+    job['steps'] = job_steps
     return job
 
 
@@ -1857,6 +2043,7 @@ def build_deploy(self, mode='live', needs=None):
             'contents': 'read',
             'id-token': 'write',
         }
+        job['environment'] = 'pypi' if mode == 'live' else 'testpypi'
     return job
 
 

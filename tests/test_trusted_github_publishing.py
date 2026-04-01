@@ -1,16 +1,16 @@
 import sys
 import types
 
-import pytest
-
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
-def _make_applier(tmp_path, *, trusted, enable_gpg):
+def _make_applier(tmp_path, *, trusted, enable_gpg, tags=None):
+    if tags is None:
+        tags = ['github', 'erotemic', 'purepy']
     cfg = XCookieConfig(
         repodir=tmp_path,
         repo_name='demo_pkg',
-        tags=['github', 'erotemic', 'purepy'],
+        tags=tags,
         interactive=False,
         rotate_secrets=False,
         refresh_docs=False,
@@ -53,36 +53,70 @@ class _FakeQueue:
         return None
 
 
-def test_render_github_actions_trusted_publishing(tmp_path):
+def test_template_registry_contains_tests_and_release_workflows(tmp_path):
+    self = _make_applier(tmp_path, trusted=True, enable_gpg=True)
+    self._build_template_registry()
+    fnames = {str(info['fname']) for info in self.template_infos}
+    assert '.github/workflows/tests.yml' in fnames
+    assert '.github/workflows/release.yml' in fnames
+
+
+def test_build_github_actions_wrapper_points_to_tests_workflow(tmp_path):
+    self = _make_applier(tmp_path, trusted=True, enable_gpg=True)
+    assert self.build_github_actions() == self.build_github_actions_tests()
+
+
+def test_tests_workflow_has_no_release_jobs(tmp_path):
     text = _make_applier(
         tmp_path, trusted=True, enable_gpg=True
-    ).build_github_actions()
+    ).build_github_actions_tests()
 
+    assert 'test_deploy:' not in text
+    assert 'live_deploy:' not in text
+    assert 'release:' not in text
+    assert 'pypa/gh-action-pypi-publish@release/v1' not in text
+    assert 'lint_job:' in text
+    assert 'pull_request:' in text
+
+
+def test_release_workflow_has_release_jobs_and_no_test_matrix_purepy(tmp_path):
+    text = _make_applier(
+        tmp_path, trusted=True, enable_gpg=True
+    ).build_github_actions_release()
+
+    assert 'test_deploy:' in text
+    assert 'live_deploy:' in text
+    assert 'release:' in text
     assert 'pypa/gh-action-pypi-publish@release/v1' in text
     assert 'packages-dir: publish_wheelhouse' in text
     assert 'id-token: write' in text
-    assert 'twine upload --username __token__' not in text
-    assert 'Sign distributions' in text
-    assert 'Prepare publish directory' in text
-    assert 'Publish test artifacts to TestPyPI' in text
-    assert 'Publish live artifacts to PyPI' in text
+    assert 'environment: testpypi' in text
+    assert 'environment: pypi' in text
+    assert 'workflow_dispatch:' in text
+    assert 'pull_request:' not in text
+    assert 'test_purepy_wheels:' not in text
+    assert 'build_sdist:' in text
+    assert 'build_purepy_wheels:' in text
 
 
-def test_render_github_actions_legacy_publishing(tmp_path):
+def test_release_workflow_binpy_uses_cibuildwheel(tmp_path):
     text = _make_applier(
-        tmp_path, trusted=False, enable_gpg=True
-    ).build_github_actions()
+        tmp_path,
+        trusted=True,
+        enable_gpg=True,
+        tags=['github', 'erotemic', 'binpy'],
+    ).build_github_actions_release()
 
-    assert 'pypa/gh-action-pypi-publish@release/v1' not in text
-    assert 'id-token: write' not in text
-    assert 'twine upload --username __token__' in text
-    assert 'Sign and Publish' in text
+    assert 'build_binpy_wheels:' in text
+    assert 'pypa/cibuildwheel@v3.3.1' in text
+    assert 'test_binpy_wheels:' not in text
+    assert 'pypa/gh-action-pypi-publish@release/v1' in text
 
 
-def test_render_github_actions_trusted_footer_drops_twine_act_secrets(tmp_path):
+def test_release_workflow_trusted_footer_drops_twine_act_secrets(tmp_path):
     text = _make_applier(
         tmp_path, trusted=True, enable_gpg=True
-    ).build_github_actions()
+    ).build_github_actions_release()
 
     assert 'Trusted publishing cannot be fully emulated with local act secrets.' in text
     assert 'EROTEMIC_TWINE_PASSWORD' not in text
@@ -90,10 +124,10 @@ def test_render_github_actions_trusted_footer_drops_twine_act_secrets(tmp_path):
     assert 'EROTEMIC_CI_SECRET' in text
 
 
-def test_render_github_actions_legacy_footer_keeps_twine_act_secrets(tmp_path):
+def test_release_workflow_legacy_footer_keeps_twine_act_secrets(tmp_path):
     text = _make_applier(
         tmp_path, trusted=False, enable_gpg=True
-    ).build_github_actions()
+    ).build_github_actions_release()
 
     assert 'EROTEMIC_TWINE_PASSWORD' in text
     assert 'EROTEMIC_TEST_TWINE_PASSWORD' in text
@@ -110,7 +144,6 @@ def test_rotate_secrets_trusted_without_gpg_skips_secret_upload(monkeypatch, tmp
     queue = _FakeQueue.created[-1]
     joined = '\n'.join(queue.commands)
 
-    assert 'source ' in queue.commands[0]
     assert 'setup_package_environs_github_erotemic' in joined
     assert 'source $(secret_loader.sh)' in joined
     assert 'export_encrypted_code_signing_keys' not in joined

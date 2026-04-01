@@ -835,8 +835,14 @@ class TemplateApplier:
                 'overwrite': 1,
                 'tags': 'github',
                 'fname': '.github/workflows/tests.yml',
-                'dynamic': 'build_github_actions',
-                # 'input_fname': rc.resource_fpath('tests.yml.in')
+                'dynamic': 'build_github_actions_tests',
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'tags': 'github',
+                'fname': '.github/workflows/release.yml',
+                'dynamic': 'build_github_actions_release',
             },
             {
                 'template': 0,
@@ -1933,11 +1939,21 @@ class TemplateApplier:
             self.SYSTEM_PIP_INSTALL = 'python -m pip install'
 
     def build_github_actions(self):
+        # Backwards-compatible wrapper. Keep this pointing at tests.yml for
+        # older call sites.
+        return self.build_github_actions_tests()
+
+    def build_github_actions_tests(self):
         from xcookie.builders import github_actions
 
-        self._setup_pip_commands()  # Do we need this here?
-        text = github_actions.build_github_actions(self)
-        return text
+        self._setup_pip_commands()
+        return github_actions.build_github_actions_tests(self)
+
+    def build_github_actions_release(self):
+        from xcookie.builders import github_actions
+
+        self._setup_pip_commands()
+        return github_actions.build_github_actions_release(self)
 
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci
