@@ -2,6 +2,18 @@ import ubelt as ub
 
 from xcookie.builders import common_ci
 from xcookie.util_yaml import Yaml
+from typing import TypeAlias, MutableMapping, MutableSequence, Mapping, Sequence
+
+
+# Type alias for json / yaml data structure
+JSON_Terminal: TypeAlias = str | int | float | bool | None
+JSON_MutableSequence: TypeAlias = MutableSequence["JSON_Mutable"]
+JSON_MutableMapping: TypeAlias = MutableMapping[str, "JSON_Mutable"]
+JSON_Mutable: TypeAlias = JSON_Terminal | JSON_MutableSequence | JSON_MutableMapping
+
+JSON_Sequence: TypeAlias = Sequence["JSON"]
+JSON_Mapping: TypeAlias = Mapping[str, "JSON"]
+JSON: TypeAlias = JSON_Terminal | JSON_Sequence | JSON_Mapping
 
 
 class Actions:
@@ -69,7 +81,7 @@ class Actions:
         print('\n'.join(update_lines))
 
     @classmethod
-    def action(cls, *args, **kwargs):
+    def action(cls, *args, **kwargs) -> JSON_Mapping:
         """
         The generic action.
 
@@ -85,7 +97,7 @@ class Actions:
         return dict(action)
 
     @classmethod
-    def checkout(cls, *args, **kwargs):
+    def checkout(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
             {'name': 'Checkout source', 'uses': 'actions/checkout@v6.0.2'},
             *args,
@@ -93,7 +105,7 @@ class Actions:
         )
 
     @classmethod
-    def setup_python(cls, *args, **kwargs):
+    def setup_python(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
             {'name': 'Setup Python', 'uses': 'actions/setup-python@v5.6.0'},
             *args,
@@ -101,7 +113,7 @@ class Actions:
         )
 
     @classmethod
-    def codecov_action(cls, *args, **kwargs):
+    def codecov_action(cls, *args, **kwargs) -> JSON_Mapping:
         """
         References:
             https://github.com/codecov/codecov-action
@@ -115,7 +127,7 @@ class Actions:
         )
 
     @classmethod
-    def combine_coverage(cls, *args, **kwargs):
+    def combine_coverage(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
             {
                 'name': 'Combine coverage Linux',
@@ -142,7 +154,7 @@ class Actions:
         )
 
     @classmethod
-    def upload_artifact(cls, *args, **kwargs):
+    def upload_artifact(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
             {
                 'uses': 'actions/upload-artifact@v6.0.0'
@@ -157,7 +169,7 @@ class Actions:
         )
 
     @classmethod
-    def download_artifact(cls, *args, **kwargs):
+    def download_artifact(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
             {
                 'uses': 'actions/download-artifact@v4.1.8',
@@ -170,7 +182,7 @@ class Actions:
     @classmethod
     def msvc_dev_cmd(
         cls, *args, osvar=None, bits=None, test_condition=None, **kwargs
-    ):
+    ) -> JSON_Mapping:
         if osvar is not None:
             # hack, just keep it this way for now
             windows_con = "${{ startsWith(matrix.os, 'windows-') }}"
@@ -213,7 +225,7 @@ class Actions:
         )
 
     @classmethod
-    def setup_qemu(cls, *args, sensible=False, **kwargs):
+    def setup_qemu(cls, *args, sensible=False, **kwargs) -> JSON_Mapping:
         if sensible:
             kwargs.update(
                 {
@@ -233,7 +245,7 @@ class Actions:
         )
 
     @classmethod
-    def setup_xcode(cls, *args, sensible=False, **kwargs):
+    def setup_xcode(cls, *args, sensible=False, **kwargs) -> JSON_Mapping:
         if sensible:
             kwargs.update(
                 {
@@ -253,7 +265,7 @@ class Actions:
         )
 
     @classmethod
-    def setup_ipfs(cls, *args, **kwargs):
+    def setup_ipfs(cls, *args, **kwargs) -> JSON_Mapping:
         # https://github.com/marketplace/actions/ipfs-setup-action
         return cls.action(
             {
@@ -1128,7 +1140,7 @@ def build_purewheel_job(self):
     # os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
     # pypy_versions = supported_platform_info['pypy_versions']
-    job: dict[str, object] = {
+    job: dict[str, JSON] = {
         'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
@@ -2030,7 +2042,7 @@ def build_deploy(self, mode='live', needs=None):
         )
     ]
 
-    job = {
+    job: dict[str, JSON] = {
         'name': f'Deploy {mode.capitalize()}',
         'runs-on': 'ubuntu-latest',
         'if': condition,

@@ -36,7 +36,7 @@ class _FakeQueue:
     @classmethod
     def create(cls, **kwargs):
         inst = cls()
-        inst.create_kwargs = kwargs
+        setattr(inst, 'create_kwargs', kwargs)
         cls.created.append(inst)
         return inst
 

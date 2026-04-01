@@ -607,7 +607,7 @@ class XCookieConfig(scfg.DataConfig):
         return config
 
     @classmethod
-    def main(cls, argv=0, **kwargs):
+    def main(cls, argv=False, **kwargs):
         """
         Main entry point
 
