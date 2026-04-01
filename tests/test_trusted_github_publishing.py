@@ -4,10 +4,10 @@ import types
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
-def _make_applier(tmp_path, *, trusted, enable_gpg, tags=None):
+def _make_applier(tmp_path, *, trusted, enable_gpg, tags=None, min_python=None):
     if tags is None:
         tags = ['github', 'erotemic', 'purepy']
-    cfg = XCookieConfig(
+    kwargs = dict(
         repodir=tmp_path,
         repo_name='demo_pkg',
         tags=tags,
@@ -15,6 +15,9 @@ def _make_applier(tmp_path, *, trusted, enable_gpg, tags=None):
         rotate_secrets=False,
         refresh_docs=False,
     )
+    if min_python is not None:
+        kwargs['min_python'] = min_python
+    cfg = XCookieConfig(**kwargs)
     cfg['ci_pypi_trusted_publishing'] = trusted
     cfg['enable_gpg'] = enable_gpg
     self = TemplateApplier(cfg)
@@ -105,6 +108,7 @@ def test_release_workflow_binpy_uses_cibuildwheel(tmp_path):
         trusted=True,
         enable_gpg=True,
         tags=['github', 'erotemic', 'binpy'],
+        min_python='3.9',
     ).build_github_actions_release()
 
     assert 'build_binpy_wheels:' in text
