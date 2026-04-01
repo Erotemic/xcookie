@@ -1750,8 +1750,11 @@ class TemplateApplier:
 
     def rotate_secrets(self):
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
-        # dev/public_gpg_key
-        # if self.config.confirm('Ready to rotate secrets?'):
+        enable_gpg = self.config['enable_gpg']
+        use_trusted_publishing = self.config.get(
+            'ci_pypi_trusted_publishing', False
+        )
+
         if 'erotemic' in self.config['tags']:
             environ_export = 'setup_package_environs_github_erotemic'
             upload_secret_cmd = 'upload_github_secrets'
@@ -1764,6 +1767,14 @@ class TemplateApplier:
         else:
             raise Exception
 
+        need_secret_upload = True
+        if (
+            use_trusted_publishing
+            and self.remote_info.get('type') == 'github'
+            and not enable_gpg
+        ):
+            need_secret_upload = False
+
         import cmd_queue
 
         script = cmd_queue.Queue.create(
@@ -1772,25 +1783,23 @@ class TemplateApplier:
         script.submit(f'source {setup_secrets_fpath}', log=False)
         script.sync().submit(f'{environ_export}', log=False)
         script.sync().submit('source $(secret_loader.sh)', log=False)
-        script.sync().submit('export_encrypted_code_signing_keys', log=False)
-        # script.sync().submit('git commit -am "Updated secrets"')
-        script.sync().submit(f'{upload_secret_cmd}', log=False)
-        # script.submit(ub.codeblock(
-        #     f'''
-        #     cd {self.repodir}
-        #     source {setup_secrets_fpath}
-        #     {environ_export}
-        #     load_secrets
-        #     export_encrypted_code_signing_keys
-        #     git commit -am "Updated secrets"
-        #     {upload_secret_cmd}
-        #     '''))
+
+        if enable_gpg:
+            script.sync().submit(
+                'export_encrypted_code_signing_keys', log=False
+            )
+
+        if need_secret_upload:
+            script.sync().submit(f'{upload_secret_cmd}', log=False)
+        else:
+            script.sync().submit(
+                'echo "Trusted publishing enabled with GPG disabled; no CI secrets need to be uploaded."',
+                log=False,
+            )
+
         script.rprint()
-        # print('FIXME: for now, you need to manually execute this')
-        # print('Note: need to load_secrets before running this')
         if self.config.confirm('Ready to rotate secrets?'):
             script.run(system=True, mode='bash')
-            # script.run(system=True)
 
     def print_help_tips(self):
         text = ub.codeblock(
