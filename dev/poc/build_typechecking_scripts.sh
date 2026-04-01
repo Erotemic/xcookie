@@ -11,4 +11,4 @@ ty check {modpath} {testpath} && mypy {modpath} {testpath} --strict
 
 # e.g.
 ty check aivm tests && mypy aivm tests --strict
-ty check aivm tests && mypy aivm tests --disallow-untyped-defs --disallow-incomplete-defs
+ty check aivm tests && mypy --disallow-untyped-defs --disallow-incomplete-defs tests aivm
