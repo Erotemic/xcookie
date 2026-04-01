@@ -1,0 +1,330 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+# Based on ~/code/xcookie/xcookie/rc/tests.yml.in
+# Now based on ~/code/xcookie/xcookie/builders/github_actions.py
+# See: https://github.com/Erotemic/xcookie
+
+name: PurePyRelease
+
+on:  push:
+  workflow_dispatch:
+
+jobs:
+  build_sdist:
+    ##
+    # Build the sdist artifact used by the release workflow.
+    # This workflow intentionally builds artifacts but does not run the
+    # full test matrix.
+    ##
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v6.0.2
+    - name: Set up Python 3.14
+      uses: actions/setup-python@v5.6.0
+      with:
+        python-version: '3.14'
+    - name: Build sdist
+      shell: bash
+      run: |-
+        python -m pip install pip uv -U
+        python -m uv pip install setuptools>=0.8 wheel build twine
+        python -m build --sdist --outdir wheelhouse
+        python -m twine check ./wheelhouse/xcookie*.tar.gz
+    - name: Show built files
+      shell: bash
+      run: ls -la wheelhouse
+    - uses: actions/upload-artifact@v6.0.0
+      name: Upload sdist artifact
+      with:
+        name: sdist_wheels
+        path: ./wheelhouse/xcookie*.tar.gz
+  build_purepy_wheels:
+    ##
+    # Build the pure-python wheels used by the release workflow.
+    ##
+    name: ${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - ubuntu-latest
+        python-version:
+        - '3.14'
+        arch:
+        - auto
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v6.0.2
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3.7.0
+      if: runner.os == 'Linux' && matrix.arch != 'auto'
+      with:
+        platforms: all
+    - name: Setup Python
+      uses: actions/setup-python@v5.6.0
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Build pure wheel
+      shell: bash
+      run: |-
+        python -m pip install pip uv -U
+        python -m uv pip install setuptools>=0.8 wheel build twine
+        python -m build --wheel --outdir wheelhouse
+        python -m twine check ./wheelhouse/xcookie*.whl
+    - name: Show built files
+      shell: bash
+      run: ls -la wheelhouse
+    - uses: actions/upload-artifact@v6.0.0
+      name: Upload wheels artifact
+      with:
+        name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+        path: ./wheelhouse/xcookie*.whl
+  test_deploy:
+    name: Deploy Test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')
+    needs:
+    - build_purepy_wheels
+    - build_sdist
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v6.0.2
+    - uses: actions/download-artifact@v4.1.8
+      name: Download wheels
+      with:
+        pattern: wheels-*
+        merge-multiple: true
+        path: wheelhouse
+    - uses: actions/download-artifact@v4.1.8
+      name: Download sdist
+      with:
+        name: sdist_wheels
+        path: wheelhouse
+    - name: Show files to upload
+      shell: bash
+      run: ls -la wheelhouse
+    - name: Sign distributions
+      env:
+        CI_SECRET: ${{ secrets.CI_SECRET }}
+      run: |-
+        GPG_EXECUTABLE=gpg
+        $GPG_EXECUTABLE --version
+        openssl version
+        $GPG_EXECUTABLE --list-keys
+        echo "Decrypting Keys"
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
+        echo "Finish Decrypt Keys"
+        $GPG_EXECUTABLE --list-keys || true
+        $GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"
+        $GPG_EXECUTABLE --list-keys
+        VERSION=$(python -c "import setup; print(setup.VERSION)")
+        python -m pip install pip uv -U
+        python -m pip install packaging twine -U
+        python -m pip install urllib3 requests[security]
+        GPG_KEYID=$(cat dev/public_gpg_key)
+        echo "GPG_KEYID = '$GPG_KEYID'"
+        GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
+        WHEEL_PATHS=(wheelhouse/*.whl wheelhouse/*.tar.gz)
+        WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
+        echo "$WHEEL_PATHS_STR"
+        for WHEEL_PATH in "${WHEEL_PATHS[@]}"
+        do
+            echo "------"
+            echo "WHEEL_PATH = $WHEEL_PATH"
+            $GPG_SIGN_CMD --output $WHEEL_PATH.asc $WHEEL_PATH
+            $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH  || echo "hack, the first run of gpg very fails"
+            $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH
+        done
+        ls -la wheelhouse
+        python -m pip install opentimestamps-client
+        ots stamp wheelhouse/*.whl wheelhouse/*.tar.gz wheelhouse/*.asc
+        ls -la wheelhouse
+    - name: Prepare publish directory
+      shell: bash
+      run: |-
+        mkdir -p publish_wheelhouse
+        shopt -s nullglob
+        for FPATH in wheelhouse/*.whl wheelhouse/*.tar.gz wheelhouse/*.zip
+        do
+            cp "$FPATH" publish_wheelhouse/
+        done
+        ls -la publish_wheelhouse
+    - name: Publish test artifacts to TestPyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: publish_wheelhouse
+        skip-existing: true
+        repository-url: https://test.pypi.org/legacy/
+    - uses: actions/upload-artifact@v6.0.0
+      name: Upload deploy artifacts
+      with:
+        name: deploy_artifacts
+        path: |-
+          wheelhouse/*.whl
+          wheelhouse/*.zip
+          wheelhouse/*.tar.gz
+          wheelhouse/*.asc
+          wheelhouse/*.ots
+    permissions:
+      contents: read
+      id-token: write
+    environment: testpypi
+  live_deploy:
+    name: Deploy Live
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))
+    needs:
+    - build_purepy_wheels
+    - build_sdist
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v6.0.2
+    - uses: actions/download-artifact@v4.1.8
+      name: Download wheels
+      with:
+        pattern: wheels-*
+        merge-multiple: true
+        path: wheelhouse
+    - uses: actions/download-artifact@v4.1.8
+      name: Download sdist
+      with:
+        name: sdist_wheels
+        path: wheelhouse
+    - name: Show files to upload
+      shell: bash
+      run: ls -la wheelhouse
+    - name: Sign distributions
+      env:
+        CI_SECRET: ${{ secrets.CI_SECRET }}
+      run: |-
+        GPG_EXECUTABLE=gpg
+        $GPG_EXECUTABLE --version
+        openssl version
+        $GPG_EXECUTABLE --list-keys
+        echo "Decrypting Keys"
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
+        openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
+        echo "Finish Decrypt Keys"
+        $GPG_EXECUTABLE --list-keys || true
+        $GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"
+        $GPG_EXECUTABLE --list-keys
+        VERSION=$(python -c "import setup; print(setup.VERSION)")
+        python -m pip install pip uv -U
+        python -m pip install packaging twine -U
+        python -m pip install urllib3 requests[security]
+        GPG_KEYID=$(cat dev/public_gpg_key)
+        echo "GPG_KEYID = '$GPG_KEYID'"
+        GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
+        WHEEL_PATHS=(wheelhouse/*.whl wheelhouse/*.tar.gz)
+        WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
+        echo "$WHEEL_PATHS_STR"
+        for WHEEL_PATH in "${WHEEL_PATHS[@]}"
+        do
+            echo "------"
+            echo "WHEEL_PATH = $WHEEL_PATH"
+            $GPG_SIGN_CMD --output $WHEEL_PATH.asc $WHEEL_PATH
+            $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH  || echo "hack, the first run of gpg very fails"
+            $GPG_EXECUTABLE --verify $WHEEL_PATH.asc $WHEEL_PATH
+        done
+        ls -la wheelhouse
+        python -m pip install opentimestamps-client
+        ots stamp wheelhouse/*.whl wheelhouse/*.tar.gz wheelhouse/*.asc
+        ls -la wheelhouse
+    - name: Prepare publish directory
+      shell: bash
+      run: |-
+        mkdir -p publish_wheelhouse
+        shopt -s nullglob
+        for FPATH in wheelhouse/*.whl wheelhouse/*.tar.gz wheelhouse/*.zip
+        do
+            cp "$FPATH" publish_wheelhouse/
+        done
+        ls -la publish_wheelhouse
+    - name: Publish live artifacts to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        packages-dir: publish_wheelhouse
+        skip-existing: true
+    - uses: actions/upload-artifact@v6.0.0
+      name: Upload deploy artifacts
+      with:
+        name: deploy_artifacts
+        path: |-
+          wheelhouse/*.whl
+          wheelhouse/*.zip
+          wheelhouse/*.tar.gz
+          wheelhouse/*.asc
+          wheelhouse/*.ots
+    permissions:
+      contents: read
+      id-token: write
+    environment: pypi
+  release:
+    name: Create Github Release
+    if: github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs:
+    - live_deploy
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v6.0.2
+    - uses: actions/download-artifact@v4.1.8
+      name: Download artifacts
+      with:
+        name: deploy_artifacts
+        path: wheelhouse
+    - name: Show files to release
+      shell: bash
+      run: ls -la wheelhouse
+    - run: 'echo "Automatic Release Notes. TODO: improve" > ${{ github.workspace }}-CHANGELOG.txt'
+    - name: Tag Release Commit
+      if: (startsWith(github.event.ref, 'refs/heads/release'))
+      run: |-
+        export VERSION=$(python -c "import setup; print(setup.VERSION)")
+        git tag "v$VERSION"
+        git push origin "v$VERSION"
+    - uses: softprops/action-gh-release@v1
+      name: Create Release
+      id: create_release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        body_path: ${{ github.workspace }}-CHANGELOG.txt
+        tag_name: ${{ github.ref }}
+        name: Release ${{ github.ref }}
+        body: Automatic Release
+        generate_release_notes: true
+        draft: true
+        prerelease: false
+        files: |-
+          wheelhouse/*.whl
+          wheelhouse/*.asc
+          wheelhouse/*.ots
+          wheelhouse/*.zip
+          wheelhouse/*.tar.gz
+
+
+###
+# Unfortunately we cant (yet) use the yaml docstring trick here
+# https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
+#__doc__: |
+#    # How to run locally
+#    # https://packaging.python.org/guides/using-testpypi/
+#    git clone https://github.com/nektos/act.git $HOME/code/act
+#    chmod +x $HOME/code/act/install.sh
+#    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
+#
+#    # Trusted publishing cannot be fully emulated with local act secrets.
+#    # The local approximation is to run the signing / build portions only.
+#    load_secrets
+#    unset GITHUB_TOKEN
+#    $HOME/.local/opt/act/act \
+#        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET
