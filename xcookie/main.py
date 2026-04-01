@@ -258,6 +258,10 @@ class XCookieConfig(scfg.DataConfig):
             'TEST_TWINE_PASSWORD',
             help='variable of the test twine password in your secrets',
         ),
+        'ci_pypi_trusted_publishing': scfg.Value(
+            False,
+            help='if True, github deploy jobs use PyPI trusted publishing instead of twine password secrets',
+        ),
         'regen': scfg.Value(
             None,
             help=ub.paragraph(

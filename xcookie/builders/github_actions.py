@@ -500,28 +500,50 @@ def build_github_actions(self):
     body = {'jobs': jobs}
 
     if 'erotemic' in self.tags:
-        footer = ub.codeblock(
-            r"""
-            ###
-            # Unfortunately we cant (yet) use the yaml docstring trick here
-            # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
-            #__doc__: |
-            #    # How to run locally
-            #    # https://packaging.python.org/guides/using-testpypi/
-            #    git clone https://github.com/nektos/act.git $HOME/code/act
-            #    chmod +x $HOME/code/act/install.sh
-            #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
-            #
-            #    load_secrets
-            #    unset GITHUB_TOKEN
-            #    $HOME/.local/opt/act/act \
-            #        --secret=EROTEMIC_TWINE_PASSWORD=$EROTEMIC_TWINE_PASSWORD \
-            #        --secret=EROTEMIC_TWINE_USERNAME=$EROTEMIC_TWINE_USERNAME \
-            #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET \
-            #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
-            #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD
-            """
-        )
+        if self.config.get('ci_pypi_trusted_publishing', False):
+            footer = ub.codeblock(
+                r"""
+                ###
+                # Unfortunately we cant (yet) use the yaml docstring trick here
+                # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
+                #__doc__: |
+                #    # How to run locally
+                #    # https://packaging.python.org/guides/using-testpypi/
+                #    git clone https://github.com/nektos/act.git $HOME/code/act
+                #    chmod +x $HOME/code/act/install.sh
+                #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
+                #
+                #    # Trusted publishing cannot be fully emulated with local act secrets.
+                #    # The local approximation is to run the signing / build portions only.
+                #    load_secrets
+                #    unset GITHUB_TOKEN
+                #    $HOME/.local/opt/act/act \
+                #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET
+                """
+            )
+        else:
+            footer = ub.codeblock(
+                r"""
+                ###
+                # Unfortunately we cant (yet) use the yaml docstring trick here
+                # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
+                #__doc__: |
+                #    # How to run locally
+                #    # https://packaging.python.org/guides/using-testpypi/
+                #    git clone https://github.com/nektos/act.git $HOME/code/act
+                #    chmod +x $HOME/code/act/install.sh
+                #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
+                #
+                #    load_secrets
+                #    unset GITHUB_TOKEN
+                #    $HOME/.local/opt/act/act \
+                #        --secret=EROTEMIC_TWINE_PASSWORD=$EROTEMIC_TWINE_PASSWORD \
+                #        --secret=EROTEMIC_TWINE_USERNAME=$EROTEMIC_TWINE_USERNAME \
+                #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET \
+                #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
+                #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD
+                """
+            )
     else:
         footer = ''
 
@@ -1572,31 +1594,38 @@ def build_deploy(self, mode='live', needs=None):
 
     enable_gpg = self.config['enable_gpg']
 
+    use_trusted_publishing = self.config.get(
+        'ci_pypi_trusted_publishing', False
+    )
     live_pass_varname = self.config['ci_pypi_live_password_varname']
     test_pass_varname = self.config['ci_pypi_test_password_varname']
 
     assert mode in {'live', 'test'}
     if mode == 'live':
-        env = {
-            'TWINE_REPOSITORY_URL': 'https://upload.pypi.org/legacy/',
-            # 'TWINE_USERNAME': '${{ secrets.TWINE_USERNAME }}',
-            'TWINE_USERNAME': '__token__',
-            'TWINE_PASSWORD': '${{ secrets.' + live_pass_varname + ' }}',
-        }
+        env = {}
+        if not use_trusted_publishing:
+            env.update(
+                {
+                    'TWINE_REPOSITORY_URL': 'https://upload.pypi.org/legacy/',
+                    'TWINE_USERNAME': '__token__',
+                    'TWINE_PASSWORD': '${{ secrets.' + live_pass_varname + ' }}',
+                }
+            )
         if enable_gpg:
-            # TODO: make this not me-specific
             env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
         condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
     elif mode == 'test':
-        env = {
-            'TWINE_REPOSITORY_URL': 'https://test.pypi.org/legacy/',
-            # 'TWINE_USERNAME': '${{ secrets.TEST_TWINE_USERNAME }}',
-            'TWINE_USERNAME': '__token__',
-            'TWINE_PASSWORD': '${{ secrets.' + test_pass_varname + ' }}',
-        }
+        env = {}
+        if not use_trusted_publishing:
+            env.update(
+                {
+                    'TWINE_REPOSITORY_URL': 'https://test.pypi.org/legacy/',
+                    'TWINE_USERNAME': '__token__',
+                    'TWINE_PASSWORD': '${{ secrets.' + test_pass_varname + ' }}',
+                }
+            )
         if enable_gpg:
-            # TODO: make this not me-specific
             env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
         condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
@@ -1627,6 +1656,7 @@ def build_deploy(self, mode='live', needs=None):
     # TODO: this is probably configured earlier, update it to point to the
     # single source of truth.
     wheelhouse_dpath = 'wheelhouse'
+    publish_dist_dpath = 'publish_wheelhouse'
 
     artifact_globs = [
         f'{wheelhouse_dpath}/*.whl',
@@ -1700,7 +1730,7 @@ def build_deploy(self, mode='live', needs=None):
             ]
             artifact_globs.append(f'{wheelhouse_dpath}/*.ots')
 
-        if self.config['deploy_pypi']:
+        if self.config['deploy_pypi'] and not use_trusted_publishing:
             run += [
                 f'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" {dist_pattern} --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
             ]
@@ -1712,7 +1742,7 @@ def build_deploy(self, mode='live', needs=None):
         #      './publish.sh'),
         # ]
     else:
-        if self.config['deploy_pypi']:
+        if self.config['deploy_pypi'] and not use_trusted_publishing:
             run = [
                 f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security] twine -U',
                 'twine upload --username __token__ --password "$TWINE_PASSWORD" --repository-url "$TWINE_REPOSITORY_URL" --skip-existing --verbose || {{ echo "failed to twine upload" ; exit 1; }}',
@@ -1755,16 +1785,52 @@ def build_deploy(self, mode='live', needs=None):
         }
     ]
 
-    if self.config['deploy_pypi'] or enable_gpg:
+    if run:
+        if enable_gpg and self.config['deploy_pypi'] and not use_trusted_publishing:
+            step_name = 'Sign and Publish'
+        elif enable_gpg:
+            step_name = 'Sign distributions'
+        else:
+            step_name = 'Publish'
         deploy_steps += [
-            # TODO: it might make sense to make this a script that is invoked
             {
-                'name': 'Sign and Publish'
-                if self.config['enable_gpg']
-                else 'Publish',
+                'name': step_name,
                 'env': env,
                 'run': run,
             }
+        ]
+
+    if self.config['deploy_pypi'] and use_trusted_publishing:
+        publish_with = {
+            'packages-dir': publish_dist_dpath,
+            'skip-existing': True,
+        }
+        if mode == 'test':
+            publish_with['repository-url'] = 'https://test.pypi.org/legacy/'
+
+        deploy_steps += [
+            {
+                'name': 'Prepare publish directory',
+                'shell': 'bash',
+                'run': ub.codeblock(
+                    f'''
+                    mkdir -p {publish_dist_dpath}
+                    shopt -s nullglob
+                    for FPATH in {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.zip
+                    do
+                        cp "$FPATH" {publish_dist_dpath}/
+                    done
+                    ls -la {publish_dist_dpath}
+                    '''
+                ),
+            },
+            {
+                'name': 'Publish live artifacts to PyPI'
+                if mode == 'live'
+                else 'Publish test artifacts to TestPyPI',
+                'uses': 'pypa/gh-action-pypi-publish@release/v1',
+                'with': publish_with,
+            },
         ]
 
     deploy_steps += [
@@ -1786,6 +1852,11 @@ def build_deploy(self, mode='live', needs=None):
         'needs': sorted(needs),
         'steps': deploy_steps,
     }
+    if self.config['deploy_pypi'] and use_trusted_publishing:
+        job['permissions'] = {
+            'contents': 'read',
+            'id-token': 'write',
+        }
     return job
 
 

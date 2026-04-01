@@ -11,6 +11,10 @@ min_python = '3.9'
 #ci_cpython_versions = ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
 #ci_pypy_versions = 'auto'
 ci_pypy_versions = []
+ci_pypi_trusted_publishing = true
+enable_gpg = true
+deploy = true
+deploy_pypi = true
 typed=true
 
 [[tool.xcookie.ci_blocklist]]
