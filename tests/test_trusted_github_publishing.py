@@ -122,6 +122,14 @@ def test_release_workflow_trusted_footer_drops_twine_act_secrets(tmp_path):
         tmp_path, trusted=True, enable_gpg=True
     ).build_github_actions_release()
 
+    assert 'Trusted publishing setup checklist' in text
+    assert '.github/workflows/release.yml' in text
+    assert 'https://github.com/Erotemic/demo_pkg/settings/environments' in text
+    assert 'https://github.com/Erotemic/demo_pkg/actions/workflows/release.yml' in text
+    assert 'https://pypi.org/manage/project/demo-pkg/settings/publishing/' in text
+    assert 'https://test.pypi.org/manage/project/demo-pkg/settings/publishing/' in text
+    assert 'https://pypi.org/manage/account/publishing/' in text
+    assert 'https://test.pypi.org/manage/account/publishing/' in text
     assert 'Trusted publishing cannot be fully emulated with local act secrets.' in text
     assert 'EROTEMIC_TWINE_PASSWORD' not in text
     assert 'EROTEMIC_TEST_TWINE_PASSWORD' not in text

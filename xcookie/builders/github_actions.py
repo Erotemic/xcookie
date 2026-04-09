@@ -351,52 +351,157 @@ def _render_workflow_text(name, on_lines, jobs, footer=''):
     text = header + '\n\non:\n' + on_text + '\n\n' + Yaml.dumps(body) + '\n\n' + footer
     return text
 
+
 def _build_github_footer(self):
-    if 'erotemic' in self.tags:
-        if self.config.get('ci_pypi_trusted_publishing', False):
-            footer = ub.codeblock(
-                r"""
-                ###
-                # Unfortunately we cant (yet) use the yaml docstring trick here
-                # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
-                #__doc__: |
-                #    # How to run locally
-                #    # https://packaging.python.org/guides/using-testpypi/
-                #    git clone https://github.com/nektos/act.git $HOME/code/act
-                #    chmod +x $HOME/code/act/install.sh
-                #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
-                #
-                #    # Trusted publishing cannot be fully emulated with local act secrets.
-                #    # The local approximation is to run the signing / build portions only.
-                #    load_secrets
-                #    unset GITHUB_TOKEN
-                #    $HOME/.local/opt/act/act \
-                #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET
-                """
+    use_trusted_publishing = self.config.get(
+        'ci_pypi_trusted_publishing', False
+    )
+
+    if use_trusted_publishing:
+        from packaging.utils import canonicalize_name
+        from urllib.parse import quote
+
+        host = self.remote_info.get('host', 'https://github.com')
+        group = self.remote_info.get('group', '<OWNER>')
+        repo_name = self.remote_info.get('repo_name', self.repo_name)
+        repo_url = f'{host}/{group}/{repo_name}'
+        workflow_relpath = '.github/workflows/release.yml'
+        workflow_filename = 'release.yml'
+        defaultbranch = self.config.get('defaultbranch', 'main')
+
+        project_name = canonicalize_name(self.pkg_name)
+        project_name_quoted = quote(project_name, safe='')
+
+        pypi_project_url = (
+            f'https://pypi.org/manage/project/'
+            f'{project_name_quoted}/settings/publishing/'
+        )
+        testpypi_project_url = (
+            f'https://test.pypi.org/manage/project/'
+            f'{project_name_quoted}/settings/publishing/'
+        )
+
+        footer_text = ub.codeblock(
+            f"""
+            Trusted publishing setup checklist
+
+            This release workflow file:
+              {workflow_relpath}
+            Workflow page:
+              {repo_url}/actions/workflows/{workflow_filename}
+            Workflow source:
+              {repo_url}/blob/{defaultbranch}/{workflow_relpath}
+            GitHub environments:
+              {repo_url}/settings/environments
+
+            Official references:
+              https://docs.pypi.org/trusted-publishers/
+              https://docs.pypi.org/trusted-publishers/using-a-publisher/
+              https://docs.pypi.org/trusted-publishers/security-model/
+              https://docs.github.com/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect
+              https://docs.github.com/actions/deployment/targeting-different-environments/using-environments-for-deployment
+
+            If trusted publishing is not configured yet:
+
+              1. In GitHub, create or review these protected environments:
+                   - testpypi
+                   - pypi
+                 URL:
+                   {repo_url}/settings/environments
+
+                Some xcookie setups will expect a setup like:
+
+                   - testpypi:
+                       * environment name: testpypi
+                       * use for non-release pushes that publish to TestPyPI
+                       * usually no manual approval is needed
+                       * optionally restrict deployment branches if you only want
+                         TestPyPI publishes from selected branches
+
+                   - pypi:
+                       * environment name: pypi
+                       * use for real releases only
+                       * require manual approval / required reviewers
+                       * prevent self-review if your org supports it
+                       * restrict deployments to release branches / version tags
+
+                   - do not put TWINE_* secrets in these environments when using
+                     trusted publishing
+
+                   - if enable_gpg=true, consider storing CI_SECRET as an environment
+                     secret instead of a repo-wide secret to reduce its scope
+
+              2. In PyPI, add a trusted publisher for this project:
+                   owner: {group}
+                   repository: {repo_name}
+                   workflow filename: {workflow_relpath}
+                   environment: pypi
+                 Project publishing page:
+                   {pypi_project_url}
+                 Account publishing page:
+                   https://pypi.org/manage/account/publishing/
+
+              3. In TestPyPI, add a trusted publisher for this project:
+                   owner: {group}
+                   repository: {repo_name}
+                   workflow filename: {workflow_relpath}
+                   environment: testpypi
+                 Project publishing page:
+                   {testpypi_project_url}
+                 Account publishing page:
+                   https://test.pypi.org/manage/account/publishing/
+
+            Notes:
+              - Keep the workflow filename stable after registration.
+              - The PyPI/TestPyPI project pages may not exist until the project
+                exists there; use the account publishing pages for pending publishers.
+              - Trusted publishing removes TWINE_* secrets, but does not replace
+                CI_SECRET when enable_gpg=true.
+            """
+        )
+
+        footer = ub.indent(footer_text, "# ").rstrip()
+        footer = "###\n" + footer
+        footer_lines = [line.strip() for line in footer.splitlines()]
+
+        if 'erotemic' in self.tags:
+            footer_lines.extend(
+                [
+                    '#',
+                    '# Local act note:',
+                    '#   Trusted publishing cannot be fully emulated with local act secrets.',
+                    '#   The local approximation is to run the signing / build portions only.',
+                    '#   load_secrets',
+                    '#   unset GITHUB_TOKEN',
+                    '#   $HOME/.local/opt/act/act \\',
+                    '#       --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET',
+                ]
             )
-        else:
-            footer = ub.codeblock(
-                r"""
-                ###
-                # Unfortunately we cant (yet) use the yaml docstring trick here
-                # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
-                #__doc__: |
-                #    # How to run locally
-                #    # https://packaging.python.org/guides/using-testpypi/
-                #    git clone https://github.com/nektos/act.git $HOME/code/act
-                #    chmod +x $HOME/code/act/install.sh
-                #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
-                #
-                #    load_secrets
-                #    unset GITHUB_TOKEN
-                #    $HOME/.local/opt/act/act \
-                #        --secret=EROTEMIC_TWINE_PASSWORD=$EROTEMIC_TWINE_PASSWORD \
-                #        --secret=EROTEMIC_TWINE_USERNAME=$EROTEMIC_TWINE_USERNAME \
-                #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET \
-                #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
-                #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD
-                """
-            )
+
+        footer = '\n'.join(footer_lines)
+    elif 'erotemic' in self.tags:
+        footer = ub.codeblock(
+            r"""
+            ###
+            # Unfortunately we cant (yet) use the yaml docstring trick here
+            # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
+            #__doc__: |
+            #    # How to run locally
+            #    # https://packaging.python.org/guides/using-testpypi/
+            #    git clone https://github.com/nektos/act.git $HOME/code/act
+            #    chmod +x $HOME/code/act/install.sh
+            #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
+            #
+            #    load_secrets
+            #    unset GITHUB_TOKEN
+            #    $HOME/.local/opt/act/act \
+            #        --secret=EROTEMIC_TWINE_PASSWORD=$EROTEMIC_TWINE_PASSWORD \
+            #        --secret=EROTEMIC_TWINE_USERNAME=$EROTEMIC_TWINE_USERNAME \
+            #        --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET \
+            #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
+            #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD
+            """
+        )
     else:
         footer = ''
     return footer

@@ -139,6 +139,8 @@ setup_package_environs_github_erotemic(){
     export VARNAME_TWINE_PASSWORD="EROTEMIC_PYPI_MASTER_TOKEN"
     export VARNAME_TEST_TWINE_PASSWORD="EROTEMIC_TEST_PYPI_MASTER_TOKEN"
     export VARNAME_TWINE_USERNAME="EROTEMIC_PYPI_MASTER_TOKEN_USERNAME"
+    export GITHUB_ENVIRONMENT_PYPI="pypi"
+    export GITHUB_ENVIRONMENT_TESTPYPI="testpypi"
     export VARNAME_TEST_TWINE_USERNAME="EROTEMIC_TEST_PYPI_MASTER_TOKEN_USERNAME"
     export GPG_IDENTIFIER="=Erotemic-CI <erotemic@gmail.com>"
     ' | python -c "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()).strip(chr(10)))" > dev/secrets_configuration.sh
@@ -151,6 +153,8 @@ setup_package_environs_github_pyutils(){
     export VARNAME_TWINE_PASSWORD="PYUTILS_PYPI_MASTER_TOKEN"
     export VARNAME_TEST_TWINE_PASSWORD="PYUTILS_TEST_PYPI_MASTER_TOKEN"
     export VARNAME_TWINE_USERNAME="PYUTILS_PYPI_MASTER_TOKEN_USERNAME"
+    export GITHUB_ENVIRONMENT_PYPI="pypi"
+    export GITHUB_ENVIRONMENT_TESTPYPI="testpypi"
     export VARNAME_TEST_TWINE_USERNAME="PYUTILS_TEST_PYPI_MASTER_TOKEN_USERNAME"
     export GPG_IDENTIFIER="=PyUtils-CI <openpyutils@gmail.com>"
     ' | python -c "import sys; from textwrap import dedent; print(dedent(sys.stdin.read()).strip(chr(10)))" > dev/secrets_configuration.sh
@@ -178,7 +182,19 @@ resolve_secret_value_from_varname_ptr(){
     printf '%s' "$secret_value"
 }
 
+upload_one_github_secret(){
+    local secret_name="$1"
+    local secret_value="$2"
+    local environment_name="${3:-}"
+    if [[ "$environment_name" == "" ]]; then
+        gh secret set "$secret_name" -b"$secret_value"
+    else
+        gh secret set "$secret_name" --env "$environment_name" -b"$secret_value"
+    fi
+}
+
 upload_github_secrets(){
+    local mode="${1:-legacy}"
     load_secrets
     unset GITHUB_TOKEN
     #printf "%s" "$GITHUB_TOKEN" | gh auth login --hostname Github.com --with-token
@@ -186,14 +202,29 @@ upload_github_secrets(){
         gh auth login
     fi
     local secret_value
+    local pypi_env
+    local testpypi_env
     source dev/secrets_configuration.sh
-    secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TWINE_USERNAME TWINE_USERNAME) && gh secret set "TWINE_USERNAME" -b"$secret_value"
-    secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TEST_TWINE_USERNAME TEST_TWINE_USERNAME) && gh secret set "TEST_TWINE_USERNAME" -b"$secret_value"
-    toggle_setx_enter
-    secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_CI_SECRET CI_SECRET) && gh secret set "CI_SECRET" -b"$secret_value"
-    secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TWINE_PASSWORD TWINE_PASSWORD) && gh secret set "TWINE_PASSWORD" -b"$secret_value"
-    secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TEST_TWINE_PASSWORD TEST_TWINE_PASSWORD) && gh secret set "TEST_TWINE_PASSWORD" -b"$secret_value"
-    toggle_setx_exit
+
+    if [[ "$mode" == "trusted_publishing" ]]; then
+        pypi_env="${GITHUB_ENVIRONMENT_PYPI:-pypi}"
+        testpypi_env="${GITHUB_ENVIRONMENT_TESTPYPI:-testpypi}"
+        toggle_setx_enter
+        secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_CI_SECRET CI_SECRET) || true
+        if [[ "$secret_value" != "" ]]; then
+            upload_one_github_secret "CI_SECRET" "$secret_value" "$pypi_env"
+            upload_one_github_secret "CI_SECRET" "$secret_value" "$testpypi_env"
+        fi
+        toggle_setx_exit
+    else
+        secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TWINE_USERNAME TWINE_USERNAME) && upload_one_github_secret "TWINE_USERNAME" "$secret_value"
+        secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TEST_TWINE_USERNAME TEST_TWINE_USERNAME) && upload_one_github_secret "TEST_TWINE_USERNAME" "$secret_value"
+        toggle_setx_enter
+        secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_CI_SECRET CI_SECRET) && upload_one_github_secret "CI_SECRET" "$secret_value"
+        secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TWINE_PASSWORD TWINE_PASSWORD) && upload_one_github_secret "TWINE_PASSWORD" "$secret_value"
+        secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TEST_TWINE_PASSWORD TEST_TWINE_PASSWORD) && upload_one_github_secret "TEST_TWINE_PASSWORD" "$secret_value"
+        toggle_setx_exit
+    fi
 }
 
 

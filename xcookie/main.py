@@ -1798,7 +1798,15 @@ class TemplateApplier:
             )
 
         if need_secret_upload:
-            script.sync().submit(f'{upload_secret_cmd}', log=False)
+            if (
+                use_trusted_publishing
+                and self.remote_info.get('type') == 'github'
+            ):
+                script.sync().submit(
+                    f'{upload_secret_cmd} trusted_publishing', log=False
+                )
+            else:
+                script.sync().submit(f'{upload_secret_cmd}', log=False)
         else:
             script.sync().submit(
                 'echo "Trusted publishing enabled with GPG disabled; no CI secrets need to be uploaded."',
