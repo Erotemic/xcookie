@@ -365,7 +365,7 @@ jobs:
 #   2. In PyPI, add a trusted publisher for this project:
 #        owner: Erotemic
 #        repository: xcookie
-#        workflow filename: .github/workflows/release.yml
+#        workflow filename: release.yml
 #        environment: pypi
 #      Project publishing page:
 #        https://pypi.org/manage/project/xcookie/settings/publishing/
@@ -375,7 +375,7 @@ jobs:
 #   3. In TestPyPI, add a trusted publisher for this project:
 #        owner: Erotemic
 #        repository: xcookie
-#        workflow filename: .github/workflows/release.yml
+#        workflow filename: release.yml
 #        environment: testpypi
 #      Project publishing page:
 #        https://test.pypi.org/manage/project/xcookie/settings/publishing/

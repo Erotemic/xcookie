@@ -366,6 +366,7 @@ def _build_github_footer(self):
         repo_name = self.remote_info.get('repo_name', self.repo_name)
         repo_url = f'{host}/{group}/{repo_name}'
         workflow_relpath = '.github/workflows/release.yml'
+        workflow_basename = ub.Path(workflow_relpath).name
         workflow_filename = 'release.yml'
         defaultbranch = self.config.get('defaultbranch', 'main')
 
@@ -434,7 +435,7 @@ def _build_github_footer(self):
               2. In PyPI, add a trusted publisher for this project:
                    owner: {group}
                    repository: {repo_name}
-                   workflow filename: {workflow_relpath}
+                   workflow filename: {workflow_basename}
                    environment: pypi
                  Project publishing page:
                    {pypi_project_url}
@@ -444,7 +445,7 @@ def _build_github_footer(self):
               3. In TestPyPI, add a trusted publisher for this project:
                    owner: {group}
                    repository: {repo_name}
-                   workflow filename: {workflow_relpath}
+                   workflow filename: {workflow_basename}
                    environment: testpypi
                  Project publishing page:
                    {testpypi_project_url}
