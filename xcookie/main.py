@@ -22,6 +22,8 @@ ExampleUsage:
     python -m xcookie.main --repodir=$HOME/code/whydat --tags="kitware,gitlab,purepy,cv2,gdal"
     python -m xcookie.main --repodir=$HOME/code/howdat --tags="kitware,gitlab,purepy,cv2,gdal"
 
+    python -m xcookie.main --repodir=$HOME/code/kwconf --tags="kitware,gitlab,erotemic,github,purepy"
+
     # Create this repo
     python -m xcookie.main --repo_name=xcookie --repodir=$HOME/code/xcookie --tags="erotemic,github,purepy"
 
