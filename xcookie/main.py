@@ -22,6 +22,8 @@ ExampleUsage:
     python -m xcookie.main --repodir=$HOME/code/whydat --tags="kitware,gitlab,purepy,cv2,gdal"
     python -m xcookie.main --repodir=$HOME/code/howdat --tags="kitware,gitlab,purepy,cv2,gdal"
 
+    python -m xcookie.main --repodir=$HOME/code/kwconf --tags="kitware,gitlab,erotemic,github,purepy"
+
     # Create this repo
     python -m xcookie.main --repo_name=xcookie --repodir=$HOME/code/xcookie --tags="erotemic,github,purepy"
 
@@ -257,6 +259,10 @@ class XCookieConfig(scfg.DataConfig):
         'ci_pypi_test_password_varname': scfg.Value(
             'TEST_TWINE_PASSWORD',
             help='variable of the test twine password in your secrets',
+        ),
+        'ci_pypi_trusted_publishing': scfg.Value(
+            False,
+            help='if True, github deploy jobs use PyPI trusted publishing instead of twine password secrets',
         ),
         'regen': scfg.Value(
             None,
@@ -603,7 +609,7 @@ class XCookieConfig(scfg.DataConfig):
         return config
 
     @classmethod
-    def main(cls, argv=0, **kwargs):
+    def main(cls, argv=False, **kwargs):
         """
         Main entry point
 
@@ -831,8 +837,14 @@ class TemplateApplier:
                 'overwrite': 1,
                 'tags': 'github',
                 'fname': '.github/workflows/tests.yml',
-                'dynamic': 'build_github_actions',
-                # 'input_fname': rc.resource_fpath('tests.yml.in')
+                'dynamic': 'build_github_actions_tests',
+            },
+            {
+                'template': 1,
+                'overwrite': 1,
+                'tags': 'github',
+                'fname': '.github/workflows/release.yml',
+                'dynamic': 'build_github_actions_release',
             },
             {
                 'template': 0,
@@ -1746,8 +1758,11 @@ class TemplateApplier:
 
     def rotate_secrets(self):
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
-        # dev/public_gpg_key
-        # if self.config.confirm('Ready to rotate secrets?'):
+        enable_gpg = self.config['enable_gpg']
+        use_trusted_publishing = self.config.get(
+            'ci_pypi_trusted_publishing', False
+        )
+
         if 'erotemic' in self.config['tags']:
             environ_export = 'setup_package_environs_github_erotemic'
             upload_secret_cmd = 'upload_github_secrets'
@@ -1760,6 +1775,14 @@ class TemplateApplier:
         else:
             raise Exception
 
+        need_secret_upload = True
+        if (
+            use_trusted_publishing
+            and self.remote_info.get('type') == 'github'
+            and not enable_gpg
+        ):
+            need_secret_upload = False
+
         import cmd_queue
 
         script = cmd_queue.Queue.create(
@@ -1768,25 +1791,31 @@ class TemplateApplier:
         script.submit(f'source {setup_secrets_fpath}', log=False)
         script.sync().submit(f'{environ_export}', log=False)
         script.sync().submit('source $(secret_loader.sh)', log=False)
-        script.sync().submit('export_encrypted_code_signing_keys', log=False)
-        # script.sync().submit('git commit -am "Updated secrets"')
-        script.sync().submit(f'{upload_secret_cmd}', log=False)
-        # script.submit(ub.codeblock(
-        #     f'''
-        #     cd {self.repodir}
-        #     source {setup_secrets_fpath}
-        #     {environ_export}
-        #     load_secrets
-        #     export_encrypted_code_signing_keys
-        #     git commit -am "Updated secrets"
-        #     {upload_secret_cmd}
-        #     '''))
+
+        if enable_gpg:
+            script.sync().submit(
+                'export_encrypted_code_signing_keys', log=False
+            )
+
+        if need_secret_upload:
+            if (
+                use_trusted_publishing
+                and self.remote_info.get('type') == 'github'
+            ):
+                script.sync().submit(
+                    f'{upload_secret_cmd} trusted_publishing', log=False
+                )
+            else:
+                script.sync().submit(f'{upload_secret_cmd}', log=False)
+        else:
+            script.sync().submit(
+                'echo "Trusted publishing enabled with GPG disabled; no CI secrets need to be uploaded."',
+                log=False,
+            )
+
         script.rprint()
-        # print('FIXME: for now, you need to manually execute this')
-        # print('Note: need to load_secrets before running this')
         if self.config.confirm('Ready to rotate secrets?'):
             script.run(system=True, mode='bash')
-            # script.run(system=True)
 
     def print_help_tips(self):
         text = ub.codeblock(
@@ -1920,11 +1949,21 @@ class TemplateApplier:
             self.SYSTEM_PIP_INSTALL = 'python -m pip install'
 
     def build_github_actions(self):
+        # Backwards-compatible wrapper. Keep this pointing at tests.yml for
+        # older call sites.
+        return self.build_github_actions_tests()
+
+    def build_github_actions_tests(self):
         from xcookie.builders import github_actions
 
-        self._setup_pip_commands()  # Do we need this here?
-        text = github_actions.build_github_actions(self)
-        return text
+        self._setup_pip_commands()
+        return github_actions.build_github_actions_tests(self)
+
+    def build_github_actions_release(self):
+        from xcookie.builders import github_actions
+
+        self._setup_pip_commands()
+        return github_actions.build_github_actions_release(self)
 
     def build_gitlab_ci(self):
         from xcookie.builders import gitlab_ci

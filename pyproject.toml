@@ -6,11 +6,15 @@ author_email = "erotemic@gmail.com"
 author = "Jon Crall"
 url = "https://github.com/Erotemic/xcookie"
 description = "The xcookie cookie-cutter Module"
-min_python = '3.9'
+min_python = '3.10'
 # Reduce the CI load of this package, only test on old and new python versions
-#ci_cpython_versions = ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+#ci_cpython_versions = ['3.7', '3.8', '3.10', '3.10', '3.11', '3.12', '3.13']
 #ci_pypy_versions = 'auto'
 ci_pypy_versions = []
+ci_pypi_trusted_publishing = true
+enable_gpg = true
+deploy = true
+deploy_pypi = true
 typed=true
 
 [[tool.xcookie.ci_blocklist]]
@@ -120,7 +124,7 @@ docstring-code-format = false
 #description = "The xcookie cookie-cutter Module"
 #authors = [{ name = "Jon Crall", email = "erotemic@gmail.com" }]
 #license = "Apache-2.0"
-#requires-python = ">=3.9"
+#requires-python = ">=3.10"
 #keywords = ["cookiecutter", "template", "utilities"]
 #classifiers = [
 #  "Development Status :: 1 - Planning",
@@ -130,7 +134,7 @@ docstring-code-format = false
 #  "License :: OSI Approved :: Apache Software License",
 #  "Programming Language :: Python :: 3.7",
 #  "Programming Language :: Python :: 3.8",
-#  "Programming Language :: Python :: 3.9",
+#  "Programming Language :: Python :: 3.10",
 #  "Programming Language :: Python :: 3.10",
 #  "Programming Language :: Python :: 3.11",
 #  "Programming Language :: Python :: 3.12",
