@@ -193,6 +193,50 @@ upload_one_github_secret(){
     fi
 }
 
+github_repo_full_name(){
+    local remote_url
+    remote_url="$(git remote get-url origin)"
+    if [[ "$remote_url" == git@github.com:* ]]; then
+        printf '%s' "${remote_url#git@github.com:}" | sed 's/\.git$//'
+    elif [[ "$remote_url" == https://github.com/* ]]; then
+        printf '%s' "${remote_url#https://github.com/}" | sed 's/\.git$//'
+    else
+        echo "Unable to determine GitHub repo from origin: $remote_url" >&2
+        return 1
+    fi
+}
+
+ensure_github_environment(){
+    local environment_name="$1"
+    local repo_full_name
+    repo_full_name="$(github_repo_full_name)" || return 1
+    gh api --method PUT \
+        -H "Accept: application/vnd.github+json" \
+        "/repos/${repo_full_name}/environments/${environment_name}" >/dev/null
+}
+
+setup_github_release_environments(){
+    source dev/secrets_configuration.sh
+    local repo_full_name
+    local pypi_env
+    local testpypi_env
+    repo_full_name="$(github_repo_full_name)" || return 1
+    pypi_env="${GITHUB_ENVIRONMENT_PYPI:-pypi}"
+    testpypi_env="${GITHUB_ENVIRONMENT_TESTPYPI:-testpypi}"
+
+    ensure_github_environment "$testpypi_env"
+    ensure_github_environment "$pypi_env"
+
+    echo "Ensured GitHub environments exist:"
+    echo "  - $testpypi_env"
+    echo "  - $pypi_env"
+    echo "Review environment protection rules manually as needed:"
+    echo "  https://github.com/${repo_full_name}/settings/environments"
+    echo "Suggested policy:"
+    echo "  - ${testpypi_env}: usually no approval required"
+    echo "  - ${pypi_env}: require approval / reviewers and restrict to release refs"
+}
+
 upload_github_secrets(){
     local mode="${1:-legacy}"
     load_secrets
@@ -209,6 +253,7 @@ upload_github_secrets(){
     if [[ "$mode" == "trusted_publishing" ]]; then
         pypi_env="${GITHUB_ENVIRONMENT_PYPI:-pypi}"
         testpypi_env="${GITHUB_ENVIRONMENT_TESTPYPI:-testpypi}"
+        setup_github_release_environments
         toggle_setx_enter
         secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_CI_SECRET CI_SECRET) || true
         if [[ "$secret_value" != "" ]]; then
