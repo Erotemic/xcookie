@@ -5,7 +5,10 @@ We are currently working on porting this changelog to the specifications in
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## Version 0.3.2 - Unreleased
+## Version 0.3.3 - Unreleased
+
+
+## Version 0.3.2 - Released 2026-04-09
 
 ### Added
 * New `ci_extras` configuration option in `pyproject.toml` to specify extra CI test dependencies.
