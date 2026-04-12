@@ -679,11 +679,11 @@ upload_github_gpg_secrets(){
 
     toggle_setx_enter
     for env_name in "$pypi_env" "$testpypi_env"; do
-        upload_one_github_secret "GPG_SECRET_SIGNING_SUBKEY" \
+        upload_one_github_secret "GPG_SECRET_SIGNING_SUBKEY_B64" \
             "$GPG_SECRET_SIGNING_SUBKEY_B64" "$env_name"
-        upload_one_github_secret "GPG_PUBLIC_KEY" \
+        upload_one_github_secret "GPG_PUBLIC_KEY_B64" \
             "$GPG_PUBLIC_KEY_B64" "$env_name"
-        upload_one_github_secret "GPG_OWNER_TRUST" \
+        upload_one_github_secret "GPG_OWNER_TRUST_B64" \
             "$GPG_OWNER_TRUST_B64" "$env_name"
     done
     toggle_setx_exit
@@ -787,9 +787,9 @@ upload_gitlab_gpg_secrets(){
     unload_secrets
 
     toggle_setx_enter
-    _gitlab_upsert_protected_var "GPG_SECRET_SIGNING_SUBKEY" "$GPG_SECRET_SIGNING_SUBKEY_B64"
-    _gitlab_upsert_protected_var "GPG_PUBLIC_KEY"            "$GPG_PUBLIC_KEY_B64"
-    _gitlab_upsert_protected_var "GPG_OWNER_TRUST"           "$GPG_OWNER_TRUST_B64"
+    _gitlab_upsert_protected_var "GPG_SECRET_SIGNING_SUBKEY_B64" "$GPG_SECRET_SIGNING_SUBKEY_B64"
+    _gitlab_upsert_protected_var "GPG_PUBLIC_KEY_B64"            "$GPG_PUBLIC_KEY_B64"
+    _gitlab_upsert_protected_var "GPG_OWNER_TRUST_B64"           "$GPG_OWNER_TRUST_B64"
     toggle_setx_exit
 }
 
