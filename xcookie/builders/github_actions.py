@@ -1952,6 +1952,7 @@ def build_deploy(self, mode='live', needs=None):
     use_direct_gpg = ci_gpg_transport == 'direct_ci'
     live_pass_varname = self.config['ci_pypi_live_password_varname']
     test_pass_varname = self.config['ci_pypi_test_password_varname']
+    defaultbranch = self.config.get('defaultbranch', 'main')
 
     assert mode in {'live', 'test'}
     if mode == 'live':
@@ -1973,6 +1974,7 @@ def build_deploy(self, mode='live', needs=None):
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
         condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
+
     elif mode == 'test':
         env = {}
         if not use_trusted_publishing:
@@ -1991,7 +1993,11 @@ def build_deploy(self, mode='live', needs=None):
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
-        condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
+        # condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
+        condition = (
+            "github.event_name == 'push' && "
+            f"github.event.ref == 'refs/heads/{defaultbranch}'"
+        )
     else:
         raise KeyError(mode)
 
