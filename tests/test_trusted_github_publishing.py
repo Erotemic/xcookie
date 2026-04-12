@@ -197,9 +197,9 @@ def _make_direct_gpg_applier(tmp_path, *, trusted, enable_gpg=True, tags=None):
 
 def test_direct_gpg_github_env_has_gpg_secrets_not_ci_secret(tmp_path):
     text = _make_direct_gpg_applier(tmp_path, trusted=False).build_github_actions_release()
-    assert 'GPG_SECRET_SIGNING_SUBKEY' in text
-    assert 'GPG_PUBLIC_KEY' in text
-    assert 'GPG_OWNER_TRUST' in text
+    assert 'GPG_SECRET_SIGNING_SUBKEY_B64' in text
+    assert 'GPG_PUBLIC_KEY_B64' in text
+    assert 'GPG_OWNER_TRUST_B64' in text
     assert 'CI_SECRET' not in text
 
 
@@ -226,7 +226,7 @@ def test_direct_gpg_github_uses_printf_not_echo_for_decode(tmp_path):
 def test_direct_gpg_github_non_trusted_has_twine_and_gpg_secrets(tmp_path):
     text = _make_direct_gpg_applier(tmp_path, trusted=False).build_github_actions_release()
     assert 'TWINE_PASSWORD' in text
-    assert 'GPG_SECRET_SIGNING_SUBKEY' in text
+    assert 'GPG_SECRET_SIGNING_SUBKEY_B64' in text
 
 
 def test_direct_gpg_trusted_github_has_no_ci_secret_no_twine(tmp_path):
@@ -235,7 +235,7 @@ def test_direct_gpg_trusted_github_has_no_ci_secret_no_twine(tmp_path):
     # still appear in footer comments explaining the two transport modes.
     assert 'secrets.CI_SECRET' not in text
     assert 'TWINE_PASSWORD' not in text
-    assert 'GPG_SECRET_SIGNING_SUBKEY' in text
+    assert 'GPG_SECRET_SIGNING_SUBKEY_B64' in text
     assert 'pypa/gh-action-pypi-publish' in text
 
 
@@ -269,7 +269,7 @@ def test_direct_gpg_gitlab_no_ci_secret_no_openssl(tmp_path):
     # The gpgsign job must not contain openssl decrypt commands or CI_SECRET
     # (they may appear in other jobs, so check gpgsign-specific markers)
     assert 'openssl enc' not in text
-    assert 'GPG_SECRET_SIGNING_SUBKEY' in text
+    assert 'GPG_SECRET_SIGNING_SUBKEY_B64' in text
     assert 'base64 -d' in text
 
 

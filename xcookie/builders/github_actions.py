@@ -435,8 +435,8 @@ def _build_github_footer(self):
                    - if enable_gpg=true and ci_gpg_secret_transport=encrypted_repo:
                      store CI_SECRET as an environment secret (not repo-wide)
                    - if enable_gpg=true and ci_gpg_secret_transport=direct_ci:
-                     store GPG_SECRET_SIGNING_SUBKEY, GPG_PUBLIC_KEY, and
-                     GPG_OWNER_TRUST as environment secrets; no CI_SECRET needed
+                     store GPG_SECRET_SIGNING_SUBKEY_B64, GPG_PUBLIC_KEY_B64, and
+                     GPG_OWNER_TRUST_B64 as environment secrets; no CI_SECRET needed
 
               2. In PyPI, add a trusted publisher for this project:
                    owner: {group}
@@ -466,7 +466,7 @@ def _build_github_footer(self):
               - When enable_gpg=true and ci_gpg_secret_transport="encrypted_repo":
                 CI_SECRET is still required (environment-scoped to pypi/testpypi).
               - When enable_gpg=true and ci_gpg_secret_transport="direct_ci":
-                GPG_SECRET_SIGNING_SUBKEY, GPG_PUBLIC_KEY, and GPG_OWNER_TRUST
+                GPG_SECRET_SIGNING_SUBKEY_B64, GPG_PUBLIC_KEY_B64, and GPG_OWNER_TRUST_B64
                 are required (environment-scoped to pypi/testpypi). No CI_SECRET.
             """
         )
@@ -490,9 +490,9 @@ def _build_github_footer(self):
             if enable_gpg and use_direct_gpg:
                 footer_lines.extend(
                     [
-                        '#       --secret=GPG_SECRET_SIGNING_SUBKEY=$GPG_SECRET_SIGNING_SUBKEY \\',
-                        '#       --secret=GPG_PUBLIC_KEY=$GPG_PUBLIC_KEY \\',
-                        '#       --secret=GPG_OWNER_TRUST=$GPG_OWNER_TRUST',
+                        '#       --secret=GPG_SECRET_SIGNING_SUBKEY_B64=$GPG_SECRET_SIGNING_SUBKEY_B64 \\',
+                        '#       --secret=GPG_PUBLIC_KEY_B64=$GPG_PUBLIC_KEY_B64 \\',
+                        '#       --secret=GPG_OWNER_TRUST_B64=$GPG_OWNER_TRUST_B64',
                     ]
                 )
             else:
@@ -523,9 +523,9 @@ def _build_github_footer(self):
             #        --secret=EROTEMIC_TWINE_USERNAME=$EROTEMIC_TWINE_USERNAME \
             #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
             #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD \
-            #        --secret=GPG_SECRET_SIGNING_SUBKEY=$GPG_SECRET_SIGNING_SUBKEY \
-            #        --secret=GPG_PUBLIC_KEY=$GPG_PUBLIC_KEY \
-            #        --secret=GPG_OWNER_TRUST=$GPG_OWNER_TRUST
+            #        --secret=GPG_SECRET_SIGNING_SUBKEY_B64=$GPG_SECRET_SIGNING_SUBKEY_B64 \
+            #        --secret=GPG_PUBLIC_KEY_B64=$GPG_PUBLIC_KEY_B64 \
+            #        --secret=GPG_OWNER_TRUST_B64=$GPG_OWNER_TRUST_B64
             """
         )
     elif 'erotemic' in self.tags:
@@ -1966,9 +1966,9 @@ def build_deploy(self, mode='live', needs=None):
             )
         if enable_gpg:
             if use_direct_gpg:
-                env['GPG_SECRET_SIGNING_SUBKEY'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY }}'
-                env['GPG_PUBLIC_KEY'] = '${{ secrets.GPG_PUBLIC_KEY }}'
-                env['GPG_OWNER_TRUST'] = '${{ secrets.GPG_OWNER_TRUST }}'
+                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                env['GPG_PUBLIC_KEY_B64'] = '${{ secrets.GPG_PUBLIC_KEY_B64 }}'
+                env['GPG_OWNER_TRUST_B64'] = '${{ secrets.GPG_OWNER_TRUST_B64 }}'
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
@@ -1985,9 +1985,9 @@ def build_deploy(self, mode='live', needs=None):
             )
         if enable_gpg:
             if use_direct_gpg:
-                env['GPG_SECRET_SIGNING_SUBKEY'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY }}'
-                env['GPG_PUBLIC_KEY'] = '${{ secrets.GPG_PUBLIC_KEY }}'
-                env['GPG_OWNER_TRUST'] = '${{ secrets.GPG_OWNER_TRUST }}'
+                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                env['GPG_PUBLIC_KEY_B64'] = '${{ secrets.GPG_PUBLIC_KEY_B64 }}'
+                env['GPG_OWNER_TRUST_B64'] = '${{ secrets.GPG_OWNER_TRUST_B64 }}'
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
@@ -2041,9 +2041,9 @@ def build_deploy(self, mode='live', needs=None):
                 'echo "Importing GPG keys from CI secrets"',
                 # Import public key first so the primary fingerprint is
                 # visible before the secret subkey import.
-                'printf \'%s\' "$GPG_PUBLIC_KEY" | base64 -d | $GPG_EXECUTABLE --import',
-                'printf \'%s\' "$GPG_OWNER_TRUST" | base64 -d | $GPG_EXECUTABLE --import-ownertrust',
-                'printf \'%s\' "$GPG_SECRET_SIGNING_SUBKEY" | base64 -d | $GPG_EXECUTABLE --import',
+                'printf \'%s\' "$GPG_PUBLIC_KEY_B64" | base64 -d | $GPG_EXECUTABLE --import',
+                'printf \'%s\' "$GPG_OWNER_TRUST_B64" | base64 -d | $GPG_EXECUTABLE --import-ownertrust',
+                'printf \'%s\' "$GPG_SECRET_SIGNING_SUBKEY_B64" | base64 -d | $GPG_EXECUTABLE --import',
                 'echo "Finish importing GPG keys"',
                 '$GPG_EXECUTABLE --list-keys || true',
                 '$GPG_EXECUTABLE --list-keys',

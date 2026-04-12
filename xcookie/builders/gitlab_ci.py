@@ -877,9 +877,9 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
             'echo "Importing GPG keys from CI secrets"',
             # Import public key first so the primary fingerprint is visible
             # before the secret subkey is imported
-            "printf '%s' \"$GPG_PUBLIC_KEY\" | base64 -d | $GPG_EXECUTABLE --import",
-            "printf '%s' \"$GPG_OWNER_TRUST\" | base64 -d | $GPG_EXECUTABLE --import-ownertrust",
-            "printf '%s' \"$GPG_SECRET_SIGNING_SUBKEY\" | base64 -d | $GPG_EXECUTABLE --import",
+            "printf '%s' \"$GPG_PUBLIC_KEY_B64\" | base64 -d | $GPG_EXECUTABLE --import",
+            "printf '%s' \"$GPG_OWNER_TRUST_B64\" | base64 -d | $GPG_EXECUTABLE --import-ownertrust",
+            "printf '%s' \"$GPG_SECRET_SIGNING_SUBKEY_B64\" | base64 -d | $GPG_EXECUTABLE --import",
             # Verify imported key matches the repo-pinned fingerprint
             'IMPORTED_FPR=$($GPG_EXECUTABLE --list-keys --with-colons "$GPG_KEYID" | awk -F: \'/^fpr/ { print $10; exit }\')',
             '[[ "$IMPORTED_FPR" == "$GPG_KEYID" ]] || { echo "ERROR: fingerprint mismatch: $IMPORTED_FPR != $GPG_KEYID"; exit 1; }',
