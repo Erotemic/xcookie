@@ -342,6 +342,25 @@ def test_rotate_secrets_direct_gpg_trusted_skips_non_gpg_upload(monkeypatch, tmp
     assert _FakeQueue.created[-1].ran
 
 
+def test_rotate_secrets_direct_gpg_gitlab_excludes_ci_secret(monkeypatch, tmp_path):
+    """GitLab direct_ci rotate: gpg secrets uploaded, repo secrets called with
+    direct_gpg mode (excluding CI_SECRET), and CI_SECRET not in any command."""
+    _FakeQueue.created.clear()
+    monkeypatch.setitem(sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue))
+
+    self = _make_direct_gpg_applier(
+        tmp_path, trusted=False, tags=['gitlab', 'kitware', 'purepy']
+    )
+    self.rotate_secrets()
+
+    joined = '\n'.join(_FakeQueue.created[-1].commands)
+    assert 'upload_gitlab_gpg_secrets' in joined
+    assert 'upload_gitlab_repo_secrets direct_gpg' in joined
+    # CI_SECRET must not be referenced in the orchestration script
+    assert 'CI_SECRET' not in joined
+    assert _FakeQueue.created[-1].ran
+
+
 def test_rotate_secrets_encrypted_repo_behavior_unchanged(monkeypatch, tmp_path):
     """Regression: default encrypted_repo path must be byte-identical before
     and after adding ci_gpg_secret_transport to the config schema."""
