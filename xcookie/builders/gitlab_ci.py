@@ -813,6 +813,9 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
 
     from xcookie.util_yaml import Yaml
 
+    ci_gpg_transport = self.config.get('ci_gpg_secret_transport', 'encrypted_repo')
+    use_direct_gpg = ci_gpg_transport == 'direct_ci'
+
     _dist_patterns = []
     _dist_patterns.append(wheelhouse_dpath + '/*.whl')
     if 'nosrcdist' not in self.tags:
@@ -857,33 +860,56 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
         )
     )
 
-    gpgsign_job.update(
-        Yaml.loads(
-            ub.codeblock(
-                """
-        script:
-            - ls """
-                + wheelhouse_dpath
-                + """
-            - export GPG_EXECUTABLE=gpg
-            - export GPG_KEYID=$(cat dev/public_gpg_key)
-            - echo "GPG_KEYID = $GPG_KEYID"
-            # Decrypt and import GPG Keys / trust
-            # note the variable pointed to by VARNAME_CI_SECRET is a protected variables only available on main and release branch
-            - source dev/secrets_configuration.sh
-            - CI_SECRET=${!VARNAME_CI_SECRET}
-            - $GPG_EXECUTABLE --version
-            - openssl version
-            - $GPG_EXECUTABLE --list-keys
-            # note CI_KITWARE_SECRET is a protected variables only available on main and release branch
-            - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import
-            - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust
-            - CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import
-            - GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"
-        """
-            )
-        )
-    )
+    if use_direct_gpg:
+        # direct_ci mode: GPG material comes from protected+masked CI
+        # variables; no .enc files, no CI_SECRET, no indirect expansion.
+        # Public signer identity is pinned in dev/public_gpg_key (full
+        # fingerprint) and verified after import.
+        preamble_script = [
+            f'ls {wheelhouse_dpath}',
+            'export GPG_EXECUTABLE=gpg',
+            # Read pinned primary fingerprint from repo anchor file
+            'export GPG_KEYID=$(cat dev/public_gpg_key)',
+            'echo "GPG_KEYID = $GPG_KEYID"',
+            '$GPG_EXECUTABLE --version',
+            'openssl version',
+            '$GPG_EXECUTABLE --list-keys',
+            'echo "Importing GPG keys from CI secrets"',
+            # Import public key first so the primary fingerprint is visible
+            # before the secret subkey is imported
+            "printf '%s' \"$GPG_PUBLIC_KEY\" | base64 -d | $GPG_EXECUTABLE --import",
+            "printf '%s' \"$GPG_OWNER_TRUST\" | base64 -d | $GPG_EXECUTABLE --import-ownertrust",
+            "printf '%s' \"$GPG_SECRET_SIGNING_SUBKEY\" | base64 -d | $GPG_EXECUTABLE --import",
+            # Verify imported key matches the repo-pinned fingerprint
+            'IMPORTED_FPR=$($GPG_EXECUTABLE --list-keys --with-colons "$GPG_KEYID" | awk -F: \'/^fpr/ { print $10; exit }\')',
+            '[[ "$IMPORTED_FPR" == "$GPG_KEYID" ]] || { echo "ERROR: fingerprint mismatch: $IMPORTED_FPR != $GPG_KEYID"; exit 1; }',
+            'echo "GPG fingerprint verified: $IMPORTED_FPR"',
+            'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
+        ]
+    else:
+        # encrypted_repo mode (default): decrypt .enc files using CI_SECRET.
+        # VARNAME_CI_SECRET indirection lets each org name the secret
+        # differently without changing the CI template.
+        preamble_script = [
+            f'ls {wheelhouse_dpath}',
+            'export GPG_EXECUTABLE=gpg',
+            'export GPG_KEYID=$(cat dev/public_gpg_key)',
+            'echo "GPG_KEYID = $GPG_KEYID"',
+            '# Decrypt and import GPG Keys / trust',
+            '# note the variable pointed to by VARNAME_CI_SECRET is a protected variable only available on main and release branch',
+            'source dev/secrets_configuration.sh',
+            'CI_SECRET=${!VARNAME_CI_SECRET}',
+            '$GPG_EXECUTABLE --version',
+            'openssl version',
+            '$GPG_EXECUTABLE --list-keys',
+            '# note CI_KITWARE_SECRET is a protected variable only available on main and release branch',
+            'CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import',
+            'CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust',
+            'CIS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CIS -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import',
+            'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
+        ]
+
+    gpgsign_job['script'] = preamble_script
     gpgsign_job['script'].append(
         Yaml.CodeBlock(
             """
@@ -991,7 +1017,6 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                 # do sed twice to handle the case of https clone with and without a read token
                 URL_HOST=$(git remote get-url origin | sed -e 's|https\?://.*@||g' | sed -e 's|https\?://||g' | sed -e 's|git@||g' | sed -e 's|:|/|g')
                 source dev/secrets_configuration.sh
-                CI_SECRET=${!VARNAME_CI_SECRET}
                 PUSH_TOKEN=${!VARNAME_PUSH_TOKEN}
                 echo "URL_HOST = $URL_HOST"
                 # A git config user name and email is required. Set if needed.

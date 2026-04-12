@@ -356,6 +356,9 @@ def _build_github_footer(self):
     use_trusted_publishing = self.config.get(
         'ci_pypi_trusted_publishing', False
     )
+    ci_gpg_transport = self.config.get('ci_gpg_secret_transport', 'encrypted_repo')
+    use_direct_gpg = ci_gpg_transport == 'direct_ci'
+    enable_gpg = self.config['enable_gpg']
 
     if use_trusted_publishing:
         from packaging.utils import canonicalize_name
@@ -429,8 +432,11 @@ def _build_github_footer(self):
                    - do not put TWINE_* secrets in these environments when using
                      trusted publishing
 
-                   - if enable_gpg=true, consider storing CI_SECRET as an environment
-                     secret instead of a repo-wide secret to reduce its scope
+                   - if enable_gpg=true and ci_gpg_secret_transport=encrypted_repo:
+                     store CI_SECRET as an environment secret (not repo-wide)
+                   - if enable_gpg=true and ci_gpg_secret_transport=direct_ci:
+                     store GPG_SECRET_SIGNING_SUBKEY, GPG_PUBLIC_KEY, and
+                     GPG_OWNER_TRUST as environment secrets; no CI_SECRET needed
 
               2. In PyPI, add a trusted publisher for this project:
                    owner: {group}
@@ -456,8 +462,12 @@ def _build_github_footer(self):
               - Keep the workflow filename stable after registration.
               - The PyPI/TestPyPI project pages may not exist until the project
                 exists there; use the account publishing pages for pending publishers.
-              - Trusted publishing removes TWINE_* secrets, but does not replace
-                CI_SECRET when enable_gpg=true.
+              - Trusted publishing removes TWINE_* secrets.
+              - When enable_gpg=true and ci_gpg_secret_transport="encrypted_repo":
+                CI_SECRET is still required (environment-scoped to pypi/testpypi).
+              - When enable_gpg=true and ci_gpg_secret_transport="direct_ci":
+                GPG_SECRET_SIGNING_SUBKEY, GPG_PUBLIC_KEY, and GPG_OWNER_TRUST
+                are required (environment-scoped to pypi/testpypi). No CI_SECRET.
             """
         )
 
@@ -475,11 +485,49 @@ def _build_github_footer(self):
                     '#   load_secrets',
                     '#   unset GITHUB_TOKEN',
                     '#   $HOME/.local/opt/act/act \\',
-                    '#       --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET',
                 ]
             )
+            if enable_gpg and use_direct_gpg:
+                footer_lines.extend(
+                    [
+                        '#       --secret=GPG_SECRET_SIGNING_SUBKEY=$GPG_SECRET_SIGNING_SUBKEY \\',
+                        '#       --secret=GPG_PUBLIC_KEY=$GPG_PUBLIC_KEY \\',
+                        '#       --secret=GPG_OWNER_TRUST=$GPG_OWNER_TRUST',
+                    ]
+                )
+            else:
+                footer_lines.extend(
+                    [
+                        '#       --secret=EROTEMIC_CI_SECRET=$EROTEMIC_CI_SECRET',
+                    ]
+                )
 
         footer = '\n'.join(footer_lines)
+    elif 'erotemic' in self.tags and use_direct_gpg:
+        footer = ub.codeblock(
+            r"""
+            ###
+            # Unfortunately we cant (yet) use the yaml docstring trick here
+            # https://github.community/t/allow-unused-keys-in-workflow-yaml-files/172120
+            #__doc__: |
+            #    # How to run locally
+            #    # https://packaging.python.org/guides/using-testpypi/
+            #    git clone https://github.com/nektos/act.git $HOME/code/act
+            #    chmod +x $HOME/code/act/install.sh
+            #    (cd $HOME/code/act && ./install.sh -b $HOME/.local/opt/act)
+            #
+            #    load_secrets
+            #    unset GITHUB_TOKEN
+            #    $HOME/.local/opt/act/act \
+            #        --secret=EROTEMIC_TWINE_PASSWORD=$EROTEMIC_TWINE_PASSWORD \
+            #        --secret=EROTEMIC_TWINE_USERNAME=$EROTEMIC_TWINE_USERNAME \
+            #        --secret=EROTEMIC_TEST_TWINE_USERNAME=$EROTEMIC_TEST_TWINE_USERNAME \
+            #        --secret=EROTEMIC_TEST_TWINE_PASSWORD=$EROTEMIC_TEST_TWINE_PASSWORD \
+            #        --secret=GPG_SECRET_SIGNING_SUBKEY=$GPG_SECRET_SIGNING_SUBKEY \
+            #        --secret=GPG_PUBLIC_KEY=$GPG_PUBLIC_KEY \
+            #        --secret=GPG_OWNER_TRUST=$GPG_OWNER_TRUST
+            """
+        )
     elif 'erotemic' in self.tags:
         footer = ub.codeblock(
             r"""
@@ -1900,6 +1948,8 @@ def build_deploy(self, mode='live', needs=None):
     use_trusted_publishing = self.config.get(
         'ci_pypi_trusted_publishing', False
     )
+    ci_gpg_transport = self.config.get('ci_gpg_secret_transport', 'encrypted_repo')
+    use_direct_gpg = ci_gpg_transport == 'direct_ci'
     live_pass_varname = self.config['ci_pypi_live_password_varname']
     test_pass_varname = self.config['ci_pypi_test_password_varname']
 
@@ -1915,7 +1965,12 @@ def build_deploy(self, mode='live', needs=None):
                 }
             )
         if enable_gpg:
-            env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
+            if use_direct_gpg:
+                env['GPG_SECRET_SIGNING_SUBKEY'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY }}'
+                env['GPG_PUBLIC_KEY'] = '${{ secrets.GPG_PUBLIC_KEY }}'
+                env['GPG_OWNER_TRUST'] = '${{ secrets.GPG_OWNER_TRUST }}'
+            else:
+                env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
         condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
     elif mode == 'test':
@@ -1929,7 +1984,12 @@ def build_deploy(self, mode='live', needs=None):
                 }
             )
         if enable_gpg:
-            env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
+            if use_direct_gpg:
+                env['GPG_SECRET_SIGNING_SUBKEY'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY }}'
+                env['GPG_PUBLIC_KEY'] = '${{ secrets.GPG_PUBLIC_KEY }}'
+                env['GPG_OWNER_TRUST'] = '${{ secrets.GPG_OWNER_TRUST }}'
+            else:
+                env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
         condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
     else:
@@ -1972,28 +2032,57 @@ def build_deploy(self, mode='live', needs=None):
         ]
 
     if enable_gpg:
-        run = [
-            # 'ls -al',
-            'GPG_EXECUTABLE=gpg',
-            '$GPG_EXECUTABLE --version',
-            'openssl version',
-            '$GPG_EXECUTABLE --list-keys',
-            'echo "Decrypting Keys"',
-            'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import',
-            'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust',
-            'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import',
-            'echo "Finish Decrypt Keys"',
-            '$GPG_EXECUTABLE --list-keys || true',
-            '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',
-            '$GPG_EXECUTABLE --list-keys',
-            'VERSION=$(python -c "import setup; print(setup.VERSION)")',
-            f'{self.UPDATE_PIP}',
-            f'{self.SYSTEM_PIP_INSTALL} packaging twine -U',
-            f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security]',
-            'GPG_KEYID=$(cat dev/public_gpg_key)',
-            '''echo "GPG_KEYID = '$GPG_KEYID'"''',
-            'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
-        ]
+        if use_direct_gpg:
+            run = [
+                'GPG_EXECUTABLE=gpg',
+                '$GPG_EXECUTABLE --version',
+                'openssl version',
+                '$GPG_EXECUTABLE --list-keys',
+                'echo "Importing GPG keys from CI secrets"',
+                # Import public key first so the primary fingerprint is
+                # visible before the secret subkey import.
+                'printf \'%s\' "$GPG_PUBLIC_KEY" | base64 -d | $GPG_EXECUTABLE --import',
+                'printf \'%s\' "$GPG_OWNER_TRUST" | base64 -d | $GPG_EXECUTABLE --import-ownertrust',
+                'printf \'%s\' "$GPG_SECRET_SIGNING_SUBKEY" | base64 -d | $GPG_EXECUTABLE --import',
+                'echo "Finish importing GPG keys"',
+                '$GPG_EXECUTABLE --list-keys || true',
+                '$GPG_EXECUTABLE --list-keys',
+                # Read the pinned primary fingerprint from the repo anchor
+                # file and verify the imported key matches it.
+                'GPG_KEYID=$(cat dev/public_gpg_key)',
+                '''echo "GPG_KEYID = '$GPG_KEYID'"''',
+                """IMPORTED_FPR=$($GPG_EXECUTABLE --list-keys --with-colons "$GPG_KEYID" | awk -F: '/^fpr/ { print $10; exit }')""",
+                'if [[ "$IMPORTED_FPR" != "$GPG_KEYID" ]]; then echo "ERROR: imported GPG fingerprint $IMPORTED_FPR does not match pinned $GPG_KEYID"; exit 1; fi',
+                'echo "GPG fingerprint verified: $IMPORTED_FPR"',
+                'VERSION=$(python -c "import setup; print(setup.VERSION)")',
+                f'{self.UPDATE_PIP}',
+                f'{self.SYSTEM_PIP_INSTALL} packaging twine -U',
+                f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security]',
+                'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
+            ]
+        else:
+            run = [
+                # 'ls -al',
+                'GPG_EXECUTABLE=gpg',
+                '$GPG_EXECUTABLE --version',
+                'openssl version',
+                '$GPG_EXECUTABLE --list-keys',
+                'echo "Decrypting Keys"',
+                'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_public_gpg_key.pgp.enc | $GPG_EXECUTABLE --import',
+                'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/gpg_owner_trust.enc | $GPG_EXECUTABLE --import-ownertrust',
+                'openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:CI_SECRET -d -a -in dev/ci_secret_gpg_subkeys.pgp.enc | $GPG_EXECUTABLE --import',
+                'echo "Finish Decrypt Keys"',
+                '$GPG_EXECUTABLE --list-keys || true',
+                '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',
+                '$GPG_EXECUTABLE --list-keys',
+                'VERSION=$(python -c "import setup; print(setup.VERSION)")',
+                f'{self.UPDATE_PIP}',
+                f'{self.SYSTEM_PIP_INSTALL} packaging twine -U',
+                f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security]',
+                'GPG_KEYID=$(cat dev/public_gpg_key)',
+                '''echo "GPG_KEYID = '$GPG_KEYID'"''',
+                'GPG_SIGN_CMD="$GPG_EXECUTABLE --batch --yes --detach-sign --armor --local-user $GPG_KEYID"',
+            ]
         _dist_patterns = []
         _dist_patterns.append(wheelhouse_dpath + '/*.whl')
         if 'nosrcdist' not in self.tags:
@@ -2160,6 +2249,11 @@ def build_deploy(self, mode='live', needs=None):
             'contents': 'read',
             'id-token': 'write',
         }
+        job['environment'] = 'pypi' if mode == 'live' else 'testpypi'
+    elif use_direct_gpg:
+        # direct_ci mode scopes GPG secrets (and Twine in non-trusted mode)
+        # to GitHub deployment environments. Setting 'environment' on the job
+        # is what makes environment-scoped secrets available to the runner.
         job['environment'] = 'pypi' if mode == 'live' else 'testpypi'
     return job
 

@@ -247,6 +247,22 @@ class XCookieConfig(scfg.DataConfig):
         'license': scfg.Value(None, help='repo metadata'),
         'dev_status': scfg.Value('planning'),
         'enable_gpg': scfg.Value(True),
+        'ci_gpg_secret_transport': scfg.Value(
+            'encrypted_repo',
+            help=ub.paragraph(
+                """
+                Controls how GPG signing key material is transported to CI.
+                "encrypted_repo" (default): key material is encrypted with
+                CI_SECRET and committed to the repository as .enc files.
+                CI decrypts at runtime using the CI_SECRET variable.
+                "direct_ci": key material is uploaded directly to the CI
+                provider as environment-scoped secrets. No encrypted files
+                are committed to the repo. CI imports the key material from
+                provider secrets and verifies the identity against
+                dev/public_gpg_key.
+                """
+            ),
+        ),
         'defaultbranch': scfg.Value('main'),
         'xdoctest_style': scfg.Value('google', help='type of xdoctest style'),
         'test_command': scfg.Value(
@@ -1762,26 +1778,27 @@ class TemplateApplier:
         use_trusted_publishing = self.config.get(
             'ci_pypi_trusted_publishing', False
         )
+        ci_gpg_transport = self.config.get(
+            'ci_gpg_secret_transport', 'encrypted_repo'
+        )
+        use_direct_gpg = ci_gpg_transport == 'direct_ci'
 
         if 'erotemic' in self.config['tags']:
             environ_export = 'setup_package_environs_github_erotemic'
             upload_secret_cmd = 'upload_github_secrets'
+            gpg_upload_cmd = 'upload_github_gpg_secrets'
         elif 'pyutils' in self.config['tags']:
             environ_export = 'setup_package_environs_github_pyutils'
             upload_secret_cmd = 'upload_github_secrets'
+            gpg_upload_cmd = 'upload_github_gpg_secrets'
         elif 'kitware' in self.config['tags']:
             environ_export = 'setup_package_environs_gitlab_kitware'
             upload_secret_cmd = 'upload_gitlab_repo_secrets'
+            gpg_upload_cmd = 'upload_gitlab_gpg_secrets'
         else:
             raise Exception
 
-        need_secret_upload = True
-        if (
-            use_trusted_publishing
-            and self.remote_info.get('type') == 'github'
-            and not enable_gpg
-        ):
-            need_secret_upload = False
+        is_github = self.remote_info.get('type') == 'github'
 
         import cmd_queue
 
@@ -1792,26 +1809,47 @@ class TemplateApplier:
         script.sync().submit(f'{environ_export}', log=False)
         script.sync().submit('source $(secret_loader.sh)', log=False)
 
+        # Step 1: export GPG material to repo (encrypted_repo) or upload
+        # directly to CI provider (direct_ci).
         if enable_gpg:
-            script.sync().submit(
-                'export_encrypted_code_signing_keys', log=False
-            )
-
-        if need_secret_upload:
-            if (
-                use_trusted_publishing
-                and self.remote_info.get('type') == 'github'
-            ):
-                script.sync().submit(
-                    f'{upload_secret_cmd} trusted_publishing', log=False
-                )
+            if use_direct_gpg:
+                script.sync().submit(gpg_upload_cmd, log=False)
             else:
-                script.sync().submit(f'{upload_secret_cmd}', log=False)
-        else:
+                script.sync().submit(
+                    'export_encrypted_code_signing_keys', log=False
+                )
+
+        # Step 2: upload non-GPG secrets (Twine, push token, CI_SECRET).
+        # Skip entirely when trusted publishing + GitHub + (no GPG or direct
+        # GPG): OIDC covers PyPI auth and GPG material is already uploaded.
+        skip_non_gpg = (
+            use_trusted_publishing
+            and is_github
+            and (not enable_gpg or use_direct_gpg)
+        )
+
+        if skip_non_gpg:
             script.sync().submit(
-                'echo "Trusted publishing enabled with GPG disabled; no CI secrets need to be uploaded."',
+                'echo "Trusted publishing + direct GPG (or no GPG):'
+                ' no additional CI secrets to upload."',
                 log=False,
             )
+        elif use_trusted_publishing and is_github:
+            # encrypted_repo + trusted publishing: CI_SECRET goes to
+            # deployment environments so the GPG decrypt step can access it.
+            script.sync().submit(
+                f'{upload_secret_cmd} trusted_publishing', log=False
+            )
+        elif use_direct_gpg:
+            # direct_ci + non-trusted publishing: upload Twine credentials
+            # (environment-scoped); CI_SECRET is not uploaded.
+            script.sync().submit(
+                f'{upload_secret_cmd} direct_gpg', log=False
+            )
+        else:
+            # encrypted_repo + non-trusted: full legacy upload (Twine +
+            # CI_SECRET, all repo-level).
+            script.sync().submit(f'{upload_secret_cmd}', log=False)
 
         script.rprint()
         if self.config.confirm('Ready to rotate secrets?'):
