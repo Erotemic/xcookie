@@ -2,6 +2,7 @@ import ubelt as ub
 
 from xcookie.builders import common_ci
 from xcookie.util_yaml import Yaml
+from typing import cast
 from typing import TypeAlias, MutableMapping, MutableSequence, Mapping, Sequence
 
 
@@ -386,14 +387,18 @@ def _normalize_cibuildwheel_skip_string(skip: str) -> str:
 
 def _matrix_needs_qemu(matrix: Mapping[str, JSON]) -> bool:
     arches = []
+
     matrix_arches = matrix.get('arch', None)
     if isinstance(matrix_arches, Sequence) and not isinstance(matrix_arches, (str, bytes)):
         arches.extend(matrix_arches)
+
     matrix_include = matrix.get('include', None)
     if isinstance(matrix_include, Sequence) and not isinstance(matrix_include, (str, bytes)):
-        for item in matrix_include:
-            if isinstance(item, Mapping) and 'arch' in item:
+        include_items = cast(Sequence[Mapping[str, JSON]], matrix_include)
+        for item in include_items:
+            if 'arch' in item:
                 arches.append(item['arch'])
+
     return any(str(arch) != 'auto' for arch in arches)
 
 

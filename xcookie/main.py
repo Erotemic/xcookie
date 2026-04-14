@@ -737,18 +737,18 @@ class TemplateApplier:
         repo.git.add(untracked)
 
     @property
-    def has_git(self):
+    def has_git(self) -> bool:
         return (self.config['repodir'] / '.git').exists()
 
     @property
-    def rel_mod_dpath(self):
+    def rel_mod_dpath(self) -> ub.Path:
         return (
             ub.Path(self.config['rel_mod_parent_dpath'])
             / self.config['mod_name']
         )
 
     @property
-    def mod_dpath(self):
+    def mod_dpath(self) -> ub.Path:
         return self.repodir / self.rel_mod_dpath
 
     @property
