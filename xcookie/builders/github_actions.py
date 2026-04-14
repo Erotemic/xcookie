@@ -1,19 +1,27 @@
+from typing import (
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    Sequence,
+    TypeAlias,
+    cast,
+)
+
 import ubelt as ub
 
 from xcookie.builders import common_ci
 from xcookie.util_yaml import Yaml
-from typing import cast
-from typing import TypeAlias, MutableMapping, MutableSequence, Mapping, Sequence
-
 
 # Type alias for json / yaml data structure
 JSON_Terminal: TypeAlias = str | int | float | bool | None
-JSON_MutableSequence: TypeAlias = MutableSequence["JSON_Mutable"]
-JSON_MutableMapping: TypeAlias = MutableMapping[str, "JSON_Mutable"]
-JSON_Mutable: TypeAlias = JSON_Terminal | JSON_MutableSequence | JSON_MutableMapping
+JSON_MutableSequence: TypeAlias = MutableSequence['JSON_Mutable']
+JSON_MutableMapping: TypeAlias = MutableMapping[str, 'JSON_Mutable']
+JSON_Mutable: TypeAlias = (
+    JSON_Terminal | JSON_MutableSequence | JSON_MutableMapping
+)
 
-JSON_Sequence: TypeAlias = Sequence["JSON"]
-JSON_Mapping: TypeAlias = Mapping[str, "JSON"]
+JSON_Sequence: TypeAlias = Sequence['JSON']
+JSON_Mapping: TypeAlias = Mapping[str, 'JSON']
 JSON: TypeAlias = JSON_Terminal | JSON_Sequence | JSON_Mapping
 
 
@@ -349,7 +357,15 @@ def _render_workflow_text(name, on_lines, jobs, footer=''):
             walker[p] = '\n'.join(v)
 
     body = {'jobs': jobs}
-    text = header + '\n\non:\n' + on_text + '\n\n' + Yaml.dumps(body) + '\n\n' + footer
+    text = (
+        header
+        + '\n\non:\n'
+        + on_text
+        + '\n\n'
+        + Yaml.dumps(body)
+        + '\n\n'
+        + footer
+    )
     return text
 
 
@@ -362,26 +378,36 @@ def _normalize_cibuildwheel_skip_selector(selector: str) -> str:
     if selector.count('{') != selector.count('}'):
         raise ValueError(f'Unbalanced cibuildwheel skip selector: {selector!r}')
     if selector.count('{') != 1 or selector.count('}') != 1:
-        raise ValueError(f'Unsupported cibuildwheel skip selector: {selector!r}')
+        raise ValueError(
+            f'Unsupported cibuildwheel skip selector: {selector!r}'
+        )
     lpos = selector.index('{')
     rpos = selector.index('}')
     if rpos < lpos:
-        raise ValueError(f'Unsupported cibuildwheel skip selector: {selector!r}')
-    inner = selector[lpos + 1:rpos]
+        raise ValueError(
+            f'Unsupported cibuildwheel skip selector: {selector!r}'
+        )
+    inner = selector[lpos + 1 : rpos]
     if not inner or '{' in inner or '}' in inner:
-        raise ValueError(f'Unsupported cibuildwheel skip selector: {selector!r}')
+        raise ValueError(
+            f'Unsupported cibuildwheel skip selector: {selector!r}'
+        )
     options = [part.strip() for part in inner.split(',') if part.strip()]
     if not options:
-        raise ValueError(f'Unsupported cibuildwheel skip selector: {selector!r}')
+        raise ValueError(
+            f'Unsupported cibuildwheel skip selector: {selector!r}'
+        )
     if len(options) == 1:
-        return selector[:lpos] + options[0] + selector[rpos + 1:]
+        return selector[:lpos] + options[0] + selector[rpos + 1 :]
     return selector
 
 
 def _normalize_cibuildwheel_skip_string(skip: str) -> str:
     if not skip:
         return skip
-    parts = [_normalize_cibuildwheel_skip_selector(part) for part in skip.split()]
+    parts = [
+        _normalize_cibuildwheel_skip_selector(part) for part in skip.split()
+    ]
     return ' '.join(parts)
 
 
@@ -389,11 +415,15 @@ def _matrix_needs_qemu(matrix: Mapping[str, JSON]) -> bool:
     arches = []
 
     matrix_arches = matrix.get('arch', None)
-    if isinstance(matrix_arches, Sequence) and not isinstance(matrix_arches, (str, bytes)):
+    if isinstance(matrix_arches, Sequence) and not isinstance(
+        matrix_arches, (str, bytes)
+    ):
         arches.extend(matrix_arches)
 
     matrix_include = matrix.get('include', None)
-    if isinstance(matrix_include, Sequence) and not isinstance(matrix_include, (str, bytes)):
+    if isinstance(matrix_include, Sequence) and not isinstance(
+        matrix_include, (str, bytes)
+    ):
         include_items = cast(Sequence[Mapping[str, JSON]], matrix_include)
         for item in include_items:
             if 'arch' in item:
@@ -406,13 +436,16 @@ def _build_github_footer(self):
     use_trusted_publishing = self.config.get(
         'ci_pypi_trusted_publishing', False
     )
-    ci_gpg_transport = self.config.get('ci_gpg_secret_transport', 'encrypted_repo')
+    ci_gpg_transport = self.config.get(
+        'ci_gpg_secret_transport', 'encrypted_repo'
+    )
     use_direct_gpg = ci_gpg_transport == 'direct_ci'
     enable_gpg = self.config['enable_gpg']
 
     if use_trusted_publishing:
-        from packaging.utils import canonicalize_name
         from urllib.parse import quote
+
+        from packaging.utils import canonicalize_name
 
         host = self.remote_info.get('host', 'https://github.com')
         group = self.remote_info.get('group', '<OWNER>')
@@ -521,8 +554,8 @@ def _build_github_footer(self):
             """
         )
 
-        footer = ub.indent(footer_text, "# ").rstrip()
-        footer = "###\n" + footer
+        footer = ub.indent(footer_text, '# ').rstrip()
+        footer = '###\n' + footer
         footer_lines = [line.strip() for line in footer.splitlines()]
 
         if 'erotemic' in self.tags:
@@ -748,9 +781,7 @@ def _collect_release_jobs(self):
             )
             release_build_needs.append('build_sdist')
 
-        jobs['build_purepy_wheels'] = Yaml.Dict(
-            build_purewheel_job(self)
-        )
+        jobs['build_purepy_wheels'] = Yaml.Dict(build_purewheel_job(self))
         jobs['build_purepy_wheels'].yaml_set_start_comment(
             ub.codeblock(
                 """
@@ -837,6 +868,7 @@ def build_github_actions_release(self):
     """
     footer = _build_github_footer(self)
     return _render_workflow_text(name, on_lines, jobs, footer=footer)
+
 
 def lint_job(self):
     supported_platform_info = common_ci.get_supported_platform_info(self)
@@ -1394,7 +1426,6 @@ def build_purewheel_job(self):
     ]
     job['steps'] = job_steps
     return job
-
 
 
 def build_sdist_job(self):
@@ -2007,7 +2038,9 @@ def build_deploy(self, mode='live', needs=None):
     use_trusted_publishing = self.config.get(
         'ci_pypi_trusted_publishing', False
     )
-    ci_gpg_transport = self.config.get('ci_gpg_secret_transport', 'encrypted_repo')
+    ci_gpg_transport = self.config.get(
+        'ci_gpg_secret_transport', 'encrypted_repo'
+    )
     use_direct_gpg = ci_gpg_transport == 'direct_ci'
     live_pass_varname = self.config['ci_pypi_live_password_varname']
     test_pass_varname = self.config['ci_pypi_test_password_varname']
@@ -2021,14 +2054,20 @@ def build_deploy(self, mode='live', needs=None):
                 {
                     'TWINE_REPOSITORY_URL': 'https://upload.pypi.org/legacy/',
                     'TWINE_USERNAME': '__token__',
-                    'TWINE_PASSWORD': '${{ secrets.' + live_pass_varname + ' }}',
+                    'TWINE_PASSWORD': '${{ secrets.'
+                    + live_pass_varname
+                    + ' }}',
                 }
             )
         if enable_gpg:
             if use_direct_gpg:
-                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = (
+                    '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                )
                 env['GPG_PUBLIC_KEY_B64'] = '${{ secrets.GPG_PUBLIC_KEY_B64 }}'
-                env['GPG_OWNER_TRUST_B64'] = '${{ secrets.GPG_OWNER_TRUST_B64 }}'
+                env['GPG_OWNER_TRUST_B64'] = (
+                    '${{ secrets.GPG_OWNER_TRUST_B64 }}'
+                )
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
@@ -2041,14 +2080,20 @@ def build_deploy(self, mode='live', needs=None):
                 {
                     'TWINE_REPOSITORY_URL': 'https://test.pypi.org/legacy/',
                     'TWINE_USERNAME': '__token__',
-                    'TWINE_PASSWORD': '${{ secrets.' + test_pass_varname + ' }}',
+                    'TWINE_PASSWORD': '${{ secrets.'
+                    + test_pass_varname
+                    + ' }}',
                 }
             )
         if enable_gpg:
             if use_direct_gpg:
-                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = (
+                    '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                )
                 env['GPG_PUBLIC_KEY_B64'] = '${{ secrets.GPG_PUBLIC_KEY_B64 }}'
-                env['GPG_OWNER_TRUST_B64'] = '${{ secrets.GPG_OWNER_TRUST_B64 }}'
+                env['GPG_OWNER_TRUST_B64'] = (
+                    '${{ secrets.GPG_OWNER_TRUST_B64 }}'
+                )
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
@@ -2243,7 +2288,11 @@ def build_deploy(self, mode='live', needs=None):
     ]
 
     if run:
-        if enable_gpg and self.config['deploy_pypi'] and not use_trusted_publishing:
+        if (
+            enable_gpg
+            and self.config['deploy_pypi']
+            and not use_trusted_publishing
+        ):
             step_name = 'Sign and Publish'
         elif enable_gpg:
             step_name = 'Sign distributions'
@@ -2270,7 +2319,7 @@ def build_deploy(self, mode='live', needs=None):
                 'name': 'Prepare publish directory',
                 'shell': 'bash',
                 'run': ub.codeblock(
-                    f'''
+                    f"""
                     mkdir -p {publish_dist_dpath}
                     shopt -s nullglob
                     for FPATH in {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.zip
@@ -2278,7 +2327,7 @@ def build_deploy(self, mode='live', needs=None):
                         cp "$FPATH" {publish_dist_dpath}/
                     done
                     ls -la {publish_dist_dpath}
-                    '''
+                    """
                 ),
             },
             {

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import ubelt as ub
 from packaging.version import parse as LooseVersion
 
@@ -41,7 +42,10 @@ class GithubRemote:
             ub.cmd(f'git push --tags {DEPLOY_REMOTE}', verbose=2)
 
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tmp:
+
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.txt', delete=False
+        ) as tmp:
             tmp.write('\n'.join(latest_notes[1:]))
             release_notes_fpath = ub.Path(tmp.name)
 

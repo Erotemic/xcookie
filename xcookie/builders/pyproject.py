@@ -44,7 +44,9 @@ def build_pyproject(self):
             for pyver in self.config['supported_python_versions']:
                 pyver_parts = tuple(int(p) for p in str(pyver).split('.')[:2])
                 if pyver_parts < (3, 11):
-                    skip_tokens.append('cp' + str(pyver).replace('.', '') + '-win_arm64')
+                    skip_tokens.append(
+                        'cp' + str(pyver).replace('.', '') + '-win_arm64'
+                    )
 
         pyproj_config['tool']['cibuildwheel'].update(
             {

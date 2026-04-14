@@ -1843,9 +1843,7 @@ class TemplateApplier:
         elif use_direct_gpg:
             # direct_ci + non-trusted publishing: upload Twine credentials
             # (environment-scoped); CI_SECRET is not uploaded.
-            script.sync().submit(
-                f'{upload_secret_cmd} direct_gpg', log=False
-            )
+            script.sync().submit(f'{upload_secret_cmd} direct_gpg', log=False)
         else:
             # encrypted_repo + non-trusted: full legacy upload (Twine +
             # CI_SECRET, all repo-level).
