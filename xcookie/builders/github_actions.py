@@ -352,6 +352,51 @@ def _render_workflow_text(name, on_lines, jobs, footer=''):
     return text
 
 
+def _normalize_cibuildwheel_skip_selector(selector: str) -> str:
+    selector = selector.strip()
+    if not selector:
+        return selector
+    if '{' not in selector and '}' not in selector:
+        return selector
+    if selector.count('{') != selector.count('}'):
+        raise ValueError(f'Unbalanced cibuildwheel skip selector: {selector!r}')
+    if selector.count('{') != 1 or selector.count('}') != 1:
+        raise ValueError(f'Unsupported cibuildwheel skip selector: {selector!r}')
+    lpos = selector.index('{')
+    rpos = selector.index('}')
+    if rpos < lpos:
+        raise ValueError(f'Unsupported cibuildwheel skip selector: {selector!r}')
+    inner = selector[lpos + 1:rpos]
+    if not inner or '{' in inner or '}' in inner:
+        raise ValueError(f'Unsupported cibuildwheel skip selector: {selector!r}')
+    options = [part.strip() for part in inner.split(',') if part.strip()]
+    if not options:
+        raise ValueError(f'Unsupported cibuildwheel skip selector: {selector!r}')
+    if len(options) == 1:
+        return selector[:lpos] + options[0] + selector[rpos + 1:]
+    return selector
+
+
+def _normalize_cibuildwheel_skip_string(skip: str) -> str:
+    if not skip:
+        return skip
+    parts = [_normalize_cibuildwheel_skip_selector(part) for part in skip.split()]
+    return ' '.join(parts)
+
+
+def _matrix_needs_qemu(matrix: Mapping[str, JSON]) -> bool:
+    arches = []
+    matrix_arches = matrix.get('arch', None)
+    if isinstance(matrix_arches, Sequence) and not isinstance(matrix_arches, (str, bytes)):
+        arches.extend(matrix_arches)
+    matrix_include = matrix.get('include', None)
+    if isinstance(matrix_include, Sequence) and not isinstance(matrix_include, (str, bytes)):
+        for item in matrix_include:
+            if isinstance(item, Mapping) and 'arch' in item:
+                arches.append(item['arch'])
+    return any(str(arch) != 'auto' for arch in arches)
+
+
 def _build_github_footer(self):
     use_trusted_publishing = self.config.get(
         'ci_pypi_trusted_publishing', False
@@ -984,6 +1029,7 @@ def build_binpy_wheels_job(self):
     )
     if isinstance(cibw_skip, list):
         cibw_skip = ' '.join(cibw_skip)
+    cibw_skip = _normalize_cibuildwheel_skip_string(cibw_skip)
     explicit_skips = ' ' + cibw_skip
     print(f'explicit_skips={explicit_skips}')
 
@@ -1209,8 +1255,9 @@ def build_binpy_wheels_job(self):
         env['VCPKG_ROOT'] = r'C:\vcpkg'
         env['VCPKG_TARGET_TRIPLET'] = 'x64-windows'
 
+    if _matrix_needs_qemu(matrix):
+        job_steps += [Actions.setup_qemu(sensible=True)]
     job_steps += [
-        Actions.setup_qemu(sensible=True),
         # abi3_action,
         *vcpkg_pre_steps,
     ]
@@ -1310,9 +1357,12 @@ def build_purewheel_job(self):
         'steps': None,
     }
     build_parts = common_ci.make_build_wheel_parts(self, wheelhouse_dpath)
-    job['steps'] = [
+    job_steps = [
         Actions.checkout(),
-        Actions.setup_qemu(sensible=True),
+    ]
+    if _matrix_needs_qemu(job['strategy']['matrix']):
+        job_steps.append(Actions.setup_qemu(sensible=True))
+    job_steps += [
         Actions.setup_python(
             {'with': {'python-version': '${{ matrix.python-version }}'}}
         ),
@@ -1337,6 +1387,7 @@ def build_purewheel_job(self):
             }
         ),
     ]
+    job['steps'] = job_steps
     return job
 
 
@@ -1392,6 +1443,7 @@ def build_binpy_wheels_release_job(self):
     )
     if isinstance(cibw_skip, list):
         cibw_skip = ' '.join(cibw_skip)
+    cibw_skip = _normalize_cibuildwheel_skip_string(cibw_skip)
     explicit_skips = ' ' + cibw_skip
 
     matrix = Yaml.Dict({})
@@ -1432,8 +1484,9 @@ def build_binpy_wheels_release_job(self):
     job_steps = []
     job_steps += [Actions.checkout()]
     job_steps += conditional_actions
+    if _matrix_needs_qemu(matrix):
+        job_steps += [Actions.setup_qemu(sensible=True)]
     job_steps += [
-        Actions.setup_qemu(sensible=True),
         Actions.cibuildwheel(sensible=True),
         {
             'name': 'Show built files',
@@ -1779,8 +1832,9 @@ def test_wheels_job(self, needs=None):
         action_steps += [
             Actions.setup_ipfs(),
         ]
+    if _matrix_needs_qemu(job['strategy']['matrix']):
+        action_steps += [Actions.setup_qemu(sensible=True)]
     action_steps += [
-        Actions.setup_qemu(sensible=True),
         Actions.setup_python(
             {'with': {'python-version': '${{ matrix.python-version }}'}}
         ),

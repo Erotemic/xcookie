@@ -39,12 +39,19 @@ def build_pyproject(self):
         if 'cv2' in self.config['tags']:
             test_extras += ['headless-strict']
 
+        skip_tokens = ['pp*', '*-musllinux_*']
+        if 'win' in self.config['os']:
+            for pyver in self.config['supported_python_versions']:
+                pyver_parts = tuple(int(p) for p in str(pyver).split('.')[:2])
+                if pyver_parts < (3, 11):
+                    skip_tokens.append('cp' + str(pyver).replace('.', '') + '-win_arm64')
+
         pyproj_config['tool']['cibuildwheel'].update(
             {
                 'build': ' '.join(wheel_build_patterns),
                 'build-frontend': 'build',
                 # 'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
-                'skip': 'pp* *-musllinux_*',
+                'skip': ' '.join(ub.oset(skip_tokens)),
                 'build-verbosity': 1,
                 # 'test-requires': ["-r requirements/tests.txt"],
                 'test-extras': test_extras,
