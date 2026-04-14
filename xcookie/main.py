@@ -1857,7 +1857,7 @@ class TemplateApplier:
 
     def print_help_tips(self):
         text = ub.codeblock(
-            f"""
+            """
             Things that xcookie might eventually do that you should do for
             yourself for now:
 
@@ -1865,9 +1865,6 @@ class TemplateApplier:
 
                 # xdev requires the non-binary mypy
                 pip install -U mypy --no-binary :all:
-
-                # Generate stubs and check them
-                xdev docstubs ./{self.rel_mod_dpath} && mypy ./{self.rel_mod_dpath}
 
                 # Then make sure you have typed = true in the [tool.xcookie]
                 # section of pyproject.toml and regenerate setup.py
