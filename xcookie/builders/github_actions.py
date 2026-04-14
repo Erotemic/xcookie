@@ -640,7 +640,7 @@ def _build_github_footer(self):
     return footer
 
 
-def _collect_test_jobs(self):
+def _collect_test_jobs(self) -> tuple[str, Mapping]:
     jobs = Yaml.Dict({})
     if self.config.linter:
         jobs['lint_job'] = lint_job(self)
@@ -1373,7 +1373,7 @@ def build_binpy_wheels_job(self):
     return job
 
 
-def build_purewheel_job(self):
+def build_purewheel_job(self) -> dict[str, JSON]:
     wheelhouse_dpath = 'wheelhouse'
     supported_platform_info = common_ci.get_supported_platform_info(self)
     # os_list = supported_platform_info['os_list']
@@ -1398,7 +1398,7 @@ def build_purewheel_job(self):
     job_steps = [
         Actions.checkout(),
     ]
-    if _matrix_needs_qemu(job['strategy']['matrix']):
+    if _matrix_needs_qemu(job['strategy']['matrix']):  # type: ignore
         job_steps.append(Actions.setup_qemu(sensible=True))
     job_steps += [
         Actions.setup_python(
@@ -2017,7 +2017,7 @@ def test_wheels_job(self, needs=None):
     return job
 
 
-def build_deploy(self, mode='live', needs=None):
+def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
     """
     CommandLine:
         xdoctest -m /home/joncrall/code/xcookie/xcookie/builders/github_actions.py build_deploy
@@ -2111,11 +2111,11 @@ def build_deploy(self, mode='live', needs=None):
         repo_name = self.remote_info['repo_name']
         repo_suffix = f'{group}/{repo_name}'  # NOQA
         # https://github.com/orgs/community/discussions/25217
-        is_not_fork_condition = (
-            "github.event.pull_request.head.repo.full_name == '"
-            + repo_suffix
-            + "'"
-        )
+        # is_not_fork_condition = (
+        #     "github.event.pull_request.head.repo.full_name == '"
+        #     + repo_suffix
+        #     + "'"
+        # )
         # Note: disabling because this does not seem to work?
         is_not_fork_condition = None
     else:
@@ -2308,7 +2308,7 @@ def build_deploy(self, mode='live', needs=None):
         ]
 
     if self.config['deploy_pypi'] and use_trusted_publishing:
-        publish_with = {
+        publish_with: dict[str, JSON] = {
             'packages-dir': publish_dist_dpath,
             'skip-existing': True,
         }
