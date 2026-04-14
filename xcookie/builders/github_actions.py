@@ -351,7 +351,7 @@ def _render_workflow_text(name, on_lines, jobs, footer=''):
     on_text = ub.indent(ub.codeblock(on_lines).strip(), '  ')
 
     walker = ub.IndexableWalker(jobs)
-    for p, v in walker:
+    for p, v in walker:  # type: ignore
         k = p[-1]
         if k == 'run' and isinstance(v, list):
             walker[p] = '\n'.join(v)
