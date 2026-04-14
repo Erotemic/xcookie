@@ -412,12 +412,13 @@ def _normalize_cibuildwheel_skip_string(skip: str) -> str:
 
 
 def _matrix_needs_qemu(matrix: Mapping[str, JSON]) -> bool:
-    arches = []
+    arches: list[JSON] = []
 
     matrix_arches = matrix.get('arch', None)
     if isinstance(matrix_arches, Sequence) and not isinstance(
         matrix_arches, (str, bytes)
     ):
+        matrix_arches = cast(Sequence[JSON], matrix_arches)
         arches.extend(matrix_arches)
 
     matrix_include = matrix.get('include', None)
