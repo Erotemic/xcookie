@@ -925,9 +925,15 @@ def build_and_test_sdist_job(self):
     build_parts = common_ci.make_build_sdist_parts(self, wheelhouse_dpath)
 
     if self.config['use_pyproject_requirements']:
+        extras = []
+        if 'cv2' in self.tags:
+            extras.append('headless')
+        if 'gdal' in self.tags:
+            extras.append('gdal')
+        extras_suffix = ",".join(extras)
         pip_reqs_install_parts = [
             f'{self.UPDATE_PIP}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} -e ".[tests]"',
+            f'{self.PIP_INSTALL_PREFER_BINARY} -e ".[{extras_suffix}]"',
         ]
     else:
         pip_reqs_install_parts = [
