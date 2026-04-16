@@ -927,7 +927,7 @@ def build_and_test_sdist_job(self):
     if self.config['use_pyproject_requirements']:
         pip_reqs_install_parts = [
             f'{self.UPDATE_PIP}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} -r pyproject.toml --extra tests',
+            f'{self.PIP_INSTALL_PREFER_BINARY} -e ".[tests]"',
         ]
     else:
         pip_reqs_install_parts = [
