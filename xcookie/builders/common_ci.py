@@ -32,7 +32,7 @@ def make_typecheck_parts(self):
     req_files_text = ' '.join(type_requirement_files)
 
     if self.config['use_pyproject_requirements']:
-        pip_install_reqs = 'pip install -r pyproject.toml'
+        pip_install_reqs = 'pip install --prefer-binary -e ".[tests]"'
     else:
         pip_install_reqs = f'pip install -r {req_files_text}'
 
