@@ -68,20 +68,10 @@ def parse_description():
 
 def parse_requirements(fname='requirements.txt', versions=False):
     """
-    Parse the package dependencies listed in a requirements file but strips
-    specific versioning information.
+    Parse the package dependencies listed in a requirements file.
 
-    Args:
-        fname (str): path to requirements file
-        versions (bool | str):
-            If true include version specs.
-            If strict, then pin to the minimum version.
-
-    Returns:
-        List[str]: list of requirements items
-
-    CommandLine:
-        python -c "import setup, ubelt; print(ubelt.urepr(setup.parse_requirements()))"
+    Strict/minimum install environments are represented by lockfile profiles,
+    not package extras. This parser is only used for normal loose metadata.
     """
     require_fpath = fname
 
@@ -148,16 +138,7 @@ def parse_requirements(fname='requirements.txt', versions=False):
             for info in parse_require_file(require_fpath):
                 parts = [info['package']]
                 if versions and 'version' in info:
-                    if versions == 'strict':
-                        # In strict mode, we pin to the minimum version
-                        if info['version']:
-                            # Only replace the first >= instance
-                            verstr = ''.join(info['version']).replace(
-                                '>=', '==', 1
-                            )
-                            parts.append(verstr)
-                    else:
-                        parts.extend(info['version'])
+                    parts.extend(info['version'])
                 if not sys.version.startswith('3.4'):
                     # apparently package_deps are broken in 3.4
                     plat_deps = info.get('platform_deps')
@@ -169,36 +150,6 @@ def parse_requirements(fname='requirements.txt', versions=False):
 
     packages = list(gen_packages_items())
     return packages
-
-
-# # Maybe use in the future? But has private deps
-# def parse_requirements_alt(fpath='requirements.txt', versions='loose'):
-#     """
-#     Args:
-#         versions (str): can be
-#             False or "free" - remove all constraints
-#             True or "loose" - use the greater or equal (>=) in the req file
-#             strict - replace all greater equal with equals
-#     """
-#     # Note: different versions of pip might have different internals.
-#     # This may need to be fixed.
-#     from pip._internal.req import parse_requirements
-#     from pip._internal.network.session import PipSession
-#     requirements = []
-#     for req in parse_requirements(fpath, session=PipSession()):
-#         if not versions or versions == 'free':
-#             req_name = req.requirement.split(' ')[0]
-#             requirements.append(req_name)
-#         elif versions == 'loose' or versions is True:
-#             requirements.append(req.requirement)
-#         elif versions == 'strict':
-#             part1, *rest = req.requirement.split(';')
-#             strict_req = ';'.join([part1.replace('>=', '==')] + rest)
-#             requirements.append(strict_req)
-#         else:
-#             raise KeyError(versions)
-#     requirements = [r.replace(' ', '') for r in requirements]
-#     return requirements
 
 
 NAME = 'xcookie'
@@ -220,9 +171,6 @@ if __name__ == '__main__':
             'requirements/optional.txt', versions='loose'
         ),
         'docs': parse_requirements('requirements/docs.txt', versions='loose'),
-        'gdal-strict': parse_requirements(
-            'requirements/gdal.txt', versions='strict'
-        ),
         'gdal': parse_requirements('requirements/gdal.txt', versions='loose'),
         'graphics': parse_requirements(
             'requirements/graphics.txt', versions='loose'
@@ -232,31 +180,6 @@ if __name__ == '__main__':
         ),
         'postgresql': parse_requirements(
             'requirements/postgresql.txt', versions='loose'
-        ),
-        'all-strict': parse_requirements('requirements.txt', versions='strict'),
-        'runtime-strict': parse_requirements(
-            'requirements/runtime.txt', versions='strict'
-        ),
-        'tests-strict': parse_requirements(
-            'requirements/tests.txt', versions='strict'
-        ),
-        'optional-strict': parse_requirements(
-            'requirements/optional.txt', versions='strict'
-        ),
-        'docs-strict': parse_requirements(
-            'requirements/docs.txt', versions='strict'
-        ),
-        'gdal-strict-strict': parse_requirements(
-            'requirements/gdal-strict.txt', versions='strict'
-        ),
-        'graphics-strict': parse_requirements(
-            'requirements/graphics.txt', versions='strict'
-        ),
-        'headless-strict': parse_requirements(
-            'requirements/headless.txt', versions='strict'
-        ),
-        'postgresql-strict': parse_requirements(
-            'requirements/postgresql.txt', versions='strict'
         ),
     }
     setupkw['name'] = NAME
