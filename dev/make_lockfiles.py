@@ -23,6 +23,15 @@ import subprocess
 REPO_DPATH = pathlib.Path(__file__).resolve().parents[1]
 LOCK_DPATH = REPO_DPATH / 'requirements' / 'locks'
 
+# Requirement files that historically participated in CI installs when their
+# tags were enabled.  Profiles include only files that exist in the checkout, so
+# this list is safe for projects without these optional dependency groups.
+PLATFORM_REQUIREMENTS = [
+    'requirements/headless.txt',
+    'requirements/gdal.txt',
+    'requirements/postgresql.txt',
+]
+
 
 PROFILES = {
     # Replacement for the old tests-strict,runtime-strict CI policy.
@@ -32,6 +41,7 @@ PROFILES = {
         'requirements': [
             'requirements/runtime.txt',
             'requirements/tests.txt',
+            *PLATFORM_REQUIREMENTS,
         ],
         'resolution': 'lowest-direct',
     },
@@ -42,6 +52,7 @@ PROFILES = {
             'requirements/runtime.txt',
             'requirements/tests.txt',
             'requirements/optional.txt',
+            *PLATFORM_REQUIREMENTS,
         ],
         'resolution': 'lowest-direct',
     },
@@ -51,6 +62,7 @@ PROFILES = {
             'requirements/runtime.txt',
             'requirements/tests.txt',
             'requirements/optional.txt',
+            *PLATFORM_REQUIREMENTS,
         ],
         'resolution': None,
     },
