@@ -147,49 +147,6 @@ def make_install_and_test_wheel_parts(
         """
     )
 
-    # if tuple(map(int, self.config.min_python.split('.'))) >= (3, 8):
-    #     # Not sure why this fails on 3.6 / 3.7?
-    #     # Use less ugly version when we can
-    #     get_mod_version_bash = ub.codeblock(
-    #         """
-    #         python -c "if 1:
-    #             from pkginfo import Wheel, SDist
-    #             import pathlib
-    #             fpath = '$WHEEL_FPATH'
-    #             cls = Wheel if fpath.endswith('.whl') else SDist
-    #             item = cls(fpath)
-    #             print(item.version)
-    #         "
-    #         """
-    #     )
-    # else:
-    #     get_mod_version_bash = ub.codeblock(
-    #         """
-    #         python -c "if 1:
-    #             from pkginfo import Wheel, SDist
-    #             import pathlib
-    #             fpath = '$WHEEL_FPATH'
-    #             cls = Wheel if fpath.endswith('.whl') else SDist
-    #             item = cls(fpath)
-    #             if item.version is None:
-    #                 import re
-    #                 # This is very fragile
-    #                 fname = pathlib.Path(fpath).name
-    #                 match = re.match(r'^([^-]+)-([^-]+)(.whl|.tar.gz)$', fname)
-    #                 bs = chr(92)
-    #                 pat = '([0-9]+' + bs + '.[0-9]+' + bs + '.[0-9]+)'
-    #                 import re
-    #                 # Not sure why version is None in 3.6 and 3.7
-    #                 match = re.search(pat, fname)
-    #                 assert match is not None
-    #                 version = match.groups()[0]
-    #                 print(version)
-    #             else:
-    #                 print(item.version)
-    #         "
-    #         """
-    #     )
-
     # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath(f'{self.mod_name}'))"
     get_modpath_python = f'import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))'
     get_modpath_bash = f'python -c "{get_modpath_python}"'
@@ -230,6 +187,36 @@ def make_install_and_test_wheel_parts(
             f'{self.PIP_INSTALL} tomli pkginfo packaging',
         ]
 
+    lockfile_install_block = Yaml.CodeBlock(
+        f"""
+        if [ -z "${{INSTALL_LOCKFILE:-}}" ] && echo "${{INSTALL_EXTRAS:-}}" | grep -q -- '-strict'; then
+            if echo "${{INSTALL_EXTRAS:-}}" | grep -q -- 'optional-strict'; then
+                export INSTALL_LOCKFILE="requirements/locks/pylock.ci-full-strict.toml"
+            else
+                export INSTALL_LOCKFILE="requirements/locks/pylock.ci-minimal-strict.toml"
+            fi
+        fi
+
+        if [ -n "${{INSTALL_LOCKFILE:-}}" ]; then
+            echo "INSTALL_LOCKFILE=$INSTALL_LOCKFILE"
+            if [ ! -f "$INSTALL_LOCKFILE" ]; then
+                echo "Strict lockfile does not exist: $INSTALL_LOCKFILE"
+                echo "Refresh lockfiles with: python dev/make_lockfiles.py"
+                exit 1
+            fi
+            echo "Syncing locked test environment"
+            {self.PIP_INSTALL} uv
+            uv pip sync "$INSTALL_LOCKFILE"
+            echo "Installing wheel without dependency resolution"
+            python -m pip install --no-deps "$WHEEL_FPATH"
+            python -m pip check
+        else
+            echo "Installing wheel with extras"
+            {self.PIP_INSTALL_PREFER_BINARY} "${{WHEEL_FPATH}}[${{INSTALL_EXTRAS}}]"
+        fi
+        """
+    )
+
     # Note: export does not expose the environment variable to subsequent jobs.
     install_wheel_commands = (
         [
@@ -246,17 +233,7 @@ def make_install_and_test_wheel_parts(
             'echo "WHEEL_FPATH=$WHEEL_FPATH"',
             'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
             'echo "UV_RESOLUTION=$UV_RESOLUTION"',
-            # 'echo "MOD_VERSION=$MOD_VERSION"',
-            # This helps but doesn't solve the problem.
-            # https://github.com/Erotemic/xdoctest/pull/158#discussion_r1697092781
-            # 'echo "Downloading dependencies from pypi"',
-            # f'pip download "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" --dest wheeldownload',
-            # f'echo "Overwriting pypi {self.mod_name} wheel"',
-            # 'cp wheelhouse/* wheeldownload/',
-            # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
-            # TODO: flag to allow prerelease?
-            # f'{self.PIP_INSTALL_PREFER_BINARY} --prerelease=allow "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} "${{WHEEL_FPATH}}[${{INSTALL_EXTRAS}}]"',
+            lockfile_install_block,
             'echo "Install finished."',
         ]
     )

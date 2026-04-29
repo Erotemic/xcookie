@@ -35,9 +35,9 @@ def build_pyproject(self):
         for cpver in supported_cp_version:
             wheel_build_patterns.append(cpver + '-*')
 
-        test_extras = ['tests-strict', 'runtime-strict']
+        test_extras = ['tests']
         if 'cv2' in self.config['tags']:
-            test_extras += ['headless-strict']
+            test_extras += ['headless']
 
         skip_tokens = ['pp*', '*-musllinux_*']
         if 'win' in self.config['os']:
@@ -55,7 +55,8 @@ def build_pyproject(self):
                 # 'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
                 'skip': ' '.join(ub.oset(skip_tokens)),
                 'build-verbosity': 1,
-                # 'test-requires': ["-r requirements/tests.txt"],
+                # Strict/minimum dependency testing is handled by CI lockfile
+                # profiles now, not by published package extras.
                 'test-extras': test_extras,
                 'test-command': 'python {project}/run_tests.py',
             }
