@@ -86,13 +86,14 @@ def make_compile_command(profile_name, profile):
     if not req_fpaths:
         raise RuntimeError(f'Profile {profile_name!r} has no existing inputs')
 
+    # uv infers the pylock output format from the standardized pylock.*.toml
+    # filename. Keep this compatible with uv pip compile, which does not use
+    # uv export's --format flag.
     cmd = [
         'uv',
         'pip',
         'compile',
         '--universal',
-        '--format',
-        'pylock.toml',
         '--output-file',
         str(output_fpath),
     ]
