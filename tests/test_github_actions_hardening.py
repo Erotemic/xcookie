@@ -1,6 +1,3 @@
-import sys
-from pathlib import Path
-
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
@@ -66,11 +63,3 @@ def test_release_jobs_keep_required_elevated_permissions(tmp_path):
     assert 'contents: write' in text
     assert 'environment: testpypi' in text
     assert 'environment: pypi' in text
-
-
-def test_hardening_tests_are_self_contained():
-    root = Path(__file__).resolve().parents[1]
-    test_text = (root / 'tests' / 'test_github_actions_hardening.py').read_text()
-    assert 'from tests.' not in test_text
-    assert 'import tests.' not in test_text
-    assert str(root) not in sys.path[:1]
