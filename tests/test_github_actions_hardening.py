@@ -1,4 +1,28 @@
-from tests.test_trusted_github_publishing import _make_applier
+import sys
+from pathlib import Path
+
+from xcookie.main import TemplateApplier, XCookieConfig
+
+
+def _make_applier(tmp_path, *, trusted, enable_gpg, tags=None, min_python=None):
+    if tags is None:
+        tags = ['github', 'erotemic', 'purepy']
+    kwargs = dict(
+        repodir=tmp_path,
+        repo_name='demo_pkg',
+        tags=tags,
+        interactive=False,
+        rotate_secrets=False,
+        refresh_docs=False,
+    )
+    if min_python is not None:
+        kwargs['min_python'] = min_python
+    cfg = XCookieConfig(**kwargs)
+    cfg['ci_pypi_trusted_publishing'] = trusted
+    cfg['enable_gpg'] = enable_gpg
+    self = TemplateApplier(cfg)
+    self._presetup()
+    return self
 
 
 def test_generated_workflows_set_top_level_read_permissions(tmp_path):
@@ -42,3 +66,11 @@ def test_release_jobs_keep_required_elevated_permissions(tmp_path):
     assert 'contents: write' in text
     assert 'environment: testpypi' in text
     assert 'environment: pypi' in text
+
+
+def test_hardening_tests_are_self_contained():
+    root = Path(__file__).resolve().parents[1]
+    test_text = (root / 'tests' / 'test_github_actions_hardening.py').read_text()
+    assert 'from tests.' not in test_text
+    assert 'import tests.' not in test_text
+    assert str(root) not in sys.path[:1]
