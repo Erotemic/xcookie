@@ -1,0 +1,136 @@
+"""
+Runtime hardening hooks for xcookie-generated GitHub Actions workflows.
+
+This module intentionally patches the workflow builder at import time instead of
+rewriting generated workflow files. It keeps the hardening centralized in the
+code that generates the workflows.
+"""
+
+import importlib.abc
+import importlib.machinery
+import sys
+
+import ubelt as ub
+
+
+_TARGET = 'xcookie.builders.github_actions'
+_INSTALLED = False
+_FINDING = False
+
+
+def _harden_github_actions_module(module):
+    """Apply conservative GitHub Actions hardening defaults."""
+    if getattr(module, '_XCOOKIE_HARDENED_GITHUB_ACTIONS', False):
+        return module
+
+    _patch_checkout(module)
+    _patch_workflow_renderer(module)
+    _patch_release_workflow(module)
+
+    module._XCOOKIE_HARDENED_GITHUB_ACTIONS = True
+    return module
+
+
+def _patch_checkout(module):
+    """Prevent checkout from leaving Git credentials behind by default."""
+    Actions = module.Actions
+    orig_checkout = Actions.checkout.__func__
+
+    def checkout(cls, *args, **kwargs):
+        action = orig_checkout(cls, *args, **kwargs)
+        checkout_with = action.setdefault('with', {})
+        checkout_with.setdefault('persist-credentials', False)
+        return action
+
+    Actions.checkout = classmethod(checkout)
+
+
+def _patch_workflow_renderer(module):
+    """Emit an explicit least-privilege top-level GITHUB_TOKEN policy."""
+    orig_render_workflow_text = module._render_workflow_text
+
+    def _render_workflow_text(name, on_lines, jobs, footer=''):
+        text = orig_render_workflow_text(name, on_lines, jobs, footer=footer)
+        if '\npermissions:\n' not in text:
+            text = text.replace(
+                '\njobs:\n',
+                '\npermissions:\n  contents: read\n\njobs:\n',
+                1,
+            )
+        return text
+
+    module._render_workflow_text = _render_workflow_text
+
+
+def _patch_release_workflow(module):
+    """Restrict generated release workflow push triggers to release refs."""
+
+    def build_github_actions_release(self):
+        name, jobs, release_build_needs = module._collect_release_jobs(self)
+
+        if self.config['deploy']:
+            jobs['test_deploy'] = module.build_deploy(
+                self, mode='test', needs=release_build_needs
+            )
+            jobs['live_deploy'] = module.build_deploy(
+                self, mode='live', needs=release_build_needs
+            )
+            jobs['release'] = module.build_github_release(
+                self, needs=['live_deploy']
+            )
+
+        defaultbranch = self.config.get('defaultbranch', 'main')
+        release_branches = ub.oset([defaultbranch, 'main', 'release'])
+        release_branches_str = ', '.join(release_branches)
+        on_lines = f"""
+        push:
+          branches: [ {release_branches_str} ]
+          tags: [ 'v*' ]
+        workflow_dispatch:
+        """
+        footer = module._build_github_footer(self)
+        return module._render_workflow_text(name, on_lines, jobs, footer=footer)
+
+    module.build_github_actions_release = build_github_actions_release
+
+
+class _GithubActionsHardeningLoader(importlib.abc.Loader):
+    def __init__(self, wrapped_loader):
+        self.wrapped_loader = wrapped_loader
+
+    def create_module(self, spec):
+        create_module = getattr(self.wrapped_loader, 'create_module', None)
+        if create_module is not None:
+            return create_module(spec)
+        return None
+
+    def exec_module(self, module):
+        self.wrapped_loader.exec_module(module)
+        _harden_github_actions_module(module)
+
+
+class _GithubActionsHardeningFinder(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        global _FINDING
+        if fullname != _TARGET or _FINDING:
+            return None
+        _FINDING = True
+        try:
+            spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        finally:
+            _FINDING = False
+        if spec is not None and spec.loader is not None:
+            spec.loader = _GithubActionsHardeningLoader(spec.loader)
+        return spec
+
+
+def install():
+    """Install the import hook once, or patch immediately if already loaded."""
+    global _INSTALLED
+    module = sys.modules.get(_TARGET)
+    if module is not None:
+        _harden_github_actions_module(module)
+        return
+    if not _INSTALLED:
+        sys.meta_path.insert(0, _GithubActionsHardeningFinder())
+        _INSTALLED = True
