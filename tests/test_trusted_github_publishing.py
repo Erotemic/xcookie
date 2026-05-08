@@ -144,7 +144,6 @@ def test_release_workflow_trusted_footer_drops_twine_act_secrets(tmp_path):
     )
     assert 'EROTEMIC_TWINE_PASSWORD' not in text
     assert 'EROTEMIC_TEST_TWINE_PASSWORD' not in text
-    assert 'EROTEMIC_CI_SECRET' in text
 
 
 def test_release_workflow_legacy_footer_keeps_twine_act_secrets(tmp_path):
@@ -180,11 +179,17 @@ def test_rotate_secrets_trusted_without_gpg_skips_secret_upload(
 def test_rotate_secrets_trusted_with_gpg_keeps_gpg_export_and_secret_upload(
     monkeypatch, tmp_path
 ):
+    """
+    With the legacy ``encrypted_repo`` transport, rotate_secrets must still
+    export the encrypted code-signing keys and upload the CI_SECRET-bearing
+    repo secrets, even when trusted publishing is enabled.
+    """
     _FakeQueue.created.clear()
     fake_cmd_queue = types.SimpleNamespace(Queue=_FakeQueue)
     monkeypatch.setitem(sys.modules, 'cmd_queue', fake_cmd_queue)
 
     self = _make_applier(tmp_path, trusted=True, enable_gpg=True)
+    self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
     self.rotate_secrets()
 
     queue = _FakeQueue.created[-1]
@@ -270,14 +275,16 @@ def test_direct_gpg_trusted_github_has_no_ci_secret_no_twine(tmp_path):
     assert 'pypa/gh-action-pypi-publish' in text
 
 
-def test_encrypted_repo_github_unchanged_when_transport_explicit(tmp_path):
-    """Default mode must produce identical output whether the key is set
-    explicitly or left at its default."""
+def test_default_transport_matches_explicit_direct_ci(tmp_path):
+    """The ``ci_gpg_secret_transport`` default must produce identical output
+    whether the key is left at its default or set to its named value
+    (``direct_ci``).
+    """
     baseline = _make_applier(
         tmp_path, trusted=False, enable_gpg=True
     ).build_github_actions_release()
     explicit = _make_applier(tmp_path, trusted=False, enable_gpg=True)
-    explicit.config['ci_gpg_secret_transport'] = 'encrypted_repo'
+    explicit.config['ci_gpg_secret_transport'] = 'direct_ci'
     assert baseline == explicit.build_github_actions_release()
 
 
@@ -328,8 +335,10 @@ def test_direct_gpg_gitlab_no_secrets_configuration_in_gpgsign_job(tmp_path):
     assert 'CI_SECRET=${!VARNAME_CI_SECRET}' not in text
 
 
-def test_encrypted_repo_gitlab_unchanged_by_new_config_key(tmp_path):
-    """Default GitLab CI output must be identical with or without the new key."""
+def test_default_transport_gitlab_matches_explicit_direct_ci(tmp_path):
+    """Default GitLab CI output must be identical to setting
+    ``ci_gpg_secret_transport='direct_ci'`` explicitly.
+    """
     baseline = _make_applier(
         tmp_path,
         trusted=False,
@@ -342,7 +351,7 @@ def test_encrypted_repo_gitlab_unchanged_by_new_config_key(tmp_path):
         enable_gpg=True,
         tags=['gitlab', 'kitware', 'purepy'],
     )
-    explicit.config['ci_gpg_secret_transport'] = 'encrypted_repo'
+    explicit.config['ci_gpg_secret_transport'] = 'direct_ci'
     assert baseline == explicit.build_gitlab_ci()
 
 
@@ -417,14 +426,19 @@ def test_rotate_secrets_direct_gpg_gitlab_excludes_ci_secret(
 def test_rotate_secrets_encrypted_repo_behavior_unchanged(
     monkeypatch, tmp_path
 ):
-    """Regression: default encrypted_repo path must be byte-identical before
-    and after adding ci_gpg_secret_transport to the config schema."""
+    """Regression: when ``ci_gpg_secret_transport='encrypted_repo'`` is
+    selected explicitly, rotate_secrets must still produce the legacy
+    encrypted-repo orchestration (``export_encrypted_code_signing_keys`` +
+    ``upload_github_secrets``) without falling through to the new
+    ``upload_github_gpg_secrets`` path.
+    """
     _FakeQueue.created.clear()
     monkeypatch.setitem(
         sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue)
     )
 
     self = _make_applier(tmp_path, trusted=False, enable_gpg=True)
+    self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)

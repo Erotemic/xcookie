@@ -253,14 +253,14 @@ class XCookieConfig(scfg.DataConfig):
             help=ub.paragraph(
                 """
                 Controls how GPG signing key material is transported to CI.
-                "encrypted_repo" (default): key material is encrypted with
-                CI_SECRET and committed to the repository as .enc files.
-                CI decrypts at runtime using the CI_SECRET variable.
-                "direct_ci": key material is uploaded directly to the CI
-                provider as environment-scoped secrets. No encrypted files
-                are committed to the repo. CI imports the key material from
-                provider secrets and verifies the identity against
+                "direct_ci" (default): key material is uploaded directly to
+                the CI provider as environment-scoped secrets. No encrypted
+                files are committed to the repo. CI imports the key material
+                from provider secrets and verifies the identity against
                 dev/public_gpg_key.
+                "encrypted_repo" (legacy): key material is encrypted with
+                CI_SECRET and committed to the repository as .enc files; CI
+                decrypts at runtime using the CI_SECRET variable.
                 """
             ),
         ),
