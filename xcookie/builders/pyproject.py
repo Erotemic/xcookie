@@ -305,10 +305,6 @@ def build_pyproject(self):
             urls = project_block.get('urls', {})
             urls['Homepage'] = str(self.config['url'])
             project_block['urls'] = urls
-        if self.config['tags']:
-            project_block['keywords'] = sorted(
-                {tag for tag in self.config['tags'] if tag}
-            )
 
         setuptools_block = pyproj_config['tool']['setuptools']
         setuptools_block['include-package-data'] = True

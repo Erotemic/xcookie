@@ -5,6 +5,61 @@ Common subroutines for consistency between gitlab-ci / github actions / etc...
 import ubelt as ub
 
 
+def get_pyproject_optional_dependency_keys(self):
+    """
+    Return the set of optional-dependency keys declared in the project's
+    pyproject.toml, or an empty set if the file (or section) is absent.
+
+    Used to filter generated CI install steps so we never reference an extra
+    that does not exist (e.g. ``pip install -e ".[tests]"`` against a project
+    without a ``tests`` extra).
+    """
+    pyproj_config = self.config._load_pyproject_config() or {}
+    project_block = pyproj_config.get('project', {}) or {}
+    optional_deps = project_block.get('optional-dependencies', {}) or {}
+    return set(optional_deps.keys())
+
+
+def filter_pyproject_extras(self, desired_extras):
+    """
+    Return ``desired_extras`` filtered down to those that actually exist in
+    the project's pyproject.toml ``[project.optional-dependencies]`` table.
+    Order is preserved and duplicates removed.
+
+    If the project does not yet have a pyproject.toml (e.g. a brand-new repo
+    being scaffolded by xcookie), all desired extras are kept so the freshly
+    generated pyproject can satisfy them.
+    """
+    available = get_pyproject_optional_dependency_keys(self)
+    pyproject_fpath = self.config['repodir'] / 'pyproject.toml'
+    if not pyproject_fpath.exists():
+        # New repo path: nothing to filter against, trust the desired list.
+        seen = set()
+        return [e for e in desired_extras if not (e in seen or seen.add(e))]
+    seen = set()
+    kept = []
+    for extra in desired_extras:
+        if extra in available and extra not in seen:
+            kept.append(extra)
+            seen.add(extra)
+    return kept
+
+
+def format_pyproject_install_target(extras, target='.', editable=False):
+    """
+    Build a pip install target string like ``"."``, ``".[tests]"`` or
+    ``"-e .[tests,optional]"`` from a list of extras, omitting the brackets
+    entirely when no extras are requested.
+    """
+    extras_part = ''
+    if extras:
+        extras_part = '[' + ','.join(extras) + ']'
+    quoted = f'"{target}{extras_part}"'
+    if editable:
+        return f'-e {quoted}'
+    return quoted
+
+
 def make_typecheck_parts(self):
     """
     Return a list of shell commands to run type checkers.
@@ -32,7 +87,9 @@ def make_typecheck_parts(self):
     req_files_text = ' '.join(type_requirement_files)
 
     if self.config['use_pyproject_requirements']:
-        pip_install_reqs = 'pip install --prefer-binary -e ".[tests]"'
+        type_extras = filter_pyproject_extras(self, ['tests'])
+        target = format_pyproject_install_target(type_extras, editable=True)
+        pip_install_reqs = f'pip install --prefer-binary {target}'
     else:
         pip_install_reqs = f'pip install -r {req_files_text}'
 

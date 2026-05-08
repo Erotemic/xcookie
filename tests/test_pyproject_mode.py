@@ -136,3 +136,191 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
     )
     assert pyproject_data['tool']['xcookie']['author'] == 'Existing Author'
     assert pyproject_data['tool']['xcookie']['version'] == '1.2.3'
+
+
+def test_xcookie_tags_are_not_written_as_project_keywords(tmp_path) -> None:
+    """
+    xcookie's ``tags`` (e.g. ``github``, ``purepy``, ``kitware``) are internal
+    scaffolding selectors, not user-facing project keywords. They must not
+    leak into ``[project.keywords]`` in the generated pyproject.toml.
+    """
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'src' / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-pkg',
+                    'description': 'Demo package',
+                    'requires-python': '>=3.10',
+                    'version': '1.2.3',
+                    'keywords': ['existing', 'domain-keywords'],
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'rel_mod_parent_dpath': 'src',
+                        'tags': ['github', 'erotemic', 'purepy'],
+                    }
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    pyproject_text = (applier.staging_dpath / 'pyproject.toml').read_text()
+    pyproject_data = toml.loads(pyproject_text)
+
+    keywords = pyproject_data['project'].get('keywords', [])
+    # Existing user-defined keywords must survive a regen.
+    assert 'existing' in keywords
+    assert 'domain-keywords' in keywords
+    # Scaffolding tags must not be turned into keywords.
+    for tag in ['github', 'erotemic', 'purepy', 'gitlab', 'kitware', 'binpy']:
+        assert tag not in keywords, (
+            f"xcookie tag {tag!r} leaked into project keywords"
+        )
+
+
+def _write_pyproject_with_extras(repodir, optional_dependencies):
+    pkgdir = repodir / 'src' / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-pkg',
+                    'description': 'Demo package',
+                    'requires-python': '>=3.11',
+                    'version': '1.2.3',
+                    'dependencies': ['package-a>=1.0'],
+                    'optional-dependencies': optional_dependencies,
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'rel_mod_parent_dpath': 'src',
+                        'tags': ['github', 'erotemic', 'purepy'],
+                        'min_python': '3.11',
+                    },
+                },
+            }
+        )
+    )
+
+
+def test_sdist_install_step_omits_empty_extras_brackets(tmp_path) -> None:
+    """
+    Regression test: when ``use_pyproject_requirements=True`` and the project
+    declares no extras at all, the generated GitHub Actions sdist job must
+    not emit ``pip install -e ".[]"`` (which is rejected by pip).
+    """
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    _write_pyproject_with_extras(repodir, optional_dependencies={})
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier._presetup()
+    text = applier.build_github_actions_tests()
+
+    assert '".[]"' not in text
+    assert '-e ".[]"' not in text
+
+
+def test_sdist_install_step_uses_tests_extra_when_available(tmp_path) -> None:
+    """
+    When the project's pyproject.toml declares a ``tests`` extra, the sdist
+    job's pre-install step should reference it so pytest is available before
+    the test steps run.
+    """
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    _write_pyproject_with_extras(
+        repodir,
+        optional_dependencies={
+            'tests': ['pytest>=8.0', 'coverage>=7.0'],
+            'optional': ['rich>=14'],
+        },
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier._presetup()
+    text = applier.build_github_actions_tests()
+
+    assert '-e ".[tests]"' in text
+    assert '".[]"' not in text
+
+
+def test_test_matrix_install_extras_are_filtered_to_existing(tmp_path) -> None:
+    """
+    The matrix-based test_wheels job should only reference extras that the
+    pyproject.toml actually declares — for a project with only ``tests``,
+    the install-extras values must not contain ``optional``.
+    """
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    _write_pyproject_with_extras(
+        repodir,
+        optional_dependencies={
+            'tests': ['pytest>=8.0'],
+        },
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier._presetup()
+    text = applier.build_github_actions_tests()
+
+    assert 'install-extras: tests' in text
+    assert 'install-extras: tests,optional' not in text
+    assert 'install-extras: optional' not in text
+    assert 'install-extras: ,' not in text

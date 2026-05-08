@@ -925,15 +925,23 @@ def build_and_test_sdist_job(self):
     build_parts = common_ci.make_build_sdist_parts(self, wheelhouse_dpath)
 
     if self.config['use_pyproject_requirements']:
-        extras = []
+        # Always include 'tests' so pytest is available in the sdist test
+        # steps below; layer on 'headless'/'gdal' only when the tags request
+        # them. Filter against the project's actual optional-dependencies so
+        # we never emit an invalid ``pip install -e ".[]"`` when none of the
+        # desired extras exist.
+        desired_extras = ['tests']
         if 'cv2' in self.tags:
-            extras.append('headless')
+            desired_extras.append('headless')
         if 'gdal' in self.tags:
-            extras.append('gdal')
-        extras_suffix = ",".join(extras)
+            desired_extras.append('gdal')
+        extras = common_ci.filter_pyproject_extras(self, desired_extras)
+        install_target = common_ci.format_pyproject_install_target(
+            extras, editable=True
+        )
         pip_reqs_install_parts = [
             f'{self.UPDATE_PIP}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} -e ".[{extras_suffix}]"',
+            f'{self.PIP_INSTALL_PREFER_BINARY} {install_target}',
         ]
     else:
         pip_reqs_install_parts = [
@@ -1638,6 +1646,18 @@ def test_wheels_job(self, needs=None):
             # Apply to specific variant
             install_extra_tags[variant_key] += extras_list
 
+    # Filter the requested extras against the project's actual
+    # optional-dependencies so we never reference an extra that does not
+    # exist in pyproject.toml. Only meaningful when use_pyproject_requirements
+    # is set; the requirements/*.txt path uses files keyed differently.
+    if self.config['use_pyproject_requirements']:
+        install_extra_tags = ub.udict(
+            {
+                k: common_ci.filter_pyproject_extras(self, v)
+                for k, v in install_extra_tags.items()
+            }
+        )
+
     install_extras = ub.udict(
         {k: ','.join(v) for k, v in install_extra_tags.items()}
     )
@@ -1719,7 +1739,22 @@ def test_wheels_job(self, needs=None):
     #                 'python-version': pyver, 'install-extras': extra,
     #                 **platkw, **special_loose_test_env})
 
-    assert not ub.find_duplicates(map(ub.hash_data, include))
+    # When use_pyproject_requirements filters extras down to a smaller set
+    # (or projects only declare a 'tests' extra), variants like full-strict
+    # and minimal-strict can collapse into identical matrix entries; drop
+    # exact duplicates here rather than failing the assert.
+    if self.config['use_pyproject_requirements']:
+        seen_hashes = set()
+        deduped = []
+        for item in include:
+            h = ub.hash_data(item)
+            if h in seen_hashes:
+                continue
+            seen_hashes.add(h)
+            deduped.append(item)
+        include = deduped
+    else:
+        assert not ub.find_duplicates(map(ub.hash_data, include))
 
     # Do postprocessing on include items, filtering out ones that aren't
     # supported.
