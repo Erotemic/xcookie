@@ -177,7 +177,7 @@ def build_setup(self):
     setupkw_parts['url'] = f'{self.config["url"]!r}'
     setupkw_parts['description'] = f'{self.config["description"]!r}'
     setupkw_parts['long_description'] = 'parse_description()'
-    setupkw_parts['long_description_content_type'] = "'text/x-rst'"
+    setupkw_parts['long_description_content_type'] = 'readme_content_type()'
     setupkw_parts['license'] = f'{self.config["license"]!r}'
     setupkw_parts['packages'] = (
         f'find_packages({self.config["rel_mod_parent_dpath"]!r})'

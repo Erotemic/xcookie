@@ -1,5 +1,5 @@
 import json
-import re
+import tempfile
 
 import toml
 import ubelt as ub
@@ -11,79 +11,6 @@ def _autodictify(value):
     if isinstance(value, list):
         return [_autodictify(v) for v in value]
     return value
-
-
-def _format_string_array(values, indent=''):
-    if not values:
-        return '[]'
-    if len(values) == 1:
-        return f'[{json.dumps(values[0])}]'
-    inner_indent = indent + '    '
-    lines = ['[']
-    for item in values:
-        lines.append(f'{inner_indent}{json.dumps(item)},')
-    lines.append(f'{indent}]')
-    return '\n'.join(lines)
-
-
-def _format_selected_array_assignments(text, pyproj_config):
-    """
-    Reformat selected TOML array assignments to keep dependency diffs readable.
-    """
-
-    section_name = None
-    formatted_lines = []
-    lines = text.splitlines()
-    for line in lines:
-        section_match = re.match(r'^\[(.+)\]$', line.strip())
-        if section_match:
-            section_name = section_match.group(1)
-            formatted_lines.append(line)
-            continue
-
-        if section_name in {'build-system', 'project'}:
-            key = None
-            values = None
-            if section_name == 'build-system':
-                key = 'requires'
-                values = pyproj_config.get('build-system', {}).get('requires')
-            elif section_name == 'project':
-                if line.lstrip().startswith('dynamic = ['):
-                    key = 'dynamic'
-                    values = pyproj_config.get('project', {}).get('dynamic')
-                elif line.lstrip().startswith('dependencies = ['):
-                    key = 'dependencies'
-                    values = pyproj_config.get('project', {}).get(
-                        'dependencies'
-                    )
-
-            if key and isinstance(values, list):
-                indent = line[: len(line) - len(line.lstrip())]
-                pattern = rf'^{re.escape(indent)}{re.escape(key)}\s*=\s*\[(.*)\]\s*$'
-                if re.match(pattern, line):
-                    formatted_lines.append(
-                        f'{indent}{key} = {_format_string_array(values, indent=indent)}'
-                    )
-                    continue
-
-        if section_name == 'project.optional-dependencies':
-            opt_match = re.match(r'^(\s*)([A-Za-z0-9_.-]+)\s*=\s*\[(.*)\]\s*$', line)
-            if opt_match:
-                indent, key = opt_match.group(1), opt_match.group(2)
-                values = (
-                    pyproj_config.get('project', {})
-                    .get('optional-dependencies', {})
-                    .get(key)
-                )
-                if isinstance(values, list):
-                    formatted_lines.append(
-                        f'{indent}{key} = {_format_string_array(values, indent=indent)}'
-                    )
-                    continue
-
-        formatted_lines.append(line)
-
-    return '\n'.join(formatted_lines)
 
 
 def build_pyproject(self):
@@ -267,18 +194,22 @@ def build_pyproject(self):
         config_to_save = ub.dict_subset(self.config, options_to_save)
         pyproj_config['tool']['xcookie'].update(config_to_save)
 
+    use_pyproject_requirements = self.config.get('use_pyproject_requirements')
+
     if not use_setup_py:
         project_block = pyproj_config['project']
         project_block['name'] = self.config['pkg_name']
         project_block['description'] = self.config['description']
         project_block['requires-python'] = f'>={self.config["min_python"]}'
         dynamic_entries = list(project_block.get('dynamic', []))
-        dynamic_entries.extend(
-            ['version', 'dependencies', 'optional-dependencies']
-        )
+        dynamic_entries.append('version')
+        if not use_pyproject_requirements:
+            dynamic_entries.extend(['dependencies', 'optional-dependencies'])
         project_block['dynamic'] = list(ub.oset(dynamic_entries))
-        for key in ['version', 'dependencies', 'optional-dependencies']:
-            project_block.pop(key, None)
+        project_block.pop('version', None)
+        if not use_pyproject_requirements:
+            for key in ['dependencies', 'optional-dependencies']:
+                project_block.pop(key, None)
 
         authors = self.config['author']
         author_emails = self.config['author_email']
@@ -332,24 +263,26 @@ def build_pyproject(self):
         setuptools_dynamic['version'] = {
             'attr': f'{self.config["mod_name"]}.__version__'
         }
+        readme_fpath = self._readme_fpath()
         setuptools_dynamic['readme'] = {
-            'file': ['README.rst'],
-            'content-type': 'text/x-rst',
+            'file': [readme_fpath.name],
+            'content-type': self._readme_content_type(),
         }
-        setuptools_dynamic['dependencies'] = {
-            'file': ['requirements/runtime.txt']
-        }
+        if not use_pyproject_requirements:
+            setuptools_dynamic['dependencies'] = {
+                'file': ['requirements/runtime.txt']
+            }
 
-        extras = ['tests', 'optional', 'docs']
-        if 'cv2' in self.tags:
-            extras.extend(['headless', 'graphics'])
-        if 'postgresql' in self.tags:
-            extras.append('postgresql')
+            extras = ['tests', 'optional', 'docs']
+            if 'cv2' in self.tags:
+                extras.extend(['headless', 'graphics'])
+            if 'postgresql' in self.tags:
+                extras.append('postgresql')
 
-        optional_dynamic = {}
-        for name in extras:
-            optional_dynamic[name] = {'file': [f'requirements/{name}.txt']}
-        setuptools_dynamic['optional-dependencies'] = optional_dynamic
+            optional_dynamic = {}
+            for name in extras:
+                optional_dynamic[name] = {'file': [f'requirements/{name}.txt']}
+            setuptools_dynamic['optional-dependencies'] = optional_dynamic
 
         entry_points = pyproject_settings.get('entry_points', {})
         console_scripts = entry_points.get('console_scripts', [])
@@ -386,5 +319,39 @@ def build_pyproject(self):
         ...
 
     text = toml.dumps(pyproj_config)
-    text = _format_selected_array_assignments(text, pyproj_config)
+    try:
+        from pyproject_fmt import run as pyproject_fmt_run
+    except Exception:
+        return text
+
+    with tempfile.NamedTemporaryFile(
+        mode='w+', suffix='pyproject.toml', delete=True
+    ) as file:
+        file.write(text)
+        file.flush()
+        pyproject_fmt_run(
+            [
+                '--no-generate-python-version-classifiers',
+                '--keep-full-version',
+                '--no-print-diff',
+                file.name,
+            ]
+        )
+        file.seek(0)
+        text = file.read()
+
+    project_name = pyproj_config.get('project', {}).get('name')
+    if project_name:
+        section_name = None
+        fixed_lines = []
+        for line in text.splitlines():
+            if line.startswith('[') and line.endswith(']'):
+                section_name = line.strip()[1:-1]
+                fixed_lines.append(line)
+                continue
+            if section_name == 'project' and line.lstrip().startswith('name = '):
+                indent = line[: len(line) - len(line.lstrip())]
+                line = f'{indent}name = {json.dumps(project_name)}'
+            fixed_lines.append(line)
+        text = '\n'.join(fixed_lines)
     return text

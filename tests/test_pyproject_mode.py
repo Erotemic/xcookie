@@ -69,12 +69,19 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
                     'description': 'Demo package',
                     'requires-python': '>=3.10',
                     'dynamic': ['version'],
+                    'dependencies': [
+                        'package-a>=1.0',
+                        'package-b>=2.0',
+                    ],
                     'authors': [
                         {
                             'name': 'Existing Author',
                             'email': 'author@example.com',
                         }
                     ],
+                    'optional-dependencies': {
+                        'tests': ['pytest>=8.0', 'coverage>=7.0'],
+                    },
                 },
                 'tool': {
                     'xcookie': {
@@ -106,6 +113,8 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
         rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
     )
 
     assert config['author'] == 'Existing Author'
@@ -119,13 +128,164 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
     pyproject_data = toml.loads(pyproject_text)
 
     assert pyproject_data['project']['authors'][0]['name'] == 'Existing Author'
-    assert 'version' in pyproject_data['project']['dynamic']
+    assert pyproject_data['project']['dynamic'] == ['version']
+    assert pyproject_data['project']['dependencies'] == [
+        'package-a>=1.0',
+        'package-b>=2.0',
+    ]
+    assert sorted(pyproject_data['project']['optional-dependencies']['tests']) == [
+        'coverage>=7.0',
+        'pytest>=8.0',
+    ]
+    # Don't assert a specific TOML formatting style here. ``pyproject_fmt`` is
+    # an optional dependency; when it's missing, ``build_pyproject`` falls
+    # back to ``toml.dumps`` which emits arrays inline. The structural
+    # assertions above already verify the data is preserved.
+    assert 'package-a>=1.0' in pyproject_text
     assert pyproject_data['tool']['ruff']['line-length'] == 123
     assert pyproject_data['tool']['setuptools']['dynamic']['version']['attr'] == (
         'demo_mod.__version__'
     )
+    assert 'dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
+    assert 'optional-dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
     assert pyproject_data['tool']['xcookie']['author'] == 'Existing Author'
     assert pyproject_data['tool']['xcookie']['version'] == '1.2.3'
+
+
+def test_pyproject_requirements_mode_preserves_project_dependencies(tmp_path) -> None:
+    """
+    When pyproject dependencies are authoritative, xcookie should not emit
+    setuptools dynamic dependency files or requirements.txt scaffolding.
+    """
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'src' / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-pkg',
+                    'description': 'Demo package',
+                    'requires-python': '>=3.10',
+                    'version': '1.2.3',
+                    'dependencies': ['package-a>=1.0', 'package-b>=2.0'],
+                    'optional-dependencies': {
+                        'tests': ['pytest>=8.0', 'coverage>=7.0'],
+                    },
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'rel_mod_parent_dpath': 'src',
+                    },
+                    'ruff': {'line-length': 123},
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    staged_fnames = {info['fname'] for info in applier.staging_infos}
+    assert 'requirements/runtime.txt' not in staged_fnames
+    assert 'requirements/tests.txt' not in staged_fnames
+    assert 'requirements/optional.txt' not in staged_fnames
+    assert 'requirements/docs.txt' not in staged_fnames
+    assert 'requirements.txt' not in staged_fnames
+
+    pyproject_text = (applier.staging_dpath / 'pyproject.toml').read_text()
+    pyproject_data = toml.loads(pyproject_text)
+
+    project_block = pyproject_data['project']
+    assert project_block['dependencies'] == [
+        'package-a>=1.0',
+        'package-b>=2.0',
+    ]
+    assert sorted(project_block['optional-dependencies']['tests']) == [
+        'coverage>=7.0',
+        'pytest>=8.0',
+    ]
+    assert project_block['dynamic'] == ['version']
+    assert 'dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
+    assert 'optional-dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
+
+
+def test_markdown_readme_is_preserved_and_reflected_in_metadata(tmp_path) -> None:
+    """
+    If a repo already uses README.md, xcookie should leave it alone and point
+    packaging metadata at Markdown instead of reStructuredText.
+    """
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'src' / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (repodir / 'README.md').write_text('# Demo Package\n\nSome markdown.\n')
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-pkg',
+                    'description': 'Demo package',
+                    'requires-python': '>=3.10',
+                    'version': '1.2.3',
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'rel_mod_parent_dpath': 'src',
+                    }
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    staged_fnames = {info['fname'] for info in applier.staging_infos}
+    assert 'README.rst' not in staged_fnames
+    assert (repodir / 'README.md').read_text() == '# Demo Package\n\nSome markdown.\n'
+
+    pyproject_text = (applier.staging_dpath / 'pyproject.toml').read_text()
+    pyproject_data = toml.loads(pyproject_text)
+    assert pyproject_data['tool']['setuptools']['dynamic']['readme']['file'] == [
+        'README.md'
+    ]
+    assert pyproject_data['tool']['setuptools']['dynamic']['readme'][
+        'content-type'
+    ] == 'text/markdown'
+
+    setup_text = applier.build_setup()
+    assert 'get_readme_fpath()' in setup_text
+    assert 'text/markdown' in setup_text
 
 
 def test_xcookie_tags_are_not_written_as_project_keywords(tmp_path) -> None:

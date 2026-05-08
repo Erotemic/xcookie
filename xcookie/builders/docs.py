@@ -614,6 +614,9 @@ def build_docs_conf(self):
 def build_docs_requirements(self):
     import ubelt as ub
 
+    if self.config['use_pyproject_requirements']:
+        return None
+
     docs_requierments = ub.codeblock(
         """
         sphinx>=5.0.1

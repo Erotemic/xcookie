@@ -870,6 +870,23 @@ class TemplateApplier:
         # the files have underscores replaced in the prefix
         return self.config['pkg_name'].replace('-', '_')
 
+    def _readme_fpath(self) -> ub.Path:
+        """
+        Prefer an existing README.md over README.rst, otherwise default to
+        README.rst for newly generated repos.
+        """
+        for rel in ['README.md', 'README.rst']:
+            fpath = self.repodir / rel
+            if fpath.exists():
+                return fpath
+        return self.repodir / 'README.rst'
+
+    def _readme_content_type(self) -> str:
+        readme_fpath = self._readme_fpath()
+        if readme_fpath.suffix.lower() == '.md':
+            return 'text/markdown'
+        return 'text/x-rst'
+
     def _build_template_registry(self):
         """
         Take stock of the files in the template repo and ensure they all have
@@ -1001,6 +1018,7 @@ class TemplateApplier:
                 'template': 0,
                 'overwrite': 1,
                 'fname': 'requirements.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_requirements_txt',
             },
             {
@@ -1008,6 +1026,7 @@ class TemplateApplier:
                 'overwrite': 1,
                 'fname': 'requirements/graphics.txt',
                 'tags': 'cv2',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_cv2_graphics_requirements_txt',
             },
             {
@@ -1015,6 +1034,7 @@ class TemplateApplier:
                 'overwrite': 1,
                 'fname': 'requirements/headless.txt',
                 'tags': 'cv2',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_cv2_headless_requirements_txt',
             },
             {
@@ -1022,30 +1042,35 @@ class TemplateApplier:
                 'overwrite': 1,
                 'fname': 'requirements/gdal.txt',
                 'tags': 'gdal',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_gdal_requirements_txt',
             },
             {
                 'template': 0,
                 'overwrite': 0,
                 'fname': 'requirements/optional.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_optional_requirements',
             },
             {
                 'template': 0,
                 'overwrite': 0,
                 'fname': 'requirements/runtime.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_runtime_requirements',
             },
             {
                 'template': 0,
                 'overwrite': 0,
                 'fname': 'requirements/tests.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_tests_requirements',
             },
             {
                 'template': 0,
                 'overwrite': 0,
                 'fname': 'requirements/docs.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_docs_requirements',
             },
             {
@@ -1841,6 +1866,8 @@ class TemplateApplier:
         return stats, tasks
 
     def build_requirements_txt(self):
+        if self.config['use_pyproject_requirements']:
+            return None
         # existing = (self.repodir / 'requirements').ls()
         candidate_all_requirements = [
             'requirements/runtime.txt',
@@ -2157,6 +2184,8 @@ class TemplateApplier:
 
     # TODO: generate better stub requirements based on common packages
     def build_optional_requirements(self):
+        if self.config['use_pyproject_requirements']:
+            return None
         text = ub.codeblock(
             """
             """
@@ -2164,6 +2193,8 @@ class TemplateApplier:
         return text
 
     def build_runtime_requirements(self):
+        if self.config['use_pyproject_requirements']:
+            return None
         text = ub.codeblock(
             """
             """
@@ -2171,6 +2202,8 @@ class TemplateApplier:
         return text
 
     def build_tests_requirements(self):
+        if self.config['use_pyproject_requirements']:
+            return None
         text = ub.codeblock(
             """
             xdoctest >= 1.1.5

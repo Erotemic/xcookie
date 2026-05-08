@@ -55,18 +55,21 @@ def build_readthedocs(self):
 
     data = default_data.copy()
 
-    if 'cv2' in self.tags:
-        data['python']['install'].insert(
-            0, {'requirements': 'requirements/headless.txt'}
-        )
-    # else:
-    #     if self.config.render_doc_images:
-    #         data['python']['install'].insert(0, {'requirements': 'requirements/special-headless.txt'})
+    if self.config['use_pyproject_requirements']:
+        data['python']['install'][0] = {'method': 'pip', 'path': '.', 'extra_requirements': ['docs']}
+    else:
+        if 'cv2' in self.tags:
+            data['python']['install'].insert(
+                0, {'requirements': 'requirements/headless.txt'}
+            )
+        # else:
+        #     if self.config.render_doc_images:
+        #         data['python']['install'].insert(0, {'requirements': 'requirements/special-headless.txt'})
 
-    if 'gdal' in self.tags:
-        data['python']['install'].insert(
-            0, {'requirements': 'requirements/gdal.txt'}
-        )
+        if 'gdal' in self.tags:
+            data['python']['install'].insert(
+                0, {'requirements': 'requirements/gdal.txt'}
+            )
 
     # import ruamel
     # text = ruamel.yaml.round_trip_dump(data, Dumper=ruamel.yaml.RoundTripDumper)
