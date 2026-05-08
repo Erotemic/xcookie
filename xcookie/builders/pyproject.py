@@ -1,3 +1,6 @@
+import json
+import re
+
 import toml
 import ubelt as ub
 
@@ -8,6 +11,79 @@ def _autodictify(value):
     if isinstance(value, list):
         return [_autodictify(v) for v in value]
     return value
+
+
+def _format_string_array(values, indent=''):
+    if not values:
+        return '[]'
+    if len(values) == 1:
+        return f'[{json.dumps(values[0])}]'
+    inner_indent = indent + '    '
+    lines = ['[']
+    for item in values:
+        lines.append(f'{inner_indent}{json.dumps(item)},')
+    lines.append(f'{indent}]')
+    return '\n'.join(lines)
+
+
+def _format_selected_array_assignments(text, pyproj_config):
+    """
+    Reformat selected TOML array assignments to keep dependency diffs readable.
+    """
+
+    section_name = None
+    formatted_lines = []
+    lines = text.splitlines()
+    for line in lines:
+        section_match = re.match(r'^\[(.+)\]$', line.strip())
+        if section_match:
+            section_name = section_match.group(1)
+            formatted_lines.append(line)
+            continue
+
+        if section_name in {'build-system', 'project'}:
+            key = None
+            values = None
+            if section_name == 'build-system':
+                key = 'requires'
+                values = pyproj_config.get('build-system', {}).get('requires')
+            elif section_name == 'project':
+                if line.lstrip().startswith('dynamic = ['):
+                    key = 'dynamic'
+                    values = pyproj_config.get('project', {}).get('dynamic')
+                elif line.lstrip().startswith('dependencies = ['):
+                    key = 'dependencies'
+                    values = pyproj_config.get('project', {}).get(
+                        'dependencies'
+                    )
+
+            if key and isinstance(values, list):
+                indent = line[: len(line) - len(line.lstrip())]
+                pattern = rf'^{re.escape(indent)}{re.escape(key)}\s*=\s*\[(.*)\]\s*$'
+                if re.match(pattern, line):
+                    formatted_lines.append(
+                        f'{indent}{key} = {_format_string_array(values, indent=indent)}'
+                    )
+                    continue
+
+        if section_name == 'project.optional-dependencies':
+            opt_match = re.match(r'^(\s*)([A-Za-z0-9_.-]+)\s*=\s*\[(.*)\]\s*$', line)
+            if opt_match:
+                indent, key = opt_match.group(1), opt_match.group(2)
+                values = (
+                    pyproj_config.get('project', {})
+                    .get('optional-dependencies', {})
+                    .get(key)
+                )
+                if isinstance(values, list):
+                    formatted_lines.append(
+                        f'{indent}{key} = {_format_string_array(values, indent=indent)}'
+                    )
+                    continue
+
+        formatted_lines.append(line)
+
+    return '\n'.join(formatted_lines)
 
 
 def build_pyproject(self):
@@ -314,4 +390,5 @@ def build_pyproject(self):
         ...
 
     text = toml.dumps(pyproj_config)
+    text = _format_selected_array_assignments(text, pyproj_config)
     return text

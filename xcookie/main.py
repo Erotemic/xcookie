@@ -375,7 +375,7 @@ class XCookieConfig(scfg.DataConfig):
             False, help=ub.paragraph('experimental new style version testing')
         ),
         'use_setup_py': scfg.Value(
-            True,
+            False,
             help=ub.paragraph(
                 """
             If False, do not generate setup.py and instead emit a fully-specified

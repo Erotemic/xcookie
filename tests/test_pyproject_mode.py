@@ -69,12 +69,19 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
                     'description': 'Demo package',
                     'requires-python': '>=3.10',
                     'dynamic': ['version'],
+                    'dependencies': [
+                        'package-a>=1.0',
+                        'package-b>=2.0',
+                    ],
                     'authors': [
                         {
                             'name': 'Existing Author',
                             'email': 'author@example.com',
                         }
                     ],
+                    'optional-dependencies': {
+                        'tests': ['pytest>=8.0', 'coverage>=7.0'],
+                    },
                 },
                 'tool': {
                     'xcookie': {
@@ -120,6 +127,9 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
 
     assert pyproject_data['project']['authors'][0]['name'] == 'Existing Author'
     assert pyproject_data['project']['dynamic'] == ['version']
+    assert 'dependencies = [\n' in pyproject_text
+    assert 'package-a>=1.0' in pyproject_text
+    assert 'tests = [\n' in pyproject_text
     assert pyproject_data['tool']['ruff']['line-length'] == 123
     assert pyproject_data['tool']['setuptools']['dynamic']['version']['attr'] == (
         'demo_mod.__version__'
