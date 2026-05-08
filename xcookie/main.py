@@ -70,6 +70,7 @@ ExampleUsage:
 """
 
 import os
+import re
 import shutil
 import tempfile
 import warnings
@@ -248,7 +249,7 @@ class XCookieConfig(scfg.DataConfig):
         'dev_status': scfg.Value('planning'),
         'enable_gpg': scfg.Value(True),
         'ci_gpg_secret_transport': scfg.Value(
-            'encrypted_repo',
+            'direct_ci',
             help=ub.paragraph(
                 """
                 Controls how GPG signing key material is transported to CI.
@@ -277,7 +278,7 @@ class XCookieConfig(scfg.DataConfig):
             help='variable of the test twine password in your secrets',
         ),
         'ci_pypi_trusted_publishing': scfg.Value(
-            False,
+            True,
             help='if True, github deploy jobs use PyPI trusted publishing instead of twine password secrets',
         ),
         'regen': scfg.Value(
@@ -529,6 +530,107 @@ class XCookieConfig(scfg.DataConfig):
             # we need from other more standard pyproject settings.
             return settings
 
+    def _infer_project_authors(self, disk_config):
+        project_block = disk_config.get('project', {})
+        authors = project_block.get('authors', [])
+        if not isinstance(authors, (list, tuple)):
+            return {}
+
+        author_names = []
+        author_emails = []
+        for entry in authors:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get('name')
+            email = entry.get('email')
+            if name:
+                author_names.append(name)
+            if email:
+                author_emails.append(email)
+
+        config = {}
+        if author_names:
+            config['author'] = (
+                author_names[0] if len(author_names) == 1 else author_names
+            )
+        if author_emails:
+            config['author_email'] = (
+                author_emails[0]
+                if len(author_emails) == 1
+                else author_emails
+            )
+        return config
+
+    def _infer_version_from_file(self, fpath):
+        try:
+            text = ub.Path(fpath).read_text()
+        except Exception:
+            return None
+
+        match = re.search(
+            r"""(?m)^__version__\s*=\s*(['"])(?P<ver>[^'"]+)\1\s*$""", text
+        )
+        if match:
+            return match.group('ver')
+        return None
+
+    def _infer_version_from_pyproject(self, disk_config):
+        project_block = disk_config.get('project', {})
+        version = project_block.get('version')
+        if version:
+            return version
+
+        tool_block = disk_config.get('tool', {})
+        setuptools_config = tool_block.get('setuptools', {})
+        setuptools_dynamic = setuptools_config.get('dynamic', {})
+        version_spec = setuptools_dynamic.get('version', {})
+        if isinstance(version_spec, dict):
+            version_file = version_spec.get('file')
+            if isinstance(version_file, str):
+                version_file = [version_file]
+            if isinstance(version_file, (list, tuple)):
+                for rel_fpath in version_file:
+                    fpath = self.repodir / rel_fpath
+                    version = self._infer_version_from_file(fpath)
+                    if version:
+                        return version
+
+            version_attr = version_spec.get('attr')
+            if isinstance(version_attr, str):
+                module_name = version_attr.rsplit('.', 1)[0]
+                candidate_rel_paths = []
+
+                xcookie_config = tool_block.get('xcookie', {})
+                rel_mod_parent_dpath = xcookie_config.get(
+                    'rel_mod_parent_dpath', '.'
+                )
+                candidate_roots = [ub.Path(rel_mod_parent_dpath)]
+
+                setuptools_packages = setuptools_config.get('packages', {})
+                if isinstance(setuptools_packages, dict):
+                    find_config = setuptools_packages.get('find', {})
+                    if isinstance(find_config, dict):
+                        for where in find_config.get('where', []) or []:
+                            candidate_roots.append(ub.Path(where))
+
+                candidate_roots.append(ub.Path('.'))
+                rel_module_dpath = ub.Path(*module_name.split('.'))
+                for root in candidate_roots:
+                    candidate_rel_paths.extend(
+                        [
+                            root / rel_module_dpath / '__init__.py',
+                            root / f'{rel_module_dpath}.py',
+                        ]
+                    )
+
+                for rel_fpath in ub.oset(candidate_rel_paths):
+                    fpath = self.repodir / rel_fpath
+                    version = self._infer_version_from_file(fpath)
+                    if version:
+                        return version
+
+        return None
+
     def _infer_xcookie_settings_from_pyproject(self, disk_config):
         """
         Helper to populate the xcookie main settings from more standard
@@ -538,6 +640,10 @@ class XCookieConfig(scfg.DataConfig):
         project_block = disk_config.get('project', {})
         config['pkg_name'] = project_block.get('name')
         config['description'] = project_block.get('description')
+        config.update(self._infer_project_authors(disk_config))
+        version = self._infer_version_from_pyproject(disk_config)
+        if version:
+            config['version'] = version
 
         setuptools_config = disk_config.get('tool', {}).get('setuptools', {})
         setuptools_packages = setuptools_config.get('packages', [])

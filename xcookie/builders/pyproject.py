@@ -2,30 +2,46 @@ import toml
 import ubelt as ub
 
 
+def _autodictify(value):
+    if isinstance(value, dict) and not isinstance(value, ub.AutoDict):
+        return ub.AutoDict({k: _autodictify(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return [_autodictify(v) for v in value]
+    return value
+
+
 def build_pyproject(self):
     """
     Returns:
         str: templated code
     """
-    # data = toml.loads((self.template_dpath / 'pyproject.toml').read_text())
-    # print('data = {}'.format(ub.urepr(data, nl=5)))
-    pyproj_config = ub.AutoDict()
+    # Start from the existing pyproject.toml when available so unrelated
+    # sections survive a regen.
+    pyproj_config = _autodictify(self.config._load_pyproject_config() or {})
     use_setup_py = self.config.get('use_setup_py', True)
     pyproject_settings = self.config._load_xcookie_pyproject_settings()
     if pyproject_settings is None:
         pyproject_settings = {}
     # {'tool': {}}
     if 'binpy' in self.config['tags']:
-        pyproj_config['build-system']['requires'] = [
-            'setuptools>=41.0.1',
-            # setuptools_scm[toml]
-            # "wheel",
-            'scikit-build>=0.11.1',
-            'numpy',
-            'ninja>=1.10.2',
-            'cmake>=3.21.2',
-            'cython>=0.29.24',
-        ]
+        build_system_requires = list(
+            pyproj_config['build-system'].get('requires') or []
+        )
+        build_system_requires.extend(
+            [
+                'setuptools>=41.0.1',
+                # setuptools_scm[toml]
+                # "wheel",
+                'scikit-build>=0.11.1',
+                'numpy',
+                'ninja>=1.10.2',
+                'cmake>=3.21.2',
+                'cython>=0.29.24',
+            ]
+        )
+        pyproj_config['build-system']['requires'] = list(
+            ub.oset(build_system_requires)
+        )
 
         supported_cp_version = []
         for pyver in self.config['supported_python_versions']:
@@ -78,12 +94,22 @@ def build_pyproject(self):
                 cmd = ' && '.join(req_commands[plat])
                 cibw[plat]['before-all'] = cmd
     else:
-        pyproj_config['build-system']['requires'] = [
-            'setuptools>=41.0.1',
-            # setuptools_scm[toml]
-            # "wheel>=0.37.1",
-        ]
-        pyproj_config['build-system']['build-backend'] = 'setuptools.build_meta'
+        build_system_requires = list(
+            pyproj_config['build-system'].get('requires') or []
+        )
+        build_system_requires.extend(
+            [
+                'setuptools>=41.0.1',
+                # setuptools_scm[toml]
+                # "wheel>=0.37.1",
+            ]
+        )
+        pyproj_config['build-system']['requires'] = list(
+            ub.oset(build_system_requires)
+        )
+        pyproj_config['build-system'].setdefault(
+            'build-backend', 'setuptools.build_meta'
+        )
 
     WITH_PYTEST_INI = 1
     if WITH_PYTEST_INI:
@@ -170,11 +196,13 @@ def build_pyproject(self):
         project_block['name'] = self.config['pkg_name']
         project_block['description'] = self.config['description']
         project_block['requires-python'] = f'>={self.config["min_python"]}'
-        project_block['dynamic'] = [
-            'version',
-            'dependencies',
-            'optional-dependencies',
-        ]
+        dynamic_entries = list(project_block.get('dynamic', []))
+        dynamic_entries.extend(
+            ['version', 'dependencies', 'optional-dependencies']
+        )
+        project_block['dynamic'] = list(ub.oset(dynamic_entries))
+        for key in ['version', 'dependencies', 'optional-dependencies']:
+            project_block.pop(key, None)
 
         authors = self.config['author']
         author_emails = self.config['author_email']
@@ -198,7 +226,9 @@ def build_pyproject(self):
         if self.config['license']:
             project_block['license'] = {'text': self.config['license']}
         if self.config['url']:
-            project_block['urls'] = {'Homepage': str(self.config['url'])}
+            urls = project_block.get('urls', {})
+            urls['Homepage'] = str(self.config['url'])
+            project_block['urls'] = urls
         if self.config['tags']:
             project_block['keywords'] = sorted(
                 {tag for tag in self.config['tags'] if tag}
