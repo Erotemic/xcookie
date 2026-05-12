@@ -108,11 +108,6 @@ https://github.com/pyutils/line_profiler/settings/secrets/actions
 https://app.circleci.com/settings/project/github/pyutils/line_profiler/environment-variables?return-to=https%3A%2F%2Fapp.circleci.com%2Fpipelines%2Fgithub%2Fpyutils%2Fline_profiler
 '
 
-# Defense against the harness or a debugging session enabling bash xtrace.
-# Every interesting line in this script touches a secret somewhere, so any
-# `set -x` trace is a potential plaintext disclosure. Use the `_log` helper
-# below for progress visibility instead of relying on `set -x`.
-set +x
 
 _log(){
     # Print a tagged progress line. Goes to stderr so it can be filtered
@@ -196,17 +191,17 @@ resolve_secret_value_from_varname_ptr(){
 }
 
 upload_one_github_secret(){
-    set +x  # never trace secret-handling logic
-    # Upload a secret to GitHub via `gh secret set --body-file -`. Piping the
-    # value via stdin (rather than passing it as `-b<value>` on the command
-    # line) keeps the secret out of `ps` and `/proc/<pid>/cmdline`.
+    # Upload a secret to GitHub. `gh secret set` reads the value from stdin
+    # when no --body flag is given, which keeps the secret off argv (out of
+    # `ps` and `/proc/<pid>/cmdline`) and works across gh CLI versions —
+    # `--body-file` only exists on newer releases.
     local secret_name="$1"
     local secret_value="$2"
     local environment_name="${3:-}"
     if [[ "$environment_name" == "" ]]; then
-        printf '%s' "$secret_value" | gh secret set "$secret_name" --body-file -
+        printf '%s' "$secret_value" | gh secret set "$secret_name"
     else
-        printf '%s' "$secret_value" | gh secret set "$secret_name" --env "$environment_name" --body-file -
+        printf '%s' "$secret_value" | gh secret set "$secret_name" --env "$environment_name"
     fi
 }
 
@@ -255,9 +250,7 @@ setup_github_release_environments(){
 }
 
 upload_github_secrets(){
-    set +x  # never trace secret-handling logic
     local mode="${1:-legacy}"
-    load_secrets
     unset GITHUB_TOKEN
     #printf "%s" "$GITHUB_TOKEN" | gh auth login --hostname Github.com --with-token
     if ! gh auth status ; then
@@ -303,9 +296,7 @@ upload_github_secrets(){
             upload_one_github_secret "TEST_TWINE_PASSWORD" "$secret_value" "$testpypi_env"
         fi
     else
-        # Legacy mode: all secrets repo-level, CI_SECRET included. Wrap the
-        # entire block so usernames (which may be tokens, e.g. `__token__`)
-        # never appear in xtrace either.
+        # Legacy mode: all secrets repo-level, CI_SECRET included.
         secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TWINE_USERNAME TWINE_USERNAME) && upload_one_github_secret "TWINE_USERNAME" "$secret_value"
         secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_TEST_TWINE_USERNAME TEST_TWINE_USERNAME) && upload_one_github_secret "TEST_TWINE_USERNAME" "$secret_value"
         secret_value=$(resolve_secret_value_from_varname_ptr VARNAME_CI_SECRET CI_SECRET) && upload_one_github_secret "CI_SECRET" "$secret_value"
@@ -320,7 +311,6 @@ _gitlab_check_auth(){
     # any upload work runs. Surfaces a clear, actionable message when the
     # token is missing, revoked, expired, or pointed at the wrong instance.
     # Assumes PRIVATE_GITLAB_TOKEN and HOST are in scope.
-    set +x  # token in --header would trace otherwise
     local TMP_AUTH http_code username
     TMP_AUTH=$(mktemp -t gitlab-auth-XXXXXXXXXX)
     http_code=$(curl --silent --output "$TMP_AUTH" --write-out '%{http_code}' \
@@ -328,7 +318,7 @@ _gitlab_check_auth(){
         "$HOST/api/v4/user")
     if [[ "$http_code" != "200" ]]; then
         echo "ERROR: GitLab authentication failed against $HOST (HTTP $http_code)" >&2
-        echo "       The token returned by git_token_for is missing/expired/revoked," >&2
+        echo "       The PRIVATE_GITLAB_TOKEN env var is invalid, expired, revoked," >&2
         echo "       lacks 'api' scope, or belongs to a different GitLab instance." >&2
         echo "       Create a new personal access token with 'api' scope at:" >&2
         echo "         $HOST/-/user_settings/personal_access_tokens" >&2
@@ -344,9 +334,8 @@ _gitlab_check_auth(){
 _secret_fingerprint(){
     # Compute a stable 12-hex-char SHA-256 prefix of a secret value so we can
     # compare local vs. remote values in logs without revealing them.
-    # Reads the secret from stdin to avoid putting it on argv (which `ps` and
-    # `set -x` would otherwise expose).
-    # Empty input prints "(empty)".
+    # Reads the secret from stdin to avoid putting it on argv (where `ps`
+    # could observe it). Empty input prints "(empty)".
     local digest
     digest=$(sha256sum | cut -c1-12)
     # SHA-256 of the empty string starts with e3b0c44298fc — treat as empty.
@@ -395,7 +384,6 @@ _gitlab_upsert_var(){
     # appears on argv — `ps` cannot see it. <api_base_url> is e.g.
     # "$HOST/api/v4/projects/$PID/variables". Reads PRIVATE_GITLAB_TOKEN
     # from the caller's scope.
-    set +x  # belt-and-suspenders against an externally enabled xtrace
     local base_url="$1" key="$2"
     local value http_code rc
     value=$(cat)
@@ -432,14 +420,12 @@ _gitlab_upsert_var(){
 
 
 upload_gitlab_group_secrets(){
-    set +x  # never trace secret-handling logic
     __doc__="
     Upsert each configured secret as a protected, masked group-level CI/CD
     variable. Secret values are never echoed: we only print 12-hex-char
     SHA-256 fingerprints so local/remote drift is observable without
     disclosing the values themselves.
     "
-    load_secrets
 
     local HOST PROJECT_PATH GROUP_NAME
     { read -r HOST; read -r PROJECT_PATH; read -r GROUP_NAME; } < <(_gitlab_remote_info) || return 1
@@ -448,10 +434,12 @@ upload_gitlab_group_secrets(){
     * HOST = $HOST
     "
 
-    local PRIVATE_GITLAB_TOKEN
-    PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
-    if [[ -z "$PRIVATE_GITLAB_TOKEN" || "$PRIVATE_GITLAB_TOKEN" == "ERROR" ]]; then
-        echo "Failed to load authentication key for $HOST"
+    local PRIVATE_GITLAB_TOKEN="${PRIVATE_GITLAB_TOKEN:-}"
+    if [[ -z "$PRIVATE_GITLAB_TOKEN" ]]; then
+        echo "ERROR: PRIVATE_GITLAB_TOKEN is not set in the environment." >&2
+        echo "       Export a GitLab personal access token with 'api' scope" >&2
+        echo "       before running rotate-secrets, e.g.:" >&2
+        echo "           export PRIVATE_GITLAB_TOKEN=<your-token>" >&2
         return 1
     fi
     _gitlab_check_auth || return 1
@@ -492,8 +480,9 @@ upload_gitlab_group_secrets(){
         echo "SECRET_VARNAME_PTR = $SECRET_VARNAME_PTR"
         echo "SECRET_VARNAME = $SECRET_VARNAME"
 
-        # Read & fingerprint values inside a setx-suppressed region so the
-        # raw values never appear in xtrace, then decide what to do.
+        # Read the local & remote values, fingerprint each, and decide what
+        # action to take. Values themselves are never printed — only the
+        # fingerprints — so logs are safe to share.
         LOCAL_VALUE=${!SECRET_VARNAME}
         REMOTE_VALUE=$(jq -r ".[] | select(.key==\"$SECRET_VARNAME\") | .value" < "$TMP_DIR/group_vars")
         LOCAL_FP=$(printf '%s' "$LOCAL_VALUE" | _secret_fingerprint)
@@ -526,14 +515,12 @@ upload_gitlab_group_secrets(){
 }
 
 upload_gitlab_repo_secrets(){
-    set +x  # never trace secret-handling logic
     __doc__="
     Upsert each configured secret as a protected, masked project-level CI/CD
     variable. Secret values are never echoed: we only print 12-hex-char
     SHA-256 fingerprints so local/remote drift is observable without
     disclosing the values themselves.
     "
-    load_secrets
 
     local HOST PROJECT_PATH GROUP_NAME
     { read -r HOST; read -r PROJECT_PATH; read -r GROUP_NAME; } < <(_gitlab_remote_info) || return 1
@@ -543,10 +530,12 @@ upload_gitlab_repo_secrets(){
     * HOST = $HOST
     "
 
-    local PRIVATE_GITLAB_TOKEN
-    PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
-    if [[ -z "$PRIVATE_GITLAB_TOKEN" || "$PRIVATE_GITLAB_TOKEN" == "ERROR" ]]; then
-        echo "Failed to load authentication key for $HOST"
+    local PRIVATE_GITLAB_TOKEN="${PRIVATE_GITLAB_TOKEN:-}"
+    if [[ -z "$PRIVATE_GITLAB_TOKEN" ]]; then
+        echo "ERROR: PRIVATE_GITLAB_TOKEN is not set in the environment." >&2
+        echo "       Export a GitLab personal access token with 'api' scope" >&2
+        echo "       before running rotate-secrets, e.g.:" >&2
+        echo "           export PRIVATE_GITLAB_TOKEN=<your-token>" >&2
         return 1
     fi
     _gitlab_check_auth || return 1
@@ -634,7 +623,6 @@ upload_gitlab_repo_secrets(){
 
 
 export_encrypted_code_signing_keys(){
-    set +x  # never trace secret-handling logic
     __doc__="
     Export the GPG signing subkey, public key, and ownertrust, encrypt each
     with CI_SECRET via openssl, and stage the resulting .enc files for
@@ -644,11 +632,10 @@ export_encrypted_code_signing_keys(){
     - Plaintext key material is written to a private 0700 mktemp dir and
       cleaned up via a RETURN trap. The repo working tree (dev/) only ever
       sees the encrypted .enc files and the public fingerprint anchor.
-    - CI_SECRET is never echoed. The function runs with xtrace forcibly
-      disabled (see `set +x` below) so the `GLKWS=\$CI_SECRET openssl ...`
-      inline assignments cannot trace.
+    - CI_SECRET is never echoed. Passed to openssl via the GLKWS env var
+      (GLKWS=$CI_SECRET openssl ... -pass env:GLKWS) so the secret is
+      not on openssl's command line.
     "
-    load_secrets
     source dev/secrets_configuration.sh
 
     local CI_SECRET
@@ -696,7 +683,6 @@ export_encrypted_code_signing_keys(){
     GLKWS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:GLKWS -d -a \
         -in dev/gpg_owner_trust.enc           >/dev/null
 
-    unload_secrets
 
     echo "Wrote encrypted artifacts:"
     ls dev/*.enc
@@ -743,7 +729,6 @@ _gpg_locate_signing_subkey(){
 
 
 upload_github_gpg_secrets(){
-    set +x  # never trace secret-handling logic
     __doc__="
     Export GPG signing subkey material and upload it directly to GitHub
     Actions as environment-scoped secrets (pypi + testpypi environments).
@@ -754,7 +739,6 @@ upload_github_gpg_secrets(){
     This implements ci_gpg_secret_transport = 'direct_ci' for GitHub.
     Call this instead of export_encrypted_code_signing_keys.
     "
-    load_secrets
     source dev/secrets_configuration.sh
 
     local pypi_env="${GITHUB_ENVIRONMENT_PYPI:-pypi}"
@@ -773,10 +757,8 @@ upload_github_gpg_secrets(){
     gpg --armor --export "${GPG_SIGN_SUBKEY}" > "$TMP_DIR/public_key.pgp"
     gpg --export-ownertrust > "$TMP_DIR/owner_trust"
 
-    # Single-line base64 for robust secret transport. xtrace is already
-    # disabled at function entry, so the `+ VAR=<base64-value>` trace
-    # cannot escape; we capture the length separately for the emptiness
-    # check so no path needs to inspect the value itself.
+    # Single-line base64 for robust secret transport (tr -d '\n' is
+    # portable across GNU and macOS; avoids -w 0 / -b 0 divergence).
     local GPG_SECRET_SIGNING_SUBKEY_B64 GPG_PUBLIC_KEY_B64 GPG_OWNER_TRUST_B64
     GPG_SECRET_SIGNING_SUBKEY_B64=$(base64 < "$TMP_DIR/signing_subkey.pgp" | tr -d '\n')
     GPG_PUBLIC_KEY_B64=$(base64 < "$TMP_DIR/public_key.pgp" | tr -d '\n')
@@ -794,7 +776,6 @@ upload_github_gpg_secrets(){
     git add dev/public_gpg_key
     git status
 
-    unload_secrets
 
     # Ensure deployment environments exist before scoping secrets to them
     setup_github_release_environments
@@ -813,7 +794,6 @@ upload_github_gpg_secrets(){
 
 
 upload_gitlab_gpg_secrets(){
-    set +x  # never trace secret-handling logic
     __doc__="
     Export GPG signing subkey material and upload it directly to GitLab
     CI/CD project variables (protected=true, masked=true).
@@ -824,7 +804,6 @@ upload_gitlab_gpg_secrets(){
     This implements ci_gpg_secret_transport = 'direct_ci' for GitLab.
     Call this instead of export_encrypted_code_signing_keys.
     "
-    load_secrets
     source dev/secrets_configuration.sh
 
     _gpg_locate_signing_subkey || return 1
@@ -858,10 +837,12 @@ upload_gitlab_gpg_secrets(){
 
     local HOST PROJECT_PATH _GROUP
     { read -r HOST; read -r PROJECT_PATH; read -r _GROUP; } < <(_gitlab_remote_info) || return 1
-    local PRIVATE_GITLAB_TOKEN
-    PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
-    if [[ -z "$PRIVATE_GITLAB_TOKEN" || "$PRIVATE_GITLAB_TOKEN" == "ERROR" ]]; then
-        echo "ERROR: failed to load GitLab authentication token for $HOST" >&2
+    local PRIVATE_GITLAB_TOKEN="${PRIVATE_GITLAB_TOKEN:-}"
+    if [[ -z "$PRIVATE_GITLAB_TOKEN" ]]; then
+        echo "ERROR: PRIVATE_GITLAB_TOKEN is not set in the environment." >&2
+        echo "       Export a GitLab personal access token with 'api' scope" >&2
+        echo "       before running rotate-secrets, e.g.:" >&2
+        echo "           export PRIVATE_GITLAB_TOKEN=<your-token>" >&2
         return 1
     fi
     _gitlab_check_auth || return 1
@@ -877,7 +858,6 @@ upload_gitlab_gpg_secrets(){
     fi
     echo "PROJECT_ID = $PROJECT_ID"
 
-    unload_secrets
 
     local vars_url="$HOST/api/v4/projects/$PROJECT_ID/variables"
     _gitlab_upsert_var "$vars_url" "GPG_SECRET_SIGNING_SUBKEY_B64" <<<"$GPG_SECRET_SIGNING_SUBKEY_B64" || return 1
@@ -887,7 +867,6 @@ upload_gitlab_gpg_secrets(){
 
 
 _test_gnu(){
-    set +x  # never trace secret-handling logic
     # Decrypt the encrypted-repo artifacts back into a throwaway GNUPGHOME
     # to verify the encrypt/decrypt round trip works end-to-end.
     local GNUPGHOME
@@ -900,7 +879,6 @@ _test_gnu(){
     source dev/secrets_configuration.sh
     gpg -k
 
-    load_secrets
     local CI_SECRET
     CI_SECRET="${!VARNAME_CI_SECRET}"
     if [[ -z "$CI_SECRET" ]]; then
@@ -916,6 +894,5 @@ _test_gnu(){
     GLKWS=$CI_SECRET openssl enc -aes-256-cbc -pbkdf2 -md SHA512 -pass env:GLKWS -d -a \
         -in dev/ci_secret_gpg_subkeys.pgp.enc  | gpg --import
 
-    unload_secrets
     gpg -k
 }

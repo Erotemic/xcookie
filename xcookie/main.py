@@ -1940,7 +1940,13 @@ class TemplateApplier:
         )
         script.submit(f'source {setup_secrets_fpath}', log=False)
         script.sync().submit(f'{environ_export}', log=False)
-        script.sync().submit('source $(secret_loader.sh)', log=False)
+        # Secret env vars (CI_SECRET, TWINE_PASSWORD, PRIVATE_GITLAB_TOKEN,
+        # ...) must already be exported in the parent shell — they're
+        # inherited by the bash subprocess. We do not source any user-side
+        # secret_loader: that previously relied on `load_secrets` being a
+        # function in ~/.bashrc, which doesn't survive into a non-login
+        # bash. Each setup_secrets.sh upload function now validates its
+        # required env vars and fails clearly if anything is missing.
 
         # Step 1: export GPG material to repo (encrypted_repo) or upload
         # directly to CI provider (direct_ci).
@@ -1984,7 +1990,19 @@ class TemplateApplier:
 
         script.rprint()
         if self.config.confirm('Ready to rotate secrets?'):
-            script.run(system=True, mode='bash')
+            # Bypass `script.run()` so we can drop cmd_queue's per-command
+            # `set -x` / `{ set +x; } 2>/dev/null` wrappers (with_gaurds).
+            # Those would re-enable xtrace inside every secret-handling
+            # function body and trace the tokens / GPG material. The script
+            # provides its own progress visibility via the `_log` helper in
+            # setup_secrets.sh.
+            import subprocess
+            text = script.finalize_text(with_gaurds=False)
+            proc = subprocess.run(
+                ['bash', '-c', text], cwd=str(self.repodir)
+            )
+            if proc.returncode != 0:
+                raise SystemExit(proc.returncode)
 
     def print_help_tips(self):
         text = ub.codeblock(
