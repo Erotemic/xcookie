@@ -426,6 +426,10 @@ upload_gitlab_group_secrets(){
     SHA-256 fingerprints so local/remote drift is observable without
     disclosing the values themselves.
     "
+    # NOTE: any `source` MUST happen before the RETURN trap is set,
+    # because bash fires RETURN on source completion as well as on
+    # function return — see `man bash` under 'trap'.
+    source dev/secrets_configuration.sh
 
     local HOST PROJECT_PATH GROUP_NAME
     { read -r HOST; read -r PROJECT_PATH; read -r GROUP_NAME; } < <(_gitlab_remote_info) || return 1
@@ -458,7 +462,7 @@ upload_gitlab_group_secrets(){
 
     # Fetch group-level variables. This response includes plaintext values
     # of masked variables (GitLab masking only affects job logs), so the
-    # response file lives in a 0700 tmpdir we cleanup via RETURN trap.
+    # response file lives in a 0700 tmpdir cleaned up by the RETURN trap.
     curl --fail --silent --show-error --header "PRIVATE-TOKEN: $PRIVATE_GITLAB_TOKEN" \
         "$HOST/api/v4/groups/$GROUP_ID/variables" > "$TMP_DIR/group_vars"
     local rc=$?
@@ -467,7 +471,6 @@ upload_gitlab_group_secrets(){
         return 1
     fi
 
-    source dev/secrets_configuration.sh
     local SECRET_VARNAME_ARR=(VARNAME_CI_SECRET VARNAME_TWINE_PASSWORD VARNAME_TEST_TWINE_PASSWORD VARNAME_TWINE_USERNAME VARNAME_TEST_TWINE_USERNAME VARNAME_PUSH_TOKEN)
     local SECRET_VARNAME_PTR SECRET_VARNAME LOCAL_VALUE REMOTE_VALUE LOCAL_FP REMOTE_FP state
     for SECRET_VARNAME_PTR in "${SECRET_VARNAME_ARR[@]}"; do
@@ -521,6 +524,10 @@ upload_gitlab_repo_secrets(){
     SHA-256 fingerprints so local/remote drift is observable without
     disclosing the values themselves.
     "
+    # NOTE: any `source` MUST happen before the RETURN trap is set,
+    # because bash fires RETURN on source completion as well as on
+    # function return — see `man bash` under 'trap'.
+    source dev/secrets_configuration.sh
 
     local HOST PROJECT_PATH GROUP_NAME
     { read -r HOST; read -r PROJECT_PATH; read -r GROUP_NAME; } < <(_gitlab_remote_info) || return 1
@@ -569,7 +576,6 @@ upload_gitlab_repo_secrets(){
     fi
 
     local mode="${1:-legacy}"
-    source dev/secrets_configuration.sh
     local SECRET_VARNAME_ARR
     if [[ "$mode" == "direct_gpg" ]]; then
         # GPG material is uploaded separately by upload_gitlab_gpg_secrets;
@@ -869,14 +875,14 @@ upload_gitlab_gpg_secrets(){
 _test_gnu(){
     # Decrypt the encrypted-repo artifacts back into a throwaway GNUPGHOME
     # to verify the encrypt/decrypt round trip works end-to-end.
+    source dev/secrets_configuration.sh
+
     local GNUPGHOME
     GNUPGHOME=$(mktemp -d -t gnupg-test-XXXXXXXXXX)
     chmod 700 "$GNUPGHOME"
     export GNUPGHOME
     # shellcheck disable=SC2064
     trap "rm -rf '$GNUPGHOME'" RETURN
-
-    source dev/secrets_configuration.sh
     gpg -k
 
     local CI_SECRET
