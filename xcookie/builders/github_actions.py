@@ -10,6 +10,7 @@ from typing import (
 import ubelt as ub
 
 from xcookie.builders import common_ci
+from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.util_yaml import Yaml
 
 # Type alias for json / yaml data structure
@@ -23,6 +24,11 @@ JSON_Mutable: TypeAlias = (
 JSON_Sequence: TypeAlias = Sequence['JSON']
 JSON_Mapping: TypeAlias = Mapping[str, 'JSON']
 JSON: TypeAlias = JSON_Terminal | JSON_Sequence | JSON_Mapping
+
+
+def _action_ref(name: str) -> str:
+    """Return the pinned GitHub Action ref for an ``owner/repo`` name."""
+    return f'{name}@{ACTION_VERSIONS[name]}'
 
 
 class Actions:
@@ -52,8 +58,8 @@ class Actions:
     """
 
     action_versions = {
-        'checkout': 'actions/checkout@v3',
-        'setup-python': 'actions/setup-python@v5',
+        'checkout': _action_ref('actions/checkout'),
+        'setup-python': _action_ref('actions/setup-python'),
     }
 
     @classmethod
@@ -108,7 +114,7 @@ class Actions:
     @classmethod
     def checkout(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
-            {'name': 'Checkout source', 'uses': 'actions/checkout@v6.0.2'},
+            {'name': 'Checkout source', 'uses': _action_ref('actions/checkout')},
             *args,
             **kwargs,
         )
@@ -116,7 +122,7 @@ class Actions:
     @classmethod
     def setup_python(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
-            {'name': 'Setup Python', 'uses': 'actions/setup-python@v5.6.0'},
+            {'name': 'Setup Python', 'uses': _action_ref('actions/setup-python')},
             *args,
             **kwargs,
         )
@@ -129,7 +135,7 @@ class Actions:
         """
         return cls.action(
             {
-                'uses': 'codecov/codecov-action@v5.5.2',
+                'uses': _action_ref('codecov/codecov-action'),
             },
             *args,
             **kwargs,
@@ -166,7 +172,7 @@ class Actions:
     def upload_artifact(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
             {
-                'uses': 'actions/upload-artifact@v6.0.0'
+                'uses': _action_ref('actions/upload-artifact')
                 # Rollback to 3.x due to
                 # https://github.com/actions/upload-artifact/issues/478
                 # todo: migrate
@@ -181,7 +187,7 @@ class Actions:
     def download_artifact(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
             {
-                'uses': 'actions/download-artifact@v4.1.8',
+                'uses': _action_ref('actions/download-artifact'),
                 # 'uses': 'actions/download-artifact@v2.1.1',
             },
             *args,
@@ -227,7 +233,7 @@ class Actions:
         return cls.action(
             {
                 'name': name,
-                'uses': 'ilammy/msvc-dev-cmd@v1',
+                'uses': _action_ref('ilammy/msvc-dev-cmd'),
             },
             *args,
             **kwargs,
@@ -247,7 +253,7 @@ class Actions:
         return cls.action(
             {
                 'name': 'Set up QEMU',
-                'uses': 'docker/setup-qemu-action@v3.7.0',
+                'uses': _action_ref('docker/setup-qemu-action'),
             },
             *args,
             **kwargs,
@@ -267,7 +273,7 @@ class Actions:
         return cls.action(
             {
                 'name': 'Install Xcode',
-                'uses': 'maxim-lobanov/setup-xcode@v1',
+                'uses': _action_ref('maxim-lobanov/setup-xcode'),
             },
             *args,
             **kwargs,
@@ -279,7 +285,7 @@ class Actions:
         return cls.action(
             {
                 'name': 'Set up IPFS',
-                'uses': 'ibnesayeed/setup-ipfs@0.6.0',
+                'uses': _action_ref('ibnesayeed/setup-ipfs'),
                 'with': {
                     'ipfs_version': '0.14.0',
                     'run_daemon': True,
@@ -327,7 +333,7 @@ class Actions:
                 # 'uses': 'pypa/cibuildwheel@v2.16.2',
                 # 'uses': 'pypa/cibuildwheel@v2.17.0',
                 # 'uses': 'pypa/cibuildwheel@v2.21.0',
-                'uses': 'pypa/cibuildwheel@v3.3.1',
+                'uses': _action_ref('pypa/cibuildwheel'),
             },
             *args,
             **kwargs,

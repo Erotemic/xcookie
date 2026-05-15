@@ -7,8 +7,13 @@ import ubelt as ub
 
 def get_pyproject_optional_dependency_keys(self):
     """
-    Return the set of optional-dependency keys declared in the project's
-    pyproject.toml, or an empty set if the file (or section) is absent.
+    Return optional-dependency keys declared in ``pyproject.toml``.
+
+    Supports both normal PEP 621 extras in
+    ``[project.optional-dependencies]`` and setuptools dynamic extras in
+    ``[tool.setuptools.dynamic.optional-dependencies]``. The dynamic form
+    appears when packaging metadata exposes extras such as ``tests`` from
+    requirement files.
 
     Used to filter generated CI install steps so we never reference an extra
     that does not exist (e.g. ``pip install -e ".[tests]"`` against a project
@@ -17,7 +22,15 @@ def get_pyproject_optional_dependency_keys(self):
     pyproj_config = self.config._load_pyproject_config() or {}
     project_block = pyproj_config.get('project', {}) or {}
     optional_deps = project_block.get('optional-dependencies', {}) or {}
-    return set(optional_deps.keys())
+
+    tool_block = pyproj_config.get('tool', {}) or {}
+    setuptools_block = tool_block.get('setuptools', {}) or {}
+    setuptools_dynamic = setuptools_block.get('dynamic', {}) or {}
+    dynamic_optional_deps = (
+        setuptools_dynamic.get('optional-dependencies', {}) or {}
+    )
+
+    return set(optional_deps.keys()) | set(dynamic_optional_deps.keys())
 
 
 def filter_pyproject_extras(self, desired_extras):

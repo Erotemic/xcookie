@@ -405,6 +405,77 @@ def test_sdist_install_step_omits_empty_extras_brackets(tmp_path) -> None:
     assert '-e ".[]"' not in text
 
 
+def test_dynamic_pyproject_extras_are_available_to_ci(tmp_path) -> None:
+    """
+    Regression test for projects whose extras are exposed dynamically via
+    setuptools. These still support ``pip install .[tests]``, so CI should not
+    filter them out just because ``[project.optional-dependencies]`` is absent.
+    """
+    from xcookie.builders import common_ci
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'src' / 'demo_mod'
+    reqdir = repodir / 'requirements'
+    pkgdir.mkdir(parents=True)
+    reqdir.mkdir()
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (reqdir / 'runtime.txt').write_text('ubelt>=1.3.3\n')
+    (reqdir / 'tests.txt').write_text('pytest>=8.0\ncoverage>=7.0\n')
+    (reqdir / 'optional.txt').write_text('rich>=14\n')
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-pkg',
+                    'description': 'Demo package',
+                    'requires-python': '>=3.11',
+                    'version': '1.2.3',
+                    'dynamic': ['dependencies', 'optional-dependencies'],
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'rel_mod_parent_dpath': 'src',
+                        'tags': ['github', 'erotemic', 'purepy'],
+                        'min_python': '3.11',
+                    },
+                    'setuptools': {
+                        'dynamic': {
+                            'dependencies': {'file': ['requirements/runtime.txt']},
+                            'optional-dependencies': {
+                                'tests': {'file': ['requirements/tests.txt']},
+                                'optional': {'file': ['requirements/optional.txt']},
+                            },
+                        }
+                    },
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier._presetup()
+    available = common_ci.get_pyproject_optional_dependency_keys(applier)
+    text = applier.build_github_actions_tests()
+
+    assert {'tests', 'optional'} <= available
+    assert '-e ".[tests]"' in text
+    assert 'install-extras: tests' in text
+    assert 'install-extras: tests,optional' in text
+    assert 'install-extras: \'\'' not in text
+
+
 def test_sdist_install_step_uses_tests_extra_when_available(tmp_path) -> None:
     """
     When the project's pyproject.toml declares a ``tests`` extra, the sdist
