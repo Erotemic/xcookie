@@ -76,6 +76,8 @@ import re
 import shutil
 import tempfile
 import warnings
+from collections.abc import MutableMapping
+from typing import Any
 
 import scriptconfig as scfg
 import toml
@@ -791,7 +793,7 @@ class TemplateApplier:
 
         rel_mod_dpath = self.rel_mod_dpath
 
-        self.template_infos = [
+        raw_template_infos: list[TemplateInfo | MutableMapping[str, Any]] = [
             # {'template': 1, 'overwrite': False, 'fname': '.circleci/config.yml'},
             # {'template': 1, 'overwrite': False, 'fname': '.travis.yml'},
             {
@@ -1036,7 +1038,7 @@ class TemplateApplier:
                 'input_fname': rc.resource_fpath('run_tests.purepy.py.in'),
             },
         ]
-        self.template_infos = coerce_template_infos(self.template_infos)
+        self.template_infos = coerce_template_infos(raw_template_infos)
 
         # The user specified some files to not overwrite by default
         skip_autogen = {
