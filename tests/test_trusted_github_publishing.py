@@ -66,6 +66,26 @@ class _FakeQueue:
         return 'true\n'
 
 
+def _patch_rotate_secret_shell(monkeypatch):
+    """Avoid invoking platform bash from rotate_secrets unit tests.
+
+    These tests verify the cmd_queue orchestration decisions.  The actual
+    subprocess execution is covered by production code and should not depend on
+    whether the test platform has a usable bash executable, especially on
+    Windows where GitHub-hosted runners may resolve ``bash`` to WSL.
+    """
+    calls = []
+
+    def fake_run(cmd, cwd=None, **kwargs):
+        calls.append({'cmd': cmd, 'cwd': cwd, 'kwargs': kwargs})
+        return types.SimpleNamespace(returncode=0)
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    return calls
+
+
 def test_template_registry_contains_tests_and_release_workflows(tmp_path):
     self = _make_applier(tmp_path, trusted=True, enable_gpg=True)
     self._build_template_registry()
@@ -173,6 +193,7 @@ def test_rotate_secrets_trusted_without_gpg_skips_secret_upload(
     monkeypatch.setitem(sys.modules, 'cmd_queue', fake_cmd_queue)
 
     self = _make_applier(tmp_path, trusted=True, enable_gpg=False)
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     queue = _FakeQueue.created[-1]
@@ -201,6 +222,7 @@ def test_rotate_secrets_trusted_with_gpg_keeps_gpg_export_and_secret_upload(
 
     self = _make_applier(tmp_path, trusted=True, enable_gpg=True)
     self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     queue = _FakeQueue.created[-1]
@@ -380,6 +402,7 @@ def test_rotate_secrets_direct_gpg_calls_gpg_upload_not_encrypt(
     )
 
     self = _make_direct_gpg_applier(tmp_path, trusted=False)
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -401,6 +424,7 @@ def test_rotate_secrets_direct_gpg_trusted_skips_non_gpg_upload(
     )
 
     self = _make_direct_gpg_applier(tmp_path, trusted=True)
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -424,6 +448,7 @@ def test_rotate_secrets_direct_gpg_gitlab_excludes_ci_secret(
     self = _make_direct_gpg_applier(
         tmp_path, trusted=False, tags=['gitlab', 'kitware', 'purepy']
     )
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -450,6 +475,7 @@ def test_rotate_secrets_encrypted_repo_behavior_unchanged(
 
     self = _make_applier(tmp_path, trusted=False, enable_gpg=True)
     self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)

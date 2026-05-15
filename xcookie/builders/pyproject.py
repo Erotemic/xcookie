@@ -324,21 +324,18 @@ def build_pyproject(self):
     except Exception:
         return text
 
-    with tempfile.NamedTemporaryFile(
-        mode='w+', suffix='pyproject.toml', delete=True
-    ) as file:
-        file.write(text)
-        file.flush()
+    with tempfile.TemporaryDirectory() as temp_dpath:
+        temp_fpath = ub.Path(temp_dpath) / 'pyproject.toml'
+        temp_fpath.write_text(text)
         pyproject_fmt_run(
             [
                 '--no-generate-python-version-classifiers',
                 '--keep-full-version',
                 '--no-print-diff',
-                file.name,
+                str(temp_fpath),
             ]
         )
-        file.seek(0)
-        text = file.read()
+        text = temp_fpath.read_text()
 
     project_name = pyproj_config.get('project', {}).get('name')
     if project_name:
