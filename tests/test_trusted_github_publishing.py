@@ -55,6 +55,16 @@ class _FakeQueue:
         self.run_kwargs = kwargs
         return None
 
+    def finalize_text(self, **kwargs):
+        # TemplateApplier.rotate_secrets now bypasses Queue.run() so it can
+        # call cmd_queue's finalize_text(with_gaurds=False) and run the
+        # resulting bash with xtrace guards disabled.  Keep this test double
+        # side-effect-free while preserving the old "ran" signal and the
+        # submitted commands for orchestration assertions below.
+        self.ran = True
+        self.run_kwargs = kwargs
+        return 'true\n'
+
 
 def test_template_registry_contains_tests_and_release_workflows(tmp_path):
     self = _make_applier(tmp_path, trusted=True, enable_gpg=True)
@@ -169,7 +179,8 @@ def test_rotate_secrets_trusted_without_gpg_skips_secret_upload(
     joined = '\n'.join(queue.commands)
 
     assert 'setup_package_environs_github_erotemic' in joined
-    assert 'source $(secret_loader.sh)' in joined
+    assert 'dev/setup_secrets.sh' in joined
+    assert 'source $(secret_loader.sh)' not in joined
     assert 'export_encrypted_code_signing_keys' not in joined
     assert 'upload_github_secrets' not in joined
     assert 'no additional CI secrets' in joined
