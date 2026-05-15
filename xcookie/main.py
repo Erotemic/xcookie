@@ -69,6 +69,8 @@ ExampleUsage:
         --use_pyproject_requirements=True --use_setup_py=False
 """
 
+from __future__ import annotations
+
 import os
 import re
 import shutil
@@ -80,6 +82,13 @@ import toml
 import ubelt as ub
 import xdev
 from packaging.version import parse as Version
+from xcookie.resolved_config import resolve_xcookie_config
+from xcookie.staging import apply_template_context
+from xcookie.template_registry import (
+    TemplateContext,
+    TemplateInfo,
+    coerce_template_infos,
+)
 
 
 class SkipFile(Exception):
@@ -390,117 +399,7 @@ class XCookieConfig(scfg.DataConfig):
     }
 
     def __post_init__(self):
-        if self['repodir'] is None:
-            self['repodir'] = ub.Path.cwd()
-        else:
-            self['repodir'] = ub.Path(self['repodir']).absolute()
-
-        try:
-            self['repodir'] = find_git_root(self['repodir'])
-        except Exception:
-            print('assuming the root was given and we are not in a repo yet')
-
-        if self['tags']:
-            if isinstance(self['tags'], str):
-                self['tags'] = [self['tags']]
-            new = []
-            for t in self['tags']:
-                new.extend([p.strip() for p in t.split(',')])
-            self['tags'] = new
-
-        if self['os']:
-            if isinstance(self['os'], str):
-                self['os'] = [self['os']]
-            new = []
-            for t in self['os']:
-                new.extend([p.strip() for p in t.split(',')])
-            self['os'] = set(new)
-            if 'all' in self['os']:
-                self['os'].add('win')
-                self['os'].add('osx')
-                self['os'].add('linux')
-                self['os'].remove('all')
-            os_normalizer = {
-                'windows': 'win',
-                'win32': 'win',
-                'darwin': 'osx',
-                'apple': 'osx',
-            }
-            self['os'] = [os_normalizer.get(x, x) for x in self['os']]
-            self['os'] = sorted(self['os'])
-
-        if self['repo_name'] is None:
-            self['repo_name'] = self['repodir'].name
-        if self['mod_name'] is None:
-            self['mod_name'] = self['repo_name'].replace('-', '_')
-        if self['pkg_name'] is None:
-            self['pkg_name'] = self['mod_name']
-        if self['is_new'] == 'auto':
-            self['is_new'] = not (self['repodir'] / '.git').exists()
-        if self['rotate_secrets'] == 'auto':
-            self['rotate_secrets'] = self['is_new']
-        if self['refresh_docs'] == 'auto':
-            self['refresh_docs'] = self['is_new']
-        if self['author'] is None:
-            if 'erotemic' in self['tags']:
-                self['author'] = 'Jon Crall'
-            else:
-                self['author'] = ub.cmd('git config user.name')['out'].strip()
-                if self['author'] == 'joncrall':
-                    self['author'] = 'Jon Crall'
-        if self['license'] is None:
-            self['license'] = 'Apache 2'
-        if self['author_email'] is None:
-            if 'erotemic' in self['tags']:
-                self['author_email'] = 'erotemic@gmail.com'
-            else:
-                self['author_email'] = ub.cmd('git config user.email')[
-                    'out'
-                ].strip()
-        if self['version'] is None:
-            # TODO: read from __init__.py
-            # self['version'] = '{mod_dpath}/__init__.py::__version__'
-            self['version'] = '0.0.1'
-
-        if self['description'] is None:
-            self['description'] = 'The {} module'.format(self['mod_name'])
-
-        if self['supported_python_versions'] == 'auto':
-            # FIXME: need to resolve after all other info is loaded
-            from xcookie.constants import KNOWN_PYTHON_VERSIONS
-
-            min_python = str(self['min_python']).lower()
-            max_python = str(self['max_python']).lower()
-
-            def satisfies_minmax(v):
-                v = Version(v)
-                if min_python != 'none':
-                    min_v = Version(min_python)
-                    if v < min_v:
-                        return False
-                if max_python != 'none':
-                    max_v = Version(max_python)
-                    if v > max_v:
-                        return False
-                return True
-
-            python_versions = [
-                v for v in KNOWN_PYTHON_VERSIONS if satisfies_minmax(v)
-            ]
-            self['supported_python_versions'] = python_versions
-
-        if self['ci_cpython_versions'] == 'auto':
-            self['ci_cpython_versions'] = self['supported_python_versions']
-
-        if self['ci_pypy_versions'] == 'auto':
-            if 'purepy' in self['tags']:
-                self['ci_pypy_versions'] = ['3.9']
-            else:
-                self['ci_pypy_versions'] = []
-        if self['use_uv'] == 'auto':
-            # Can only use uv if the min python >= 3.8
-            min_python = self['supported_python_versions'][0]
-            self['use_uv'] = Version(min_python) >= Version('3.8')
+        object.__setattr__(self, 'resolved', resolve_xcookie_config(self))
 
     def _load_pyproject_config(self):
         pyproject_fpath = self['repodir'] / 'pyproject.toml'
@@ -792,13 +691,12 @@ class TemplateApplier:
             config = XCookieConfig(**config)
 
         self.config = config
-        self.repodir = ub.Path(self.config['repodir'])
-        if self.config['repo_name'] is None:
-            self.config['repo_name'] = self.repodir.name
-        self.repo_name = self.config['repo_name']
+        self.resolved = resolve_xcookie_config(self.config)
+        self.repodir = self.resolved.repodir
+        self.repo_name = self.resolved.repo_name
         self._tmpdir = tempfile.TemporaryDirectory(prefix=self.repo_name)
 
-        self.template_infos = None
+        self.template_infos: list[TemplateInfo] | None = None
         try:
             xcookie_dpath = ub.Path(__file__).parent.parent
         except NameError:
@@ -848,22 +746,19 @@ class TemplateApplier:
 
     @property
     def rel_mod_dpath(self) -> ub.Path:
-        return (
-            ub.Path(self.config['rel_mod_parent_dpath'])
-            / self.config['mod_name']
-        )
+        return self.resolved.rel_mod_dpath
 
     @property
     def mod_dpath(self) -> ub.Path:
-        return self.repodir / self.rel_mod_dpath
+        return self.resolved.mod_dpath
 
     @property
     def mod_name(self):
-        return self.config['mod_name']
+        return self.resolved.mod_name
 
     @property
     def pkg_name(self):
-        return self.config['pkg_name']
+        return self.resolved.pkg_name
 
     @property
     def pkg_fname_prefix(self):
@@ -1141,14 +1036,17 @@ class TemplateApplier:
                 'input_fname': rc.resource_fpath('run_tests.purepy.py.in'),
             },
         ]
+        self.template_infos = coerce_template_infos(self.template_infos)
 
         # The user specified some files to not overwrite by default
-        skip_autogen = set(self.config['skip_autogen'] or [])
+        skip_autogen = {
+            os.fspath(p) for p in (self.config['skip_autogen'] or [])
+        }
         if skip_autogen:
             for item in self.template_infos:
-                if item['fname'] in skip_autogen:
-                    item['overwrite'] = 0
-                    item['skip'] = 1
+                if os.fspath(item.fname) in skip_autogen:
+                    item.overwrite = False
+                    item.skip = True
 
         if 0:
             # Checker and help autopopulate
@@ -1198,7 +1096,7 @@ class TemplateApplier:
                     )
                 )
             )
-            known_fpaths = {d['fname'] for d in self.template_infos}
+            known_fpaths = {os.fspath(d.fname) for d in self.template_infos}
             exist_fpaths = {d['fname'] for d in template_contents}
             unexpected_fpaths = exist_fpaths - known_fpaths
             if unexpected_fpaths:
@@ -1520,19 +1418,22 @@ class TemplateApplier:
                 else:
                     raise NotImplementedError('unknown vcs remote')
 
+    @property
+    def template_context(self) -> TemplateContext:
+        return TemplateContext.from_config(self.config)
+
     def _stage_file(self, info):
         """
         Write a single file to the staging directory based on its template
         info.
 
         Args:
-            info (dict):
-                a template dictionary that defines how to construct a file
+            info (TemplateInfo | dict):
+                a template record that defines how to construct a file
 
         Returns:
-            dict: enriched information.
-                A side effect of this function is writing the data to temporary
-                storage
+            TemplateInfo: enriched information.  A side effect of this function
+            is writing the data to temporary storage.
 
         Example:
             >>> from xcookie.main import *  # NOQA
@@ -1545,37 +1446,30 @@ class TemplateApplier:
             >>>     'interactive': False,
             >>> }
             >>> config = XCookieConfig.cli(argv=0, data=kwargs)
-            >>> #config.__post_init__()
             >>> print('config = {}'.format(ub.urepr(dict(config), nl=1)))
             >>> self = TemplateApplier(config)
             >>> self._build_template_registry()
-            >>> info = [d for d in self.template_infos if d['fname'] == 'setup.py'][0]
             >>> info = [d for d in self.template_infos if d['fname'] == '.gitlab-ci.yml'][0]
             >>> self._stage_file(info)
         """
-        # print('info = {!r}'.format(info))
-        tags = info.get('tags', None)
-        if tags:
-            tags = set(tags.split(','))
-            if not set(self.config['tags']).issuperset(tags):
-                raise SkipFile
+        info = TemplateInfo.coerce(info)
+        if not info.tag_requirements_met(self.tags):
+            raise SkipFile
 
-        path_name = info['fname']
-        path_type = info.get('path_type', 'file')
+        path_name = info.fname
+        path_type = info.path_type
 
         stage_fpath = self.staging_dpath / path_name
-        info['stage_fpath'] = stage_fpath
-        info['repo_fpath'] = self.repodir / path_name
-        info['path_type'] = path_type
+        info.stage_fpath = stage_fpath
+        info.repo_fpath = self.repodir / path_name
+        info.path_type = path_type
         if path_type == 'dir':
             stage_fpath.ensuredir()
         else:
             stage_fpath.parent.ensuredir()
-            dynamic = (
-                info.get('dynamic', '') or info.get('source', '') == 'dynamic'
-            )
+            dynamic = info.dynamic or info.source == 'dynamic'
             if dynamic:
-                dynamic_var = info.get('dynamic', '')
+                dynamic_var = info.dynamic
                 if dynamic_var == '':
                     text = self.lut(info)
                 else:
@@ -1584,13 +1478,13 @@ class TemplateApplier:
                     raise SkipFile('file was disabled')
                 try:
                     stage_fpath.write_text(text)
-                    if 'x' in info.get('perms', ''):
+                    if 'x' in info.perms:
                         stage_fpath.chmod('+x')
                 except Exception:
                     print(f'text={text}')
                     raise
             else:
-                in_fname = info.get('input_fname', path_name)
+                in_fname = info.input_fname or path_name
                 raw_fpath = self.template_dpath / in_fname
                 if not raw_fpath.exists():
                     raise IOError(
@@ -1600,33 +1494,10 @@ class TemplateApplier:
 
                 self._apply_xcookie_directives(stage_fpath)
 
-                if info['template']:
-                    xdev.sedfile(
-                        stage_fpath, 'xcookie', self.repo_name, verbose=0
-                    )
-                    xdev.sedfile(
-                        stage_fpath, '<mod_name>', self.mod_name, verbose=0
-                    )
-                    rel_mod_dpath_text = str(self.rel_mod_dpath).replace(
-                        '\\', '/'
-                    )
-                    xdev.sedfile(
-                        stage_fpath,
-                        '<rel_mod_dpath>',
-                        rel_mod_dpath_text,
-                        verbose=0,
-                    )
-                    # FIXME: use configuration from pyproject.toml
-                    author = ub.cmd('git config --global user.name')[
-                        'out'
-                    ].strip()
-                    author_email = ub.cmd('git config --global user.email')[
-                        'out'
-                    ].strip()
-                    xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
-                    xdev.sedfile(
-                        stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0
-                    )
+                if info.template:
+                    text = stage_fpath.read_text()
+                    text = apply_template_context(text, self.template_context)
+                    stage_fpath.write_text(text)
 
         # Probably inefficient.
         if stage_fpath.name.endswith('.py'):
@@ -1737,11 +1608,12 @@ class TemplateApplier:
                 self.staging_infos.append(info)
 
         if 1:
-            import pandas as pd
-
             # print('self.staging_infos = {}'.format(ub.urepr(self.staging_infos, nl=1)))
-            df = pd.DataFrame(self.staging_infos)
-            print(df)
+            print(
+                ub.urepr(
+                    [info.to_dict() for info in self.staging_infos], nl=1
+                )
+            )
 
     def gather_tasks(self):
         tasks = {

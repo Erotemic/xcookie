@@ -18,6 +18,7 @@ Welcome to xcookie's documentation!
    :maxdepth: 8
 
    xcookie
+   dev/refactor_plan
 
 
 
