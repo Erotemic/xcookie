@@ -293,6 +293,20 @@ def make_purepy_ci_jobs(self):
                 all_install_extras[variant_key] + extras_list
             )
 
+    # Match GitHub Actions behavior: when pyproject metadata is the
+    # source of truth, only reference extras that actually exist.  This
+    # handles both static PEP 621 extras and setuptools dynamic extras via
+    # common_ci.filter_pyproject_extras, and avoids emitting invalid install
+    # targets such as ``wheel.whl[tests-strict]`` for projects without strict
+    # extras.
+    if self.config['use_pyproject_requirements']:
+        all_install_extras = ub.udict(
+            {
+                k: common_ci.filter_pyproject_extras(self, v)
+                for k, v in all_install_extras.items()
+            }
+        )
+
     # Convert back to comma-separated strings
     all_install_extras_str = ub.udict(
         {k: ','.join(v) for k, v in all_install_extras.items()}

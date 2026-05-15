@@ -326,7 +326,13 @@ def make_install_and_test_wheel_parts(
             # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
             # TODO: flag to allow prerelease?
             # f'{self.PIP_INSTALL_PREFER_BINARY} --prerelease=allow "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} "${{WHEEL_FPATH}}[${{INSTALL_EXTRAS}}]"',
+            'if [[ -n "${INSTALL_EXTRAS:-}" ]]; then',
+            '    INSTALL_TARGET="${WHEEL_FPATH}[${INSTALL_EXTRAS}]"',
+            'else',
+            '    INSTALL_TARGET="${WHEEL_FPATH}"',
+            'fi',
+            'echo "INSTALL_TARGET=$INSTALL_TARGET"',
+            f'{self.PIP_INSTALL_PREFER_BINARY} "${{INSTALL_TARGET}}"',
             'echo "Install finished."',
         ]
     )

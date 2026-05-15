@@ -545,3 +545,82 @@ def test_test_matrix_install_extras_are_filtered_to_existing(tmp_path) -> None:
     assert 'install-extras: tests,optional' not in text
     assert 'install-extras: optional' not in text
     assert 'install-extras: ,' not in text
+
+
+def test_gitlab_test_matrix_install_extras_are_filtered_to_existing(tmp_path) -> None:
+    """
+    GitLab CI should use the same pyproject extra filtering as GitHub Actions.
+    For a project that only declares ``tests``, generated GitLab test jobs must
+    not request missing extras such as ``optional`` or ``tests-strict``.
+    """
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    _write_pyproject_with_extras(
+        repodir,
+        optional_dependencies={
+            'tests': ['pytest>=8.0'],
+        },
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+        tags=['gitlab', 'kitware', 'purepy'],
+    )
+    applier = TemplateApplier(config)
+    applier._presetup()
+    text = applier.build_gitlab_ci()
+
+    assert 'INSTALL_EXTRAS="tests"' in text
+    assert 'tests,optional' not in text
+    assert 'tests-strict' not in text
+    assert 'runtime-strict' not in text
+    assert 'optional-strict' not in text
+    assert '${WHEEL_FPATH}[${INSTALL_EXTRAS}]' in text
+    assert '${WHEEL_FPATH}[]' not in text
+
+
+def test_wheel_install_command_omits_empty_extra_brackets(tmp_path) -> None:
+    """
+    Shared wheel-test install commands should omit ``[]`` when filtering leaves
+    a test variant with no declared extras. This matters for both GitHub and
+    GitLab generated CI.
+    """
+    from xcookie.builders import common_ci
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    _write_pyproject_with_extras(repodir, optional_dependencies={})
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier._presetup()
+
+    parts = common_ci.make_install_and_test_wheel_parts(
+        applier,
+        'wheelhouse',
+        special_install_lines=[],
+        workspace_dname='sandbox',
+    )
+    install_text = '\n'.join(parts['install_wheel_commands'])
+
+    assert 'INSTALL_TARGET="${WHEEL_FPATH}"' in install_text
+    assert '"${WHEEL_FPATH}[${INSTALL_EXTRAS}]"' in install_text
+    assert '"${WHEEL_FPATH}[]"' not in install_text
+
