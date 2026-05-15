@@ -1607,10 +1607,13 @@ class TemplateApplier:
                     xdev.sedfile(
                         stage_fpath, '<mod_name>', self.mod_name, verbose=0
                     )
+                    rel_mod_dpath_text = str(self.rel_mod_dpath).replace(
+                        '\\', '/'
+                    )
                     xdev.sedfile(
                         stage_fpath,
                         '<rel_mod_dpath>',
-                        str(self.rel_mod_dpath),
+                        rel_mod_dpath_text,
                         verbose=0,
                     )
                     # FIXME: use configuration from pyproject.toml

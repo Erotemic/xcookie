@@ -199,8 +199,10 @@ def test_rotate_secrets_trusted_without_gpg_skips_secret_upload(
     queue = _FakeQueue.created[-1]
     joined = '\n'.join(queue.commands)
 
+    joined_posix = joined.replace('\\', '/')
+
     assert 'setup_package_environs_github_erotemic' in joined
-    assert 'dev/setup_secrets.sh' in joined
+    assert 'dev/setup_secrets.sh' in joined_posix
     assert 'source $(secret_loader.sh)' not in joined
     assert 'export_encrypted_code_signing_keys' not in joined
     assert 'upload_github_secrets' not in joined
