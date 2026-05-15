@@ -4,73 +4,41 @@ Common subroutines for consistency between gitlab-ci / github actions / etc...
 
 import ubelt as ub
 
+from xcookie.builders import ci_plan
+
 
 def get_pyproject_optional_dependency_keys(self):
     """
     Return optional-dependency keys declared in ``pyproject.toml``.
 
-    Supports both normal PEP 621 extras in
-    ``[project.optional-dependencies]`` and setuptools dynamic extras in
-    ``[tool.setuptools.dynamic.optional-dependencies]``. The dynamic form
-    appears when packaging metadata exposes extras such as ``tests`` from
-    requirement files.
-
-    Used to filter generated CI install steps so we never reference an extra
-    that does not exist (e.g. ``pip install -e ".[tests]"`` against a project
-    without a ``tests`` extra).
+    Compatibility wrapper around :mod:`xcookie.builders.ci_plan`.
     """
-    pyproj_config = self.config._load_pyproject_config() or {}
-    project_block = pyproj_config.get('project', {}) or {}
-    optional_deps = project_block.get('optional-dependencies', {}) or {}
-
-    tool_block = pyproj_config.get('tool', {}) or {}
-    setuptools_block = tool_block.get('setuptools', {}) or {}
-    setuptools_dynamic = setuptools_block.get('dynamic', {}) or {}
-    dynamic_optional_deps = (
-        setuptools_dynamic.get('optional-dependencies', {}) or {}
-    )
-
-    return set(optional_deps.keys()) | set(dynamic_optional_deps.keys())
+    return ci_plan.get_pyproject_optional_dependency_keys(self)
 
 
 def filter_pyproject_extras(self, desired_extras):
     """
-    Return ``desired_extras`` filtered down to those that actually exist in
-    the project's pyproject.toml ``[project.optional-dependencies]`` table.
-    Order is preserved and duplicates removed.
+    Return ``desired_extras`` filtered down to extras declared by pyproject.
 
-    If the project does not yet have a pyproject.toml (e.g. a brand-new repo
-    being scaffolded by xcookie), all desired extras are kept so the freshly
-    generated pyproject can satisfy them.
+    Compatibility wrapper around :mod:`xcookie.builders.ci_plan`.
     """
-    available = get_pyproject_optional_dependency_keys(self)
-    pyproject_fpath = self.config['repodir'] / 'pyproject.toml'
-    if not pyproject_fpath.exists():
-        # New repo path: nothing to filter against, trust the desired list.
-        seen = set()
-        return [e for e in desired_extras if not (e in seen or seen.add(e))]
-    seen = set()
-    kept = []
-    for extra in desired_extras:
-        if extra in available and extra not in seen:
-            kept.append(extra)
-            seen.add(extra)
-    return kept
+    return list(ci_plan.filter_pyproject_extras(self, desired_extras))
 
 
 def format_pyproject_install_target(extras, target='.', editable=False):
     """
-    Build a pip install target string like ``"."``, ``".[tests]"`` or
-    ``"-e .[tests,optional]"`` from a list of extras, omitting the brackets
-    entirely when no extras are requested.
+    Build a pip install target, omitting brackets when extras are empty.
+
+    Compatibility wrapper around :mod:`xcookie.builders.ci_plan`.
     """
-    extras_part = ''
-    if extras:
-        extras_part = '[' + ','.join(extras) + ']'
-    quoted = f'"{target}{extras_part}"'
-    if editable:
-        return f'-e {quoted}'
-    return quoted
+    return ci_plan.format_pyproject_install_target(
+        extras, target=target, editable=editable
+    )
+
+
+def make_ci_plan(self):
+    """Return the shared provider-neutral CI plan for this applier."""
+    return ci_plan.make_ci_plan(self)
 
 
 def make_typecheck_parts(self):
@@ -100,8 +68,10 @@ def make_typecheck_parts(self):
     req_files_text = ' '.join(type_requirement_files)
 
     if self.config['use_pyproject_requirements']:
-        type_extras = filter_pyproject_extras(self, ['tests'])
-        target = format_pyproject_install_target(type_extras, editable=True)
+        plan = make_ci_plan(self)
+        target = format_pyproject_install_target(
+            plan.typecheck_extras, editable=True
+        )
         pip_install_reqs = f'pip install --prefer-binary {target}'
     else:
         pip_install_reqs = f'pip install -r {req_files_text}'

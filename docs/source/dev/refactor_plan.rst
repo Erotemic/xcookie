@@ -57,11 +57,26 @@ Chunk 3: shared CI plan model
 
 Prevent GitHub/GitLab drift by making both providers render from a common plan.
 
-* Add ``CIPlan`` for provider-neutral CI policy.
-* Add ``TestVariant`` for strict/loose, minimal/full, Python version, and extras.
+Initial implementation status:
+
+* ``xcookie.builders.ci_plan.CIPlan`` owns provider-neutral CI policy for
+  optional-dependency discovery, test variants, typecheck extras, and sdist
+  test extras.
+* ``TestVariant`` records strict/loose mode, minimal/full scope, install extras,
+  and the pyproject/uv resolution policy used by provider matrices.
+* GitHub Actions and GitLab CI both consume the shared plan for wheel-test
+  variant extras instead of duplicating the same filtering policy.
+* ``common_ci`` keeps compatibility wrappers for older builder call sites while
+  forwarding optional-dependency filtering and install-target formatting to the
+  plan module.
+
+Remaining follow-up work for this chunk:
+
 * Add artifact and deployment plan records.
-* Centralize extra filtering and wheel install target construction.
-* Make provider renderers consume the same plan rather than duplicating policy.
+* Move provider-specific matrix expansion details into dedicated renderer helper
+  methods once the shared policy layer is stable.
+* Continue adding generated-output invariant tests around the plan so GitHub and
+  GitLab cannot drift again.
 
 Chunk 4: thin provider renderers
 --------------------------------

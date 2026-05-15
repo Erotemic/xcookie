@@ -931,19 +931,13 @@ def build_and_test_sdist_job(self):
     build_parts = common_ci.make_build_sdist_parts(self, wheelhouse_dpath)
 
     if self.config['use_pyproject_requirements']:
-        # Always include 'tests' so pytest is available in the sdist test
-        # steps below; layer on 'headless'/'gdal' only when the tags request
-        # them. Filter against the project's actual optional-dependencies so
-        # we never emit an invalid ``pip install -e ".[]"`` when none of the
-        # desired extras exist.
-        desired_extras = ['tests']
-        if 'cv2' in self.tags:
-            desired_extras.append('headless')
-        if 'gdal' in self.tags:
-            desired_extras.append('gdal')
-        extras = common_ci.filter_pyproject_extras(self, desired_extras)
+        # Always include the test extras selected by the shared CI plan so
+        # pytest is available in the sdist test steps below.  The plan filters
+        # against the project's actual optional-dependencies, avoiding invalid
+        # install targets such as ``pip install -e ".[]"``.
+        plan = common_ci.make_ci_plan(self)
         install_target = common_ci.format_pyproject_install_target(
-            extras, editable=True
+            plan.sdist_test_extras, editable=True
         )
         pip_reqs_install_parts = [
             f'{self.UPDATE_PIP}',
@@ -1590,83 +1584,7 @@ def test_wheels_job(self, needs=None):
             os_list = os_list + ['windows-11-arm']
 
     install_extra_versions = supported_platform_info['install_extra_versions']
-
-    # Map the min/full loose/strict terminology to specific extra packages
-    import ubelt as ub
-
-    from xcookie.util_yaml import Yaml
-
-    special_loose_tags = []
-    if 'cv2' in self.tags:
-        # TODO: can probably have this generate appropriate ci_extras in the
-        # xcookie config?
-        special_loose_tags.append('headless')
-
-    # Parse ci_extras configuration if specified
-    ci_extras = {}
-    if self.config.get('ci_extras'):
-        ci_extras = Yaml.loads(self.config['ci_extras'])
-
-    if self.config['use_pyproject_requirements']:
-        special_strict_tags = [t for t in special_loose_tags]
-        install_extra_tags = ub.udict(
-            {
-                'minimal-loose': ['tests'] + special_loose_tags,
-                'full-loose': ['tests', 'optional'] + special_loose_tags,
-                'minimal-strict': ['tests'] + special_strict_tags,
-                'full-strict': ['tests', 'optional'] + special_strict_tags,
-            }
-        )
-    else:
-        special_strict_tags = [t + '-strict' for t in special_loose_tags]
-        install_extra_tags = ub.udict(
-            {
-                'minimal-loose': ['tests'] + special_loose_tags,
-                'full-loose': ['tests', 'optional'] + special_loose_tags,
-                'minimal-strict': ['tests-strict', 'runtime-strict']
-                + special_strict_tags,
-                'full-strict': [
-                    'tests-strict',
-                    'runtime-strict',
-                    'optional-strict',
-                ]
-                + special_strict_tags,
-            }
-        )
-
-    # Apply ci_extras to the install_extra_tags
-    # ci_extras can specify: 'loose', 'strict', 'minimal-loose', 'full-loose',
-    # 'minimal-strict', 'full-strict'
-    for variant_key, extras_list in ci_extras.items():
-        if variant_key == 'loose':
-            # Apply to all loose variants
-            for key in ['minimal-loose', 'full-loose']:
-                if key in install_extra_tags:
-                    install_extra_tags[key] += extras_list
-        elif variant_key == 'strict':
-            # Apply to all strict variants
-            for key in ['minimal-strict', 'full-strict']:
-                if key in install_extra_tags:
-                    install_extra_tags[key] += extras_list
-        elif variant_key in install_extra_tags:
-            # Apply to specific variant
-            install_extra_tags[variant_key] += extras_list
-
-    # Filter the requested extras against the project's actual
-    # optional-dependencies so we never reference an extra that does not
-    # exist in pyproject.toml. Only meaningful when use_pyproject_requirements
-    # is set; the requirements/*.txt path uses files keyed differently.
-    if self.config['use_pyproject_requirements']:
-        install_extra_tags = ub.udict(
-            {
-                k: common_ci.filter_pyproject_extras(self, v)
-                for k, v in install_extra_tags.items()
-            }
-        )
-
-    install_extras = ub.udict(
-        {k: ','.join(v) for k, v in install_extra_tags.items()}
-    )
+    plan = common_ci.make_ci_plan(self)
 
     special_strict_test_env = {}
     special_loose_test_env = {}
@@ -1681,68 +1599,47 @@ def test_wheels_job(self, needs=None):
 
     platform_basis = [{'os': osname, 'arch': 'auto'} for osname in os_list]
 
-    # Reduce the CI load, don't specify the entire product space
-    # arch = 'auto'
+    # Reduce the CI load, don't specify the entire product space.  The shared
+    # plan owns variant/extras policy; this renderer only expands variants
+    # across provider-specific platforms and Python versions.
     include = []
-    for platkw in platform_basis:
-        for extra in install_extras.take(['minimal-strict']):
-            for pyver in install_extra_versions['minimal-strict']:
-                item = {
-                    'python-version': pyver,
-                    'install-extras': extra,
-                    **platkw,
-                    **special_strict_test_env,
-                }
-                if self.config['use_pyproject_requirements']:
-                    item['uv-resolution'] = 'lowest-direct'
-                include.append(item)
 
-    for platkw in platform_basis:
-        for extra in install_extras.take(['full-strict']):
-            for pyver in install_extra_versions['full-strict']:
-                item = {
-                    'python-version': pyver,
-                    'install-extras': extra,
-                    **platkw,
-                    **special_strict_test_env,
-                }
-                if self.config['use_pyproject_requirements']:
-                    item['uv-resolution'] = 'lowest-direct'
-                include.append(item)
+    variant_groups = [
+        (tuple(plan.iter_active_variants(['minimal-strict'])), platform_basis),
+        (tuple(plan.iter_active_variants(['full-strict'])), platform_basis),
+        # Preserve the historical behavior where minimal-loose skips the first
+        # platform basis entry, usually Linux, to reduce CI load.
+        (tuple(plan.iter_active_variants(['minimal-loose'])), platform_basis[1:]),
+        (tuple(plan.iter_active_variants(['full-loose'])), platform_basis),
+    ]
 
-    for platkw in platform_basis[1:]:
-        for extra in install_extras.take(['minimal-loose']):
-            for pyver in install_extra_versions['minimal-loose']:
-                item = {
-                    'python-version': pyver,
-                    'install-extras': extra,
-                    **platkw,
-                    **special_loose_test_env,
-                }
-                if self.config['use_pyproject_requirements']:
-                    item['uv-resolution'] = 'highest'
-                include.append(item)
-
-    for platkw in platform_basis:
-        for extra in install_extras.take(['full-loose']):
-            for pyver in install_extra_versions['full-loose']:
-                item = {
-                    'python-version': pyver,
-                    'install-extras': extra,
-                    **platkw,
-                    **special_loose_test_env,
-                }
-                if self.config['use_pyproject_requirements']:
-                    item['uv-resolution'] = 'highest'
-                include.append(item)
+    for variants, platforms in variant_groups:
+        for platkw in platforms:
+            for variant in variants:
+                test_env = (
+                    special_strict_test_env
+                    if variant.is_strict
+                    else special_loose_test_env
+                )
+                for pyver in install_extra_versions[variant.key]:
+                    item = {
+                        'python-version': pyver,
+                        'install-extras': variant.install_extras,
+                        **platkw,
+                        **test_env,
+                    }
+                    if self.config['use_pyproject_requirements']:
+                        item['uv-resolution'] = variant.uv_resolution
+                    include.append(item)
 
     # TODO: implement pypy support
     # pypy_versions = supported_platform_info['pypy_versions']
     # for platkw in platform_basis:
-    #     for extra in install_extras.take(['full-loose']):
+    #     for variant in plan.iter_active_variants(['full-loose']):
     #         for pyver in pypy_versions:
     #             include.append({
-    #                 'python-version': pyver, 'install-extras': extra,
+    #                 'python-version': pyver,
+    #                 'install-extras': variant.install_extras,
     #                 **platkw, **special_loose_test_env})
 
     # When use_pyproject_requirements filters extras down to a smaller set
