@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import (
     Mapping,
     MutableMapping,
@@ -11,6 +13,7 @@ import ubelt as ub
 
 from xcookie.builders import common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
+from xcookie.builders.ci_plan import CIPlan
 from xcookie.util_yaml import Yaml
 
 # Type alias for json / yaml data structure
@@ -24,6 +27,57 @@ JSON_Mutable: TypeAlias = (
 JSON_Sequence: TypeAlias = Sequence['JSON']
 JSON_Mapping: TypeAlias = Mapping[str, 'JSON']
 JSON: TypeAlias = JSON_Terminal | JSON_Sequence | JSON_Mapping
+
+
+class GitHubActionsRenderer:
+    """Render GitHub Actions workflows from a provider-neutral CI plan."""
+
+    def __init__(self, applier, plan: CIPlan | None = None):
+        self.applier = applier
+        self.plan = plan if plan is not None else common_ci.make_ci_plan(applier)
+
+    def render_default(self) -> str:
+        """Render the default GitHub workflow.
+
+        The historical default workflow is the test workflow.  Keep that policy
+        here so module-level wrappers are thin aliases around the renderer.
+        """
+        return self.render_tests()
+
+    def render_tests(self) -> str:
+        name, jobs = _collect_test_jobs(self.applier, self.plan)
+        defaultbranch = self.applier.config['defaultbranch']
+        run_on_branches = ub.oset([defaultbranch, 'main'])
+        run_on_branches_str = ', '.join(run_on_branches)
+        on_lines = f"""
+        push:
+        pull_request:
+          branches: [ {run_on_branches_str} ]
+        """
+        return _render_workflow_text(name, on_lines, jobs, footer='')
+
+    def render_release(self) -> str:
+        name, jobs, release_build_needs = _collect_release_jobs(
+            self.applier, self.plan
+        )
+
+        if self.applier.config['deploy']:
+            jobs['test_deploy'] = build_deploy(
+                self.applier, mode='test', needs=release_build_needs
+            )
+            jobs['live_deploy'] = build_deploy(
+                self.applier, mode='live', needs=release_build_needs
+            )
+            jobs['release'] = build_github_release(
+                self.applier, needs=['live_deploy']
+            )
+
+        on_lines = """
+        push:
+        workflow_dispatch:
+        """
+        footer = _build_github_footer(self.applier)
+        return _render_workflow_text(name, on_lines, jobs, footer=footer)
 
 
 def _action_ref(name: str) -> str:
@@ -646,10 +700,12 @@ def _build_github_footer(self):
     return footer
 
 
-def _collect_test_jobs(self) -> tuple[str, Mapping]:
+def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     jobs = Yaml.Dict({})
     if self.config.linter:
-        jobs['lint_job'] = lint_job(self)
+        jobs['lint_job'] = lint_job(self, plan=plan)
         jobs['lint_job'].yaml_set_start_comment(
             ub.codeblock(
                 """
@@ -667,7 +723,9 @@ def _collect_test_jobs(self) -> tuple[str, Mapping]:
         name = 'PurePyCI'
         purepy_jobs = Yaml.Dict({})
         if 'nosrcdist' not in self.tags:
-            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
+            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(
+                self, plan=plan
+            )
             purepy_jobs['build_and_test_sdist'].yaml_set_start_comment(
                 ub.codeblock(
                     """
@@ -684,7 +742,7 @@ def _collect_test_jobs(self) -> tuple[str, Mapping]:
             build_purewheel_job(self)
         )
         purepy_jobs['test_purepy_wheels'] = Yaml.Dict(
-            test_wheels_job(self, needs=['build_purepy_wheels'])
+            test_wheels_job(self, needs=['build_purepy_wheels'], plan=plan)
         )
 
         purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(
@@ -715,7 +773,9 @@ def _collect_test_jobs(self) -> tuple[str, Mapping]:
         name = 'BinPyCI'
         binpy_jobs = Yaml.Dict({})
         if 'nosrcdist' not in self.tags:
-            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
+            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(
+                self, plan=plan
+            )
             binpy_jobs['build_and_test_sdist'].yaml_set_start_comment(
                 ub.codeblock(
                     """
@@ -732,7 +792,7 @@ def _collect_test_jobs(self) -> tuple[str, Mapping]:
             build_binpy_wheels_job(self)
         )
         binpy_jobs['test_binpy_wheels'] = Yaml.Dict(
-            test_wheels_job(self, needs=['build_binpy_wheels'])
+            test_wheels_job(self, needs=['build_binpy_wheels'], plan=plan)
         )
 
         binpy_jobs['build_binpy_wheels'].yaml_set_start_comment(
@@ -766,7 +826,9 @@ def _collect_test_jobs(self) -> tuple[str, Mapping]:
     return name, jobs
 
 
-def _collect_release_jobs(self):
+def _collect_release_jobs(self, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     jobs = Yaml.Dict({})
     release_build_needs = []
 
@@ -841,43 +903,18 @@ def _collect_release_jobs(self):
 
 def build_github_actions(self):
     # Backwards-compatible wrapper for older call sites.
-    return build_github_actions_tests(self)
+    return GitHubActionsRenderer(self).render_default()
 
 
 def build_github_actions_tests(self):
-    name, jobs = _collect_test_jobs(self)
-    defaultbranch = self.config['defaultbranch']
-    run_on_branches = ub.oset([defaultbranch, 'main'])
-    run_on_branches_str = ', '.join(run_on_branches)
-    on_lines = f"""
-    push:
-    pull_request:
-      branches: [ {run_on_branches_str} ]
-    """
-    return _render_workflow_text(name, on_lines, jobs, footer='')
+    return GitHubActionsRenderer(self).render_tests()
 
 
 def build_github_actions_release(self):
-    name, jobs, release_build_needs = _collect_release_jobs(self)
-
-    if self.config['deploy']:
-        jobs['test_deploy'] = build_deploy(
-            self, mode='test', needs=release_build_needs
-        )
-        jobs['live_deploy'] = build_deploy(
-            self, mode='live', needs=release_build_needs
-        )
-        jobs['release'] = build_github_release(self, needs=['live_deploy'])
-
-    on_lines = """
-    push:
-    workflow_dispatch:
-    """
-    footer = _build_github_footer(self)
-    return _render_workflow_text(name, on_lines, jobs, footer=footer)
+    return GitHubActionsRenderer(self).render_release()
 
 
-def lint_job(self):
+def lint_job(self, plan: CIPlan | None = None):
     supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     job = {
@@ -916,14 +953,16 @@ def lint_job(self):
     # TODO: I think we need to install reqs similarly
     # to how we do it in github here?
     if 'notypes' not in self.tags:
-        typecheck_cmds = common_ci.make_typecheck_parts(self)
+        typecheck_cmds = common_ci.make_typecheck_parts(self, plan=plan)
         # GitHub Actions expects a single string for `run` with newlines
         run_text = '\n'.join(typecheck_cmds)
         job['steps'].append({'name': 'Typecheck', 'run': run_text})
     return Yaml.Dict(job)
 
 
-def build_and_test_sdist_job(self):
+def build_and_test_sdist_job(self, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     wheelhouse_dpath = 'wheelhouse'
@@ -935,7 +974,6 @@ def build_and_test_sdist_job(self):
         # pytest is available in the sdist test steps below.  The plan filters
         # against the project's actual optional-dependencies, avoiding invalid
         # install targets such as ``pip install -e ".[]"``.
-        plan = common_ci.make_ci_plan(self)
         install_target = common_ci.format_pyproject_install_target(
             plan.sdist_test_extras, editable=True
         )
@@ -1558,7 +1596,9 @@ def build_binpy_wheels_release_job(self):
     return job
 
 
-def test_wheels_job(self, needs=None):
+def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     wheelhouse_dpath = 'wheelhouse'
     supported_platform_info = common_ci.get_supported_platform_info(self)
 
@@ -1584,7 +1624,6 @@ def test_wheels_job(self, needs=None):
             os_list = os_list + ['windows-11-arm']
 
     install_extra_versions = supported_platform_info['install_extra_versions']
-    plan = common_ci.make_ci_plan(self)
 
     special_strict_test_env = {}
     special_loose_test_env = {}

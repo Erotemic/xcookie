@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Common subroutines for consistency between gitlab-ci / github actions / etc...
 """
@@ -41,7 +43,7 @@ def make_ci_plan(self):
     return ci_plan.make_ci_plan(self)
 
 
-def make_typecheck_parts(self):
+def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     """
     Return a list of shell commands to run type checkers.
 
@@ -68,7 +70,8 @@ def make_typecheck_parts(self):
     req_files_text = ' '.join(type_requirement_files)
 
     if self.config['use_pyproject_requirements']:
-        plan = make_ci_plan(self)
+        if plan is None:
+            plan = make_ci_plan(self)
         target = format_pyproject_install_target(
             plan.typecheck_extras, editable=True
         )

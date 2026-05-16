@@ -83,10 +83,25 @@ Chunk 4: thin provider renderers
 
 After ``CIPlan`` exists, make GitHub and GitLab builders mostly syntax renderers.
 
-* Keep provider-specific job names, permissions, artifact actions, and deployment
-  syntax in renderer classes.
-* Move provider-neutral policy out of ``github_actions.py`` and ``gitlab_ci.py``.
-* Add side-by-side invariant tests for plan-derived content.
+Initial implementation status:
+
+* ``GitHubActionsRenderer`` owns test/release workflow rendering and receives a
+  single ``CIPlan`` for the whole workflow.
+* ``GitLabCIRenderer`` owns provider selection and threads the same ``CIPlan``
+  into pure-Python and binary GitLab render paths.
+* Module-level builder functions remain as thin wrappers around the renderer
+  classes while existing template call sites are migrated.
+* Leaf job builders accept an optional plan, so tests and higher-level renderers
+  can avoid reconstructing CI policy in multiple places.
+
+Remaining follow-up work for this chunk:
+
+* Move more provider-specific matrix expansion into renderer methods with small
+  typed helper records.
+* Move deployment and artifact policy into the shared plan once those records
+  exist.
+* Expand generated-output invariant tests so GitHub/GitLab renderers are
+  compared on plan-derived content rather than exact full YAML text.
 
 Chunk 5: secret rotation plan
 -----------------------------

@@ -1,6 +1,25 @@
+from __future__ import annotations
+
 import ubelt as ub
 
 from xcookie.builders import common_ci
+from xcookie.builders.ci_plan import CIPlan
+
+
+class GitLabCIRenderer:
+    """Render GitLab CI YAML from a provider-neutral CI plan."""
+
+    def __init__(self, applier, plan: CIPlan | None = None):
+        self.applier = applier
+        self.plan = plan if plan is not None else common_ci.make_ci_plan(applier)
+
+    def render(self) -> str:
+        if 'purepy' in self.applier.tags:
+            return make_purepy_ci_jobs(self.applier, plan=self.plan)
+        elif 'binpy' in self.applier.tags:
+            return make_binpy_ci_jobs(self.applier, plan=self.plan)
+        else:
+            raise NotImplementedError
 
 
 def build_gitlab_ci(self):
@@ -18,12 +37,7 @@ def build_gitlab_ci(self):
         >>> text = build_gitlab_ci(self)
         >>> print(ub.highlight_code(text, 'yaml'))
     """
-    if 'purepy' in self.tags:
-        return make_purepy_ci_jobs(self)
-    elif 'binpy' in self.tags:
-        return make_binpy_ci_jobs(self)
-    else:
-        raise NotImplementedError
+    return GitLabCIRenderer(self).render()
 
 
 def build_gitlab_rules(self):
@@ -96,7 +110,9 @@ def workflow_section():
     )
 
 
-def make_purepy_ci_jobs(self):
+def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     import ruamel.yaml  # NOQA
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
     from xcookie.util_yaml import Yaml
@@ -242,7 +258,6 @@ def make_purepy_ci_jobs(self):
     )
 
     test_templates = {}
-    plan = common_ci.make_ci_plan(self)
     install_extras = plan.active_install_extras()
     for extra_key, extra in install_extras.items():
         if 'gdal' in self.tags:
@@ -359,7 +374,7 @@ def make_purepy_ci_jobs(self):
         body.update(jobs)
 
     if enable_lint:
-        lint_job = build_lint_job(self, common_template, main_image)
+        lint_job = build_lint_job(self, common_template, main_image, plan=plan)
         body['lint'] = lint_job
 
     if enable_gpg:
@@ -403,7 +418,9 @@ def make_purepy_ci_jobs(self):
     return text
 
 
-def make_binpy_ci_jobs(self):
+def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     import ruamel.yaml  # NOQA
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
     from xcookie.util_yaml import Yaml
@@ -553,7 +570,6 @@ def make_binpy_ci_jobs(self):
     )
 
     test_templates = {}
-    plan = common_ci.make_ci_plan(self)
     install_extras = plan.active_install_extras()
     for extra_key, extra in install_extras.items():
         if 'gdal' in self.tags:
@@ -682,7 +698,7 @@ def make_binpy_ci_jobs(self):
     return text
 
 
-def build_lint_job(self, common_template, deploy_image):
+def build_lint_job(self, common_template, deploy_image, plan: CIPlan | None = None):
     from ruamel.yaml.comments import CommentedMap
 
     from xcookie.util_yaml import Yaml
@@ -722,7 +738,7 @@ def build_lint_job(self, common_template, deploy_image):
 
     # Add typechecking commands (mypy + ty by default) unless disabled
     if 'notypes' not in self.tags:
-        typecheck_cmds = common_ci.make_typecheck_parts(self)
+        typecheck_cmds = common_ci.make_typecheck_parts(self, plan=plan)
         # Ensure the script key exists and is a list
         script_list = lint_job.get('script') or []
         # Extend script with typecheck commands
