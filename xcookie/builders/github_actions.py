@@ -12,6 +12,7 @@ from typing import (
 
 import ubelt as ub
 
+from xcookie.builders import ci_model
 from xcookie.builders import common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.builders.ci_plan import CIPlan
@@ -725,14 +726,18 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
             indent=4,
         )
 
+
     if 'purepy' in self.tags:
         name = 'PurePyCI'
+        workflow_plan = ci_model.make_purepy_workflow_plan(
+            self, plan=plan, provider='github'
+        )
         purepy_jobs = Yaml.Dict({})
-        if 'nosrcdist' not in self.tags:
-            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(
+        if workflow_plan.sdist_job_key is not None:
+            purepy_jobs[workflow_plan.sdist_job_key] = build_and_test_sdist_job(
                 self, plan=plan
             )
-            purepy_jobs['build_and_test_sdist'].yaml_set_start_comment(
+            purepy_jobs[workflow_plan.sdist_job_key].yaml_set_start_comment(
                 ub.codeblock(
                     """
                 ##
@@ -744,14 +749,18 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
                 indent=4,
             )
 
-        purepy_jobs['build_purepy_wheels'] = Yaml.Dict(
+        purepy_jobs[workflow_plan.wheel_build_job_key] = Yaml.Dict(
             build_purewheel_job(self)
         )
-        purepy_jobs['test_purepy_wheels'] = Yaml.Dict(
-            test_wheels_job(self, needs=['build_purepy_wheels'], plan=plan)
+        purepy_jobs[workflow_plan.artifact_test_job_key] = Yaml.Dict(
+            test_wheels_job(
+                self,
+                needs=[workflow_plan.wheel_build_job_key],
+                plan=plan,
+            )
         )
 
-        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(
+        purepy_jobs[workflow_plan.wheel_build_job_key].yaml_set_start_comment(
             ub.codeblock(
                 """
             ##
@@ -762,7 +771,7 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
             ),
             indent=4,
         )
-        purepy_jobs['test_purepy_wheels'].yaml_set_start_comment(
+        purepy_jobs[workflow_plan.artifact_test_job_key].yaml_set_start_comment(
             ub.codeblock(
                 """
             ##
@@ -1604,175 +1613,15 @@ def build_binpy_wheels_release_job(self):
     return job
 
 
+
 def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     if plan is None:
         plan = common_ci.make_ci_plan(self)
     wheelhouse_dpath = 'wheelhouse'
-    supported_platform_info = common_ci.get_supported_platform_info(self)
-
-    os_list = supported_platform_info['os_list']
-
-    pyproj_config = self.config._load_pyproject_config()
-
-    cibw_windows_build_arches = (
-        pyproj_config.get('tool', {})
-        .get('cibuildwheel', {})
-        .get('windows', {})
-        .get('archs', None)
+    cases = ci_model.make_artifact_test_cases(
+        self, plan=plan, provider='github'
     )
-    if cibw_windows_build_arches is not None:
-        cibw_windows_build_arches = [
-            _.lower() for _ in cibw_windows_build_arches
-        ]
-
-        if 'arm64' in cibw_windows_build_arches:
-            # If we are building binaries for arm on windows, then
-            # we need to extend the os_list here to ensure we are testing
-            # on windows arm.
-            os_list = os_list + ['windows-11-arm']
-
-    install_extra_versions = supported_platform_info['install_extra_versions']
-
-    special_strict_test_env = {}
-    special_loose_test_env = {}
-    if 'gdal' in self.tags:
-        special_loose_test_env['gdal-requirement-txt'] = 'requirements/gdal.txt'
-        # TODO: need to have better logic for gdal strict that doesn't require
-        # separate tracked files.
-        # special_strict_test_env['gdal-requirement-txt'] = 'requirements-strict/gdal.txt'
-        special_strict_test_env['gdal-requirement-txt'] = (
-            'requirements/gdal-strict.txt'
-        )
-
-    platform_basis = [{'os': osname, 'arch': 'auto'} for osname in os_list]
-
-    # Reduce the CI load, don't specify the entire product space.  The shared
-    # plan owns variant/extras policy; this renderer only expands variants
-    # across provider-specific platforms and Python versions.
-    include = []
-
-    variant_groups = [
-        (tuple(plan.iter_active_variants(['minimal-strict'])), platform_basis),
-        (tuple(plan.iter_active_variants(['full-strict'])), platform_basis),
-        # Preserve the historical behavior where minimal-loose skips the first
-        # platform basis entry, usually Linux, to reduce CI load.
-        (tuple(plan.iter_active_variants(['minimal-loose'])), platform_basis[1:]),
-        (tuple(plan.iter_active_variants(['full-loose'])), platform_basis),
-    ]
-
-    for variants, platforms in variant_groups:
-        for platkw in platforms:
-            for variant in variants:
-                test_env = (
-                    special_strict_test_env
-                    if variant.is_strict
-                    else special_loose_test_env
-                )
-                for pyver in install_extra_versions[variant.key]:
-                    item = {
-                        'python-version': pyver,
-                        'install-extras': variant.install_extras,
-                        **platkw,
-                        **test_env,
-                    }
-                    if self.config['use_pyproject_requirements']:
-                        item['uv-resolution'] = variant.uv_resolution
-                    include.append(item)
-
-    # TODO: implement pypy support
-    # pypy_versions = supported_platform_info['pypy_versions']
-    # for platkw in platform_basis:
-    #     for variant in plan.iter_active_variants(['full-loose']):
-    #         for pyver in pypy_versions:
-    #             include.append({
-    #                 'python-version': pyver,
-    #                 'install-extras': variant.install_extras,
-    #                 **platkw, **special_loose_test_env})
-
-    # When use_pyproject_requirements filters extras down to a smaller set
-    # (or projects only declare a 'tests' extra), variants like full-strict
-    # and minimal-strict can collapse into identical matrix entries; drop
-    # exact duplicates here rather than failing the assert.
-    if self.config['use_pyproject_requirements']:
-        seen_hashes = set()
-        deduped = []
-        for item in include:
-            h = ub.hash_data(item)
-            if h in seen_hashes:
-                continue
-            seen_hashes.add(h)
-            deduped.append(item)
-        include = deduped
-    else:
-        assert not ub.find_duplicates(map(ub.hash_data, include))
-
-    # Do postprocessing on include items, filtering out ones that aren't
-    # supported.
-    filtered_include = []
-    for item in include:
-        # Available os names:
-        # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
-        if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
-            # This image is no longer supported, and does not work apparently
-            item['os'] = 'ubuntu-20.04'
-            # item['os'] = 'ubuntu-18.04'
-        if item['python-version'] == '3.7' and item['os'] == 'ubuntu-latest':
-            item['os'] = 'ubuntu-22.04'
-        if item['python-version'] == '3.6' and item['os'] == 'macOS-latest':
-            item['os'] = 'macos-13'
-        if item['python-version'] == '3.7' and item['os'] == 'macOS-latest':
-            item['os'] = 'macos-13'
-
-        if item['os'] == 'windows-11-arm' and item['python-version'] in {
-            '3.6',
-            '3.7',
-            '3.8',
-            '3.9',
-            '3.10',
-        }:
-            # cibuildwheel can't target 3.8 on Window ARM64
-            # GitHub doesn't have anything below Python 3.11 on their ARM64
-            # machines, so just test the built wheels from 3.11+
-            continue
-
-        filtered_include.append(item)
-    include = filtered_include
-
-    if True:
-        # hack, todo better specific disable for rc versions
-        # if self.config.mod_name == 'xcookie':
-        #     filtered_include = []
-        #     for item in include:
-        #         flag = True
-        #         if 'rc' in item['python-version']:
-        #             if 'windows' in item['os']:
-        #                 flag = False
-        #         if flag:
-        #             filtered_include.append(item)
-        #     include = filtered_include
-        import re
-        from fnmatch import translate as glob_to_re
-
-        def compile_rules(rules):
-            return [
-                {k: re.compile(glob_to_re(str(pat))) for k, pat in rule.items()}
-                for rule in (rules or ())
-            ]
-
-        def is_blocked_compiled(item, compiled_rules):
-            for crule in compiled_rules:
-                if all(
-                    regex.fullmatch(str(item.get(k, '')))
-                    for k, regex in crule.items()
-                ):
-                    return True
-            return False
-
-        ci_blocklist = Yaml.coerce(self.config.ci_blocklist)
-        compiled = compile_rules(ci_blocklist)
-        include = [
-            it for it in include if not is_blocked_compiled(it, compiled)
-        ]
+    include = [case.github_matrix_item() for case in cases]
 
     condition = "! startsWith(github.event.ref, 'refs/heads/release')"
     job = Yaml.Dict(
@@ -1785,12 +1634,6 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
                 'fail-fast': False,
                 'matrix': Yaml.Dict(
                     {
-                        # 'os': os_list,
-                        # 'python-version': python_versions_non34,
-                        # 'install-extras': list(install_extras.take(['minimal-loose', 'full-loose'])),
-                        # 'arch': [
-                        #     'auto'
-                        # ],
                         'include': include,
                     }
                 ),
@@ -1809,26 +1652,12 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         indent=8,
     )
 
-    # if 1:
-    #     # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
-    #     # get_modname_bash = f'python -c "{get_modname_python}"'
-
-    #     # get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
-    #     # get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
-
-    #     # get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
-    #     # get_mod_version_bash = f'python -c "{get_mod_version_python}"'
-
-    #     # # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
-    #     # get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
-    #     # get_modpath_bash = f'python -c "{get_modpath_python}"'
-
     install_env = {'INSTALL_EXTRAS': '${{ matrix.install-extras }}'}
     if self.config['use_pyproject_requirements']:
         install_env['UV_RESOLUTION'] = '${{ matrix.uv-resolution }}'
 
     special_install_lines = []
-    if 'gdal' in self.tags:
+    if any(case.gdal_requirement_txt is not None for case in cases):
         install_env['GDAL_REQUIREMENT_TXT'] = (
             '${{ matrix.gdal-requirement-txt }}'
         )
@@ -1860,7 +1689,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         action_steps += [
             Actions.setup_ipfs(),
         ]
-    if _matrix_needs_qemu(job['strategy']['matrix']):
+    if ci_model.any_test_case_needs_qemu(cases):
         action_steps += [Actions.setup_qemu(sensible=True)]
     action_steps += [
         Actions.setup_python(
@@ -2006,7 +1835,6 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         ]
     job['steps'] = action_steps
     return job
-
 
 def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
     """

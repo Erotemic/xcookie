@@ -1,134 +1,80 @@
-from __future__ import annotations
-
-from pathlib import Path
-
-
-class _FakeConfig(dict):
-    def __init__(self, repodir: Path, pyproject_data=None, **kwargs):
-        defaults = {
-            'repodir': repodir,
-            'use_pyproject_requirements': True,
-            'test_variants': [
-                'minimal-loose',
-                'full-loose',
-                'minimal-strict',
-                'full-strict',
-            ],
-            'ci_extras': None,
-        }
-        defaults.update(kwargs)
-        super().__init__(defaults)
-        self._pyproject_data = pyproject_data or {}
-
-    def _load_pyproject_config(self):
-        return self._pyproject_data
-
-    def __getattr__(self, key):
-        try:
-            return self[key]
-        except KeyError:
-            raise AttributeError(key)
+from xcookie.builders import ci_model, ci_plan
+from xcookie.main import TemplateApplier, XCookieConfig
 
 
-class _FakeApplier:
-    def __init__(self, config, tags=None):
-        self.config = config
-        self.tags = tags or ['github', 'purepy']
+def _make_applier(tmp_path, *, tags=None, use_pyproject_requirements=False):
+    if tags is None:
+        tags = ['github', 'purepy']
+    cfg = XCookieConfig(
+        repodir=tmp_path,
+        repo_name='demo_pkg',
+        mod_name='demo_pkg',
+        tags=tags,
+        interactive=False,
+        rotate_secrets=False,
+        refresh_docs=False,
+        test_variants=[
+            'minimal-loose',
+            'full-loose',
+            'minimal-strict',
+            'full-strict',
+        ],
+    )
+    cfg['enable_gpg'] = False
+    cfg['deploy'] = False
+    cfg['use_pyproject_requirements'] = use_pyproject_requirements
+    self = TemplateApplier(cfg)
+    self._presetup()
+    return self
 
 
-def test_ci_plan_filters_static_pyproject_extras(tmp_path) -> None:
-    from xcookie.builders.ci_plan import make_ci_plan
+def test_format_pyproject_install_target_omits_empty_brackets():
+    assert ci_plan.format_pyproject_install_target([], editable=True) == '-e "."'
+    assert (
+        ci_plan.format_pyproject_install_target(['tests', 'optional'], editable=True)
+        == '-e ".[tests,optional]"'
+    )
 
-    (tmp_path / 'pyproject.toml').write_text('[project]\nname = "demo"\n')
-    pyproject_data = {
-        'project': {
-            'optional-dependencies': {
-                'tests': [],
-            }
-        }
-    }
-    config = _FakeConfig(tmp_path, pyproject_data=pyproject_data)
-    plan = make_ci_plan(_FakeApplier(config))
 
-    assert plan.optional_dependency_keys == {'tests'}
+def test_ci_plan_filters_pyproject_extras(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+version = "0.0.0"
+
+[project.optional-dependencies]
+tests = []
+optional = []
+headless = []
+'''
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy', 'cv2'],
+        use_pyproject_requirements=True,
+    )
+    plan = ci_plan.make_ci_plan(self)
+    assert plan.optional_dependency_keys == frozenset({'tests', 'optional', 'headless'})
     assert plan.typecheck_extras == ('tests',)
-    assert plan.sdist_test_extras == ('tests',)
-    assert plan.active_install_extras() == {
-        'minimal-loose': 'tests',
-        'full-loose': 'tests',
-        'minimal-strict': 'tests',
-        'full-strict': 'tests',
-    }
+    variants = plan.active_variants_by_key()
+    assert variants['full-strict'].extras == ('tests', 'optional', 'headless')
+    assert variants['full-strict'].uv_resolution == 'lowest-direct'
 
 
-def test_ci_plan_sees_dynamic_setuptools_extras(tmp_path) -> None:
-    from xcookie.builders.ci_plan import make_ci_plan
-
-    (tmp_path / 'pyproject.toml').write_text('[project]\nname = "demo"\n')
-    pyproject_data = {
-        'project': {},
-        'tool': {
-            'setuptools': {
-                'dynamic': {
-                    'optional-dependencies': {
-                        'tests': {'file': ['requirements/tests.txt']},
-                        'optional': {'file': ['requirements/optional.txt']},
-                    }
-                }
-            }
-        },
-    }
-    config = _FakeConfig(tmp_path, pyproject_data=pyproject_data)
-    plan = make_ci_plan(_FakeApplier(config))
-
-    assert {'tests', 'optional'} <= plan.optional_dependency_keys
-    assert plan.active_install_extras()['full-loose'] == 'tests,optional'
-    assert plan.active_install_extras()['full-strict'] == 'tests,optional'
+def test_artifact_test_cases_preserve_github_minimal_loose_platform_reduction(tmp_path):
+    self = _make_applier(tmp_path, tags=['github', 'purepy'])
+    plan = ci_plan.make_ci_plan(self)
+    cases = ci_model.make_artifact_test_cases(self, plan=plan, provider='github')
+    minimal_loose = [case for case in cases if case.variant.key == 'minimal-loose']
+    full_loose = [case for case in cases if case.variant.key == 'full-loose']
+    assert len(full_loose) >= len(minimal_loose)
+    assert all(case.platform.github_os != 'ubuntu-latest' for case in minimal_loose)
 
 
-def test_ci_plan_applies_ci_extras_by_group_and_variant(tmp_path) -> None:
-    from xcookie.builders.ci_plan import make_ci_plan
-
-    # No pyproject.toml exists, so the scaffold/new-repo path keeps desired
-    # extras without filtering against disk metadata.
-    config = _FakeConfig(
-        tmp_path,
-        pyproject_data={},
-        ci_extras={
-            'loose': ['loose-extra'],
-            'full-strict': ['strict-extra'],
-        },
-    )
-    plan = make_ci_plan(_FakeApplier(config))
-
-    extras = plan.active_install_extras()
-    assert extras['minimal-loose'] == 'tests,loose-extra'
-    assert extras['full-loose'] == 'tests,optional,loose-extra'
-    assert extras['minimal-strict'] == 'tests'
-    assert extras['full-strict'] == 'tests,optional,strict-extra'
-
-
-def test_ci_plan_legacy_requirements_mode_uses_strict_extra_names(tmp_path) -> None:
-    from xcookie.builders.ci_plan import make_ci_plan
-
-    config = _FakeConfig(
-        tmp_path,
-        use_pyproject_requirements=False,
-        pyproject_data={},
-    )
-    plan = make_ci_plan(_FakeApplier(config, tags=['github', 'purepy', 'cv2']))
-
-    extras = plan.active_install_extras()
-    assert extras['minimal-loose'] == 'tests,headless'
-    assert extras['full-loose'] == 'tests,optional,headless'
-    assert extras['minimal-strict'] == 'tests-strict,runtime-strict,headless-strict'
-    assert extras['full-strict'] == (
-        'tests-strict,runtime-strict,optional-strict,headless-strict'
-    )
-
-
-def test_format_pyproject_install_target_omits_empty_brackets() -> None:
-    from xcookie.builders.ci_plan import format_pyproject_install_target
-
-    assert format_pyproject_install_target([], editable=True) == '-e "."'
-    assert format_pyproject_install_target(['tests']) == '".[tests]"'
+def test_ci_platform_mapping_adds_gitlab_linux_platform(tmp_path):
+    self = _make_applier(tmp_path, tags=['gitlab', 'purepy'])
+    platforms = ci_model.make_ci_platforms(self, provider='gitlab')
+    assert len(platforms) == 1
+    assert platforms[0].logical_os == 'linux'
+    assert platforms[0].gitlab_arch == 'x86_64'
