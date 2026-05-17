@@ -957,10 +957,13 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
     if self.config['deploy_tags']:
         deploy_script += [
             Yaml.CodeBlock(
-                r"""
-                set -e
+                'set -e\n'
+                + common_ci.make_project_version_assignment(
+                    self, 'PROJECT_VERSION', export=True
+                )
+                + '\n'
+                + r"""
                 # Have the server git-tag the release and push the tags
-                export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
                 # do sed twice to handle the case of https clone with and without a read token
                 URL_HOST=$(git remote get-url origin | sed -e 's|https\?://.*@||g' | sed -e 's|https\?://||g' | sed -e 's|git@||g' | sed -e 's|:|/|g')
                 source dev/secrets_configuration.sh
@@ -997,7 +1000,7 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                 echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
                 echo "CI_API_V4_URL=$CI_API_V4_URL"
 
-                export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+                {common_ci.make_project_version_assignment(self, 'PROJECT_VERSION', export=True)}
                 echo "PROJECT_VERSION=$PROJECT_VERSION"
 
                 # If running on CI use CI authentication, otherwise
@@ -1076,8 +1079,11 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                 __note__
             deploy_script += [
                 Yaml.CodeBlock(
-                    r"""
-                    export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+                    common_ci.make_project_version_assignment(
+                        self, 'PROJECT_VERSION', export=True
+                    )
+                    + '\n'
+                    + r"""
                     echo "PROJECT_VERSION=$PROJECT_VERSION"
                     TAG_NAME="v$PROJECT_VERSION"
 

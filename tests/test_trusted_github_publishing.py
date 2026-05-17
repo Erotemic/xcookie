@@ -500,6 +500,20 @@ def test_release_workflow_pyproject_mode_does_not_import_setup(tmp_path):
     assert 'ast.parse' in text
 
 
+
+def test_gitlab_deploy_pyproject_mode_does_not_import_setup(tmp_path):
+    text = _make_applier(
+        tmp_path,
+        trusted=False,
+        enable_gpg=True,
+        tags=['gitlab', 'kitware', 'purepy'],
+        use_setup_py=False,
+    ).build_gitlab_ci()
+
+    assert 'import setup; print(setup.VERSION)' not in text
+    assert 'demo_pkg/__init__.py' in text
+    assert 'ast.parse' in text
+
 def test_yes_flag_answers_xcookie_prompts_without_stdin():
     cfg = XCookieConfig(yes=True, interactive=True)
 

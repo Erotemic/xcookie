@@ -4,6 +4,8 @@ from __future__ import annotations
 Common subroutines for consistency between gitlab-ci / github actions / etc...
 """
 
+import shlex
+
 import ubelt as ub
 
 from xcookie.builders import ci_plan
@@ -493,3 +495,39 @@ def get_supported_platform_info(self):
         f'supported_platform_info = {ub.urepr(supported_platform_info, nl=1)}'
     )
     return supported_platform_info
+
+
+def _py_shell_command(code: str) -> str:
+    """Return a shell-safe ``python -c`` command."""
+    return 'python -c ' + shlex.quote(code)
+
+
+def make_project_version_getter(self) -> str:
+    """Return a shell command that prints the project version.
+
+    Historically generated deploy jobs imported ``setup.VERSION``.  That is
+    invalid for pyproject-only repositories.  When ``setup.py`` is disabled,
+    statically parse ``__version__`` from the package ``__init__`` module
+    instead of importing the project package or its runtime dependencies.
+    """
+    if self.config['use_setup_py']:
+        return 'python -c "import setup; print(setup.VERSION)"'
+
+    rel_init = (self.rel_mod_dpath / '__init__.py').as_posix()
+    py_code = (
+        'import ast, pathlib; '
+        f'tree = ast.parse(pathlib.Path({rel_init!r}).read_text()); '
+        'print(next(ast.literal_eval(n.value) for n in tree.body '
+        'if isinstance(n, ast.Assign) '
+        'and any(getattr(t, "id", None) == "__version__" '
+        'for t in n.targets)))'
+    )
+    return _py_shell_command(py_code)
+
+
+def make_project_version_assignment(
+    self, variable: str = 'VERSION', export: bool = False
+) -> str:
+    """Return a shell assignment for the current project version."""
+    prefix = 'export ' if export else ''
+    return f'{prefix}{variable}=$({make_project_version_getter(self)})'
