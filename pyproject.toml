@@ -111,9 +111,6 @@ overrides = [ { module = [
 ], ignore_missing_imports = true } ]
 
 [tool.ty]
-overrides = [ { include = [
-  "xcookie/main.py",
-] } ]
 rules.unused-type-ignore-comment = "ignore"
 rules.unresolved-import = "ignore"
 src.exclude = []

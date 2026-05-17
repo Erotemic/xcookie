@@ -642,11 +642,12 @@ class XCookieConfig(scfg.DataConfig):
     ):
         # We load the config multiple times to get the right defaults.
         # ideally we should fix this up
-        cli_kwargs = {
-            'strict': strict,
-            'autocomplete': autocomplete,
-        }
-        config = XCookieConfig.cli(argv=argv, data=kwargs, **cli_kwargs)
+        config = XCookieConfig.cli(
+            argv=argv,
+            data=kwargs,
+            strict=strict,
+            autocomplete=autocomplete,
+        )
         # config.__post_init__()
         settings = config._load_xcookie_pyproject_settings()
         if settings:
@@ -655,7 +656,8 @@ class XCookieConfig(scfg.DataConfig):
                 argv=argv,
                 data=kwargs,
                 default=ub.dict_isect(settings, config),
-                **cli_kwargs,
+                strict=strict,
+                autocomplete=autocomplete,
             )
         return config
 
