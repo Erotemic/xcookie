@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import ubelt as ub
 
 from xcookie.builders import common_ci
@@ -165,7 +167,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
     body['stages'] = CommentedSeq(stages)
     body.yaml_add_eol_comment('stages', 'TEMPLATE1,c 1')
 
-    common_template = ub.udict(
+    common_template_data = ub.udict(
         Yaml.loads(
             ub.codeblock(
                 """
@@ -194,7 +196,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         )
     )
 
-    common_template = CommentedMap(common_template)
+    common_template = CommentedMap(common_template_data)
     common_template.yaml_set_anchor('common_template')
     body['.common_template'] = common_template
 
@@ -456,7 +458,7 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
         stages.append('gpgsign')
     body['stages'] = CommentedSeq(stages)
 
-    common_template = ub.udict(
+    common_template_data = ub.udict(
         Yaml.loads(
             ub.codeblock(
                 """
@@ -478,7 +480,7 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
         )
     )
 
-    common_template = CommentedMap(common_template)
+    common_template = CommentedMap(common_template_data)
     common_template.yaml_set_anchor('common_template')
     body['.common_template'] = common_template
 
@@ -722,7 +724,7 @@ def build_lint_job(self, common_template, deploy_image, plan: CIPlan | None = No
 
     from xcookie.util_yaml import Yaml
 
-    lint_job = {}
+    lint_job: dict[str, Any] = {}
     lint_job.update(
         ub.udict(
             Yaml.loads(

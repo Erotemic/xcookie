@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import (
+    Any,
     Mapping,
     MutableMapping,
     MutableSequence,
@@ -922,7 +923,7 @@ def build_github_actions_release(self):
 def lint_job(self, plan: CIPlan | None = None):
     supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
-    job = {
+    job: dict[str, Any] = {
         'runs-on': 'ubuntu-latest',
         'steps': [
             Actions.checkout(),
@@ -982,7 +983,7 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
         install_target = common_ci.format_pyproject_install_target(
             plan.sdist_test_extras, editable=True
         )
-        pip_reqs_install_parts = [
+        pip_reqs_install_parts: list[str] = [
             f'{self.UPDATE_PIP}',
             f'{self.PIP_INSTALL_PREFER_BINARY} {install_target}',
         ]
@@ -991,13 +992,15 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
             f'{self.UPDATE_PIP}',
             f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/tests.txt',
             f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/runtime.txt',
-            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt'
-            if 'cv2' in self.tags
-            else None,
-            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
-            if 'gdal' in self.tags
-            else None,
         ]
+        if 'cv2' in self.tags:
+            pip_reqs_install_parts.append(
+                f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt'
+            )
+        if 'gdal' in self.tags:
+            pip_reqs_install_parts.append(
+                f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
+            )
 
     import kwutil
 

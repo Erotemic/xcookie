@@ -149,7 +149,7 @@ def _normalize_tags(value: Any) -> frozenset[str]:
         return frozenset()
     if isinstance(value, str):
         value = value.split(',')
-    tags = []
+    tags: list[str] = []
     for item in value:
         tags.extend(part.strip() for part in str(item).split(','))
     return frozenset(tag for tag in tags if tag)

@@ -95,6 +95,14 @@ exclude = [
     #'ubelt/util_stream.py'
 ]
 
+[[tool.ty.overrides]]
+include = ["xcookie/main.py"]
+
+[tool.ty.overrides.rules]
+# ty 0.0.37 cannot narrow the value types in the **cli_kwargs dict
+# forwarded into scriptconfig.Config.cli in XCookieConfig.load_from_cli_and_pyproject.
+invalid-argument-type = "ignore"
+
 [tool.ruff]
 line-length = 80
 target-version = "py38"
@@ -156,7 +164,6 @@ docstring-code-format = false
 #include = ["xcookie*"]
 
 ## Package data mirrors your setup.py
-#[tool.setuptools.package-data]
 #"*" = ["requirements/*.txt"]
 #"xcookie" = ["py.typed", "*.pyi"]
 #"xcookie.rc" = ["*.in"]

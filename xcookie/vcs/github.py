@@ -100,7 +100,7 @@ def version_bump():
     # Github create PR
 
 
-def _parse_changelog(fpath) -> dict[object, list]:
+def _parse_changelog(fpath) -> dict[object, list[str]]:
     """
     Helper to parse the changelog for the version to verify versions agree.
 
@@ -115,7 +115,7 @@ def _parse_changelog(fpath) -> dict[object, list]:
 
     version = None
     versions = []
-    version_changelines = ub.ddict(list)
+    version_changelines: dict[object, list[str]] = ub.ddict(list)
     with open(fpath, 'r') as file:
         for line in file.readlines():
             line = line.rstrip()
