@@ -427,3 +427,170 @@ def make_test_workflow_plan(
     if 'binpy' in self.tags:
         return make_binpy_workflow_plan(self, plan=plan, provider=provider)
     raise NotImplementedError('Need to specify binpy or purepy in tags')
+
+
+@dataclass(frozen=True)
+class PublishTarget:
+    """One publishing/deploy target described before provider rendering."""
+
+    name: str
+    repository_url: str | None = None
+    environment: str | None = None
+    trusted_publishing: bool = False
+    requires_oidc: bool = False
+    upload_artifacts: bool = True
+
+
+@dataclass(frozen=True)
+class ReleasePlan:
+    """Provider-neutral release/deploy description used before rendering."""
+
+    provider: ProviderName
+    package_kind: PackageKind
+    build_job_keys: tuple[str, ...]
+    deploy_job_keys: tuple[str, ...]
+    publish_targets: tuple[PublishTarget, ...]
+    signing_transport: str | None
+    distribution_globs: tuple[str, ...]
+    artifact_globs: tuple[str, ...]
+
+
+def _package_kind_from_tags(self: Any) -> PackageKind:
+    if 'purepy' in self.tags:
+        return 'purepy'
+    if 'binpy' in self.tags:
+        return 'binpy'
+    raise NotImplementedError('Need to specify binpy or purepy in tags')
+
+
+def make_distribution_globs(
+    self: Any,
+    wheelhouse_dpath: str = 'wheelhouse',
+) -> tuple[str, ...]:
+    """Return distribution globs that publish/sign steps operate on."""
+    globs = [f'{wheelhouse_dpath}/*.whl']
+    if 'nosrcdist' not in self.tags:
+        globs.append(f'{wheelhouse_dpath}/*.tar.gz')
+    return tuple(globs)
+
+
+def make_release_artifact_globs(
+    self: Any,
+    wheelhouse_dpath: str = 'wheelhouse',
+) -> tuple[str, ...]:
+    """Return artifact globs preserved by release/signing jobs."""
+    globs = list(make_distribution_globs(self, wheelhouse_dpath))
+    globs.append(f'{wheelhouse_dpath}/*.zip')
+    if self.config.get('enable_gpg', False):
+        globs.append(f'{wheelhouse_dpath}/*.asc')
+        globs.append(f'{wheelhouse_dpath}/*.ots')
+    return tuple(globs)
+
+
+def make_publish_targets(
+    self: Any,
+    provider: ProviderName = 'github',
+) -> tuple[PublishTarget, ...]:
+    """Describe the configured publishing targets without rendering YAML."""
+    targets: list[PublishTarget] = []
+    deploy_pypi = bool(self.config.get('deploy_pypi', False))
+    deploy_tags = bool(self.config.get('deploy_tags', False))
+    deploy_artifacts = bool(self.config.get('deploy_artifacts', False))
+
+    if provider == 'github':
+        trusted = bool(self.config.get('ci_pypi_trusted_publishing', False))
+        if deploy_pypi:
+            targets.extend(
+                [
+                    PublishTarget(
+                        name='testpypi',
+                        repository_url='https://test.pypi.org/legacy/',
+                        environment='testpypi',
+                        trusted_publishing=trusted,
+                        requires_oidc=trusted,
+                    ),
+                    PublishTarget(
+                        name='pypi',
+                        repository_url='https://upload.pypi.org/legacy/',
+                        environment='pypi',
+                        trusted_publishing=trusted,
+                        requires_oidc=trusted,
+                    ),
+                ]
+            )
+        if deploy_tags:
+            targets.append(
+                PublishTarget(name='github-release', upload_artifacts=True)
+            )
+    else:
+        if deploy_pypi:
+            targets.append(
+                PublishTarget(
+                    name='pypi',
+                    repository_url='https://upload.pypi.org/legacy/',
+                )
+            )
+        if deploy_tags:
+            targets.append(
+                PublishTarget(name='git-tags', upload_artifacts=False)
+            )
+        if deploy_artifacts:
+            targets.append(PublishTarget(name='gitlab-package-registry'))
+
+    return tuple(targets)
+
+
+def make_release_plan(
+    self: Any,
+    provider: ProviderName = 'github',
+    wheelhouse_dpath: str = 'wheelhouse',
+) -> ReleasePlan:
+    """Build a provider-neutral description of release/deploy behavior."""
+    package_kind = _package_kind_from_tags(self)
+    enable_gpg = bool(self.config.get('enable_gpg', False))
+    deploy = bool(self.config.get('deploy', False))
+
+    if provider == 'github':
+        build_job_keys = []
+        if 'nosrcdist' not in self.tags:
+            build_job_keys.append('build_sdist')
+        if package_kind == 'purepy':
+            build_job_keys.append('build_purepy_wheels')
+        else:
+            build_job_keys.append('build_binpy_wheels')
+
+        deploy_job_keys = []
+        if deploy:
+            deploy_job_keys.extend(['test_deploy', 'live_deploy', 'release'])
+    else:
+        build_job_keys = []
+        if package_kind == 'purepy':
+            if 'nosrcdist' not in self.tags:
+                build_job_keys.append('build/sdist')
+            build_job_keys.append('build/{swenv_key}')
+        else:
+            build_job_keys.append('build/{swenv_key}')
+
+        deploy_job_keys = []
+        if enable_gpg:
+            deploy_job_keys.append('gpgsign/wheels')
+        if deploy:
+            deploy_job_keys.append('deploy/wheels')
+
+    signing_transport = None
+    if enable_gpg:
+        signing_transport = str(
+            self.config.get('ci_gpg_secret_transport', 'direct_ci')
+        )
+
+    return ReleasePlan(
+        provider=provider,
+        package_kind=package_kind,
+        build_job_keys=tuple(build_job_keys),
+        deploy_job_keys=tuple(deploy_job_keys),
+        publish_targets=make_publish_targets(self, provider=provider),
+        signing_transport=signing_transport,
+        distribution_globs=make_distribution_globs(self, wheelhouse_dpath),
+        artifact_globs=make_release_artifact_globs(self, wheelhouse_dpath),
+    )
+
