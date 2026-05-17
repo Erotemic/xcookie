@@ -726,7 +726,6 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
             indent=4,
         )
 
-
     if 'purepy' in self.tags:
         name = 'PurePyCI'
         workflow_plan = ci_model.make_purepy_workflow_plan(
@@ -786,12 +785,15 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
         jobs.update(purepy_jobs)
     elif 'binpy' in self.tags:
         name = 'BinPyCI'
+        workflow_plan = ci_model.make_binpy_workflow_plan(
+            self, plan=plan, provider='github'
+        )
         binpy_jobs = Yaml.Dict({})
-        if 'nosrcdist' not in self.tags:
-            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(
+        if workflow_plan.sdist_job_key is not None:
+            binpy_jobs[workflow_plan.sdist_job_key] = build_and_test_sdist_job(
                 self, plan=plan
             )
-            binpy_jobs['build_and_test_sdist'].yaml_set_start_comment(
+            binpy_jobs[workflow_plan.sdist_job_key].yaml_set_start_comment(
                 ub.codeblock(
                     """
                 ##
@@ -803,14 +805,18 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
                 indent=4,
             )
 
-        binpy_jobs['build_binpy_wheels'] = Yaml.Dict(
+        binpy_jobs[workflow_plan.wheel_build_job_key] = Yaml.Dict(
             build_binpy_wheels_job(self)
         )
-        binpy_jobs['test_binpy_wheels'] = Yaml.Dict(
-            test_wheels_job(self, needs=['build_binpy_wheels'], plan=plan)
+        binpy_jobs[workflow_plan.artifact_test_job_key] = Yaml.Dict(
+            test_wheels_job(
+                self,
+                needs=[workflow_plan.wheel_build_job_key],
+                plan=plan,
+            )
         )
 
-        binpy_jobs['build_binpy_wheels'].yaml_set_start_comment(
+        binpy_jobs[workflow_plan.wheel_build_job_key].yaml_set_start_comment(
             ub.codeblock(
                 """
             ##
@@ -822,7 +828,7 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
             ),
             indent=4,
         )
-        binpy_jobs['test_binpy_wheels'].yaml_set_start_comment(
+        binpy_jobs[workflow_plan.artifact_test_job_key].yaml_set_start_comment(
             ub.codeblock(
                 """
             ##

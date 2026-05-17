@@ -588,23 +588,17 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
         """
     )
 
-    test_templates = {}
-    install_extras = plan.active_install_extras()
-    for extra_key, extra in install_extras.items():
-        if 'gdal' in self.tags:
-            if extra_key.endswith('-strict'):
-                special_install_lines = [
-                    """
-                    sed 's/>=/==/' "requirements/gdal.txt" > "requirements/gdal-strict.txt
-                    """.strip(),
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal-strict.txt',
-                ]
-            else:
-                special_install_lines = [
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
-                ]
-        else:
-            special_install_lines = []
+    workflow_plan = ci_model.make_binpy_workflow_plan(
+        self, plan=plan, provider='gitlab'
+    )
+    artifact_test_cases = list(workflow_plan.artifact_test_cases)
+    test_templates: dict[str, Any] = {}
+    for case in ci_model.unique_variant_cases(artifact_test_cases):
+        extra_key = case.variant.key
+        extra = case.install_extras
+        special_install_lines = case.gitlab_special_install_lines(
+            self.PIP_INSTALL_PREFER_BINARY
+        )
         workspace_dname = 'sandbox'
         install_and_test_wheel_parts = (
             common_ci.make_install_and_test_wheel_parts(
@@ -630,16 +624,17 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
     main_cpver = 'cp' + main_pyver.replace('.', '')
     main_image = KNOWN_CPYTHON_DOCKER_IMAGES[main_cpver]
 
-    build_names = []
-    jobs = {}
-    opsys = 'linux'
-    arch = 'x86_64'
-    for pyver in self.config['ci_cpython_versions']:
-        cpver = 'cp' + pyver.replace('.', '')
+    build_names: list[str] = []
+    jobs: dict[str, Any] = {}
+    build_job_names: set[str] = set()
+    for case in artifact_test_cases:
+        cpver = case.gitlab_cpver
+        if cpver not in KNOWN_CPYTHON_DOCKER_IMAGES:
+            continue
         image = KNOWN_CPYTHON_DOCKER_IMAGES[cpver]
 
         # TODO: handle this case in other variants
-        extra_environs = {}
+        extra_environs: dict[str, str] = {}
 
         # fixme: might not be a robust check, e.g. python could release, but
         # packages might not have official wheels yet.
@@ -661,29 +656,36 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
                     }
                 )
 
-        swenv_key = f'{cpver}-{opsys}-{arch}'
-        build_name = f'build/{swenv_key}'
-        build_job = {
-            'variables': {
-                'CIBW_BUILD': f'{cpver}-*',
+        swenv_key = case.gitlab_swenv_key
+        build_name = workflow_plan.wheel_build_job_key.format(
+            swenv_key=swenv_key
+        )
+        if build_name not in build_job_names:
+            build_job = {
+                'variables': {
+                    'CIBW_BUILD': f'{cpver}-*',
+                }
             }
-        }
-        build_job = CommentedMap(build_job)
-        _add_yaml_merge(build_job, cibuildwheel_template)
-        jobs[build_name] = build_job
-        build_names.append(build_name)
+            build_job = CommentedMap(build_job)
+            _add_yaml_merge(build_job, cibuildwheel_template)
+            jobs[build_name] = build_job
+            build_names.append(build_name)
+            build_job_names.add(build_name)
 
-        for extra_key, common_test_template in test_templates.items():
-            test_name = f'test/{extra_key}/{swenv_key}'
-            test_job = {
-                'image': image,
-                'needs': [build_name],
-            }
-            test_job = CommentedMap(test_job)
-            _add_yaml_merge(test_job, common_test_template)
-            if extra_environs:
-                test_job['variables'] = extra_environs.copy()
-            jobs[test_name] = test_job
+        common_test_template = test_templates[case.variant.key]
+        test_name = workflow_plan.artifact_test_job_key.format(
+            variant_key=case.variant.key,
+            swenv_key=swenv_key,
+        )
+        test_job = {
+            'image': image,
+            'needs': [build_name],
+        }
+        test_job = CommentedMap(test_job)
+        _add_yaml_merge(test_job, common_test_template)
+        if extra_environs:
+            test_job['variables'] = extra_environs.copy()
+        jobs[test_name] = test_job
 
     body.update(jobs)
 

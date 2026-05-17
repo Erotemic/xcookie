@@ -51,12 +51,13 @@ class ArtifactTestCase:
     gdal_requirement_txt: str | None = None
 
     @property
-    def key(self) -> tuple[str, str, str, str, str | None, str | None]:
+    def key(self) -> tuple[str, str, str, str, str, str | None, str | None]:
         return (
             self.variant.key,
             self.python_version,
             self.platform.logical_os,
             self.platform.arch,
+            self.install_extras,
             self.uv_resolution,
             self.gdal_requirement_txt,
         )
@@ -383,3 +384,46 @@ def make_purepy_workflow_plan(
             make_artifact_test_cases(self, plan=plan, provider=provider)
         ),
     )
+
+
+def make_binpy_workflow_plan(
+    self: Any,
+    plan: CIPlan | None = None,
+    provider: ProviderName = 'github',
+) -> CIWorkflowPlan:
+    """Build the provider-neutral test workflow topology for binpy repos."""
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
+    sdist_job_key = None
+    if provider == 'github' and 'nosrcdist' not in self.tags:
+        sdist_job_key = 'build_and_test_sdist'
+    return CIWorkflowPlan(
+        kind='tests',
+        package_kind='binpy',
+        provider=provider,
+        sdist_job_key=sdist_job_key,
+        wheel_build_job_key='build_binpy_wheels'
+        if provider == 'github'
+        else 'build/{swenv_key}',
+        artifact_test_job_key='test_binpy_wheels'
+        if provider == 'github'
+        else 'test/{variant_key}/{swenv_key}',
+        artifact_test_cases=tuple(
+            make_artifact_test_cases(self, plan=plan, provider=provider)
+        ),
+    )
+
+
+def make_test_workflow_plan(
+    self: Any,
+    plan: CIPlan | None = None,
+    provider: ProviderName = 'github',
+) -> CIWorkflowPlan:
+    """Dispatch to the provider-neutral test workflow plan for this repo."""
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
+    if 'purepy' in self.tags:
+        return make_purepy_workflow_plan(self, plan=plan, provider=provider)
+    if 'binpy' in self.tags:
+        return make_binpy_workflow_plan(self, plan=plan, provider=provider)
+    raise NotImplementedError('Need to specify binpy or purepy in tags')
