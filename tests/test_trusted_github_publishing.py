@@ -500,7 +500,6 @@ def test_release_workflow_pyproject_mode_does_not_import_setup(tmp_path):
     assert 'ast.parse' in text
 
 
-
 def test_gitlab_deploy_pyproject_mode_does_not_import_setup(tmp_path):
     text = _make_applier(
         tmp_path,
@@ -513,6 +512,16 @@ def test_gitlab_deploy_pyproject_mode_does_not_import_setup(tmp_path):
     assert 'import setup; print(setup.VERSION)' not in text
     assert 'demo_pkg/__init__.py' in text
     assert 'ast.parse' in text
+
+
+def test_gitlab_yaml_merge_generation_supports_current_ruamel(tmp_path):
+    text = _make_direct_gpg_applier(
+        tmp_path, trusted=False, tags=['gitlab', 'kitware', 'purepy']
+    ).build_gitlab_ci()
+
+    assert '<<:' in text
+    assert 'gpgsign/wheels:' in text
+
 
 def test_yes_flag_answers_xcookie_prompts_without_stdin():
     cfg = XCookieConfig(yes=True, interactive=True)

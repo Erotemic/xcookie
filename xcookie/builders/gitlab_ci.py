@@ -22,6 +22,25 @@ class GitLabCIRenderer:
             raise NotImplementedError
 
 
+
+def _add_yaml_merge(target, referent):
+    """Attach a YAML merge key across ruamel.yaml versions.
+
+    Older xcookie code used ``add_yaml_merge([(0, referent)])``.  Newer
+    ruamel.yaml releases expect a ``MergeValue`` object; plain lists can be
+    accepted by ``add_yaml_merge`` but fail later while dumping because they do
+    not provide ``sequence`` / ``merge_pos`` attributes.
+    """
+    try:
+        from ruamel.yaml.mergevalue import MergeValue
+    except Exception:  # pragma: no cover - old ruamel fallback
+        target.add_yaml_merge([(0, referent)])
+    else:
+        merge_value = MergeValue()
+        merge_value.merge_pos = 0
+        merge_value.append(referent)
+        target.add_yaml_merge(merge_value)
+
 def build_gitlab_ci(self):
     """
     Example:
@@ -204,7 +223,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         build_sdist_template = CommentedMap(build_sdist_template)
         build_sdist_template.yaml_set_anchor('build_sdist_template')
         body['.build_sdist_template'] = build_sdist_template
-        build_sdist_template.add_yaml_merge([(0, common_template)])
+        _add_yaml_merge(build_sdist_template, common_template)
 
     # Make the wheel build template
     enable_wheel = True
@@ -226,7 +245,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         build_wheel_template = CommentedMap(build_wheel_template)
         build_wheel_template.yaml_set_anchor('build_wheel_template')
         body['.build_wheel_template'] = build_wheel_template
-        build_wheel_template.add_yaml_merge([(0, common_template)])
+        _add_yaml_merge(build_wheel_template, common_template)
 
     common_test_template = {
         'stage': 'test',
@@ -239,7 +258,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
 
     common_test_template = CommentedMap(common_test_template)
     common_test_template.yaml_set_anchor('common_test_template')
-    common_test_template.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(common_test_template, common_template)
     body['.common_test_template'] = common_test_template
 
     setup_venv_template = Yaml.CodeBlock(
@@ -292,7 +311,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         anchor = f'test_{extra_key}_template'
         test = CommentedMap(test)
         test.yaml_set_anchor(anchor)
-        test.add_yaml_merge([(0, common_test_template)])
+        _add_yaml_merge(test, common_test_template)
         body['.' + anchor] = test
         test_templates[extra_key] = test
 
@@ -316,7 +335,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
             'image': main_image,
         }
         build_job = CommentedMap(build_job)
-        build_job.add_yaml_merge([(0, build_sdist_template)])
+        _add_yaml_merge(build_job, build_sdist_template)
         jobs[build_name] = build_job
 
         sdist_test_python_versions = [pyver]
@@ -335,7 +354,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
                     ],
                 }
                 test_job = CommentedMap(test_job)
-                test_job.add_yaml_merge([(0, common_test_template)])
+                _add_yaml_merge(test_job, common_test_template)
                 jobs[test_name] = test_job
         body.update(jobs)
 
@@ -357,7 +376,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
                     'image': KNOWN_CPYTHON_DOCKER_IMAGES[cpver],
                 }
                 build_job = CommentedMap(build_job)
-                build_job.add_yaml_merge([(0, build_wheel_template)])
+                _add_yaml_merge(build_job, build_wheel_template)
                 jobs[build_name] = build_job
 
                 for extra_key, common_test_template in test_templates.items():
@@ -369,7 +388,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
                         ],
                     }
                     test_job = CommentedMap(test_job)
-                    test_job.add_yaml_merge([(0, common_test_template)])
+                    _add_yaml_merge(test_job, common_test_template)
                     jobs[test_name] = test_job
         body.update(jobs)
 
@@ -551,7 +570,7 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
     }
     common_test_template = CommentedMap(common_test_template)
     common_test_template.yaml_set_anchor('common_test_template')
-    common_test_template.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(common_test_template, common_template)
     body['.common_test_template'] = common_test_template
 
     setup_venv_template = Yaml.CodeBlock(
@@ -602,7 +621,7 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
         anchor = f'test_{extra_key}_template'
         test = CommentedMap(test)
         test.yaml_set_anchor(anchor)
-        test.add_yaml_merge([(0, common_test_template)])
+        _add_yaml_merge(test, common_test_template)
         body['.' + anchor] = test
         test_templates[extra_key] = test
 
@@ -650,7 +669,7 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
             }
         }
         build_job = CommentedMap(build_job)
-        build_job.add_yaml_merge([(0, cibuildwheel_template)])
+        _add_yaml_merge(build_job, cibuildwheel_template)
         jobs[build_name] = build_job
         build_names.append(build_name)
 
@@ -661,7 +680,7 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
                 'needs': [build_name],
             }
             test_job = CommentedMap(test_job)
-            test_job.add_yaml_merge([(0, common_test_template)])
+            _add_yaml_merge(test_job, common_test_template)
             if extra_environs:
                 test_job['variables'] = extra_environs.copy()
             jobs[test_name] = test_job
@@ -746,7 +765,7 @@ def build_lint_job(self, common_template, deploy_image, plan: CIPlan | None = No
         lint_job['script'] = script_list
 
     lint_job = CommentedMap(lint_job)
-    lint_job.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(lint_job, common_template)
 
     lint_job['allow_failure'] = True
     return lint_job
@@ -879,7 +898,7 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
     gpgsign_job['script'].append(f'ls {wheelhouse_dpath}')
 
     gpgsign_job = CommentedMap(gpgsign_job)
-    gpgsign_job.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(gpgsign_job, common_template)
 
     enable_otc = True
     if enable_otc:
@@ -1060,7 +1079,7 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                     echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
                     echo "CI_API_V4_URL=$CI_API_V4_URL"
 
-                    export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+                    {common_ci.make_project_version_assignment(self, 'PROJECT_VERSION', export=True)}
 
                     # Building this dummy variable requires some wheels built
                     # in the local dir, the next step wont use them directly
@@ -1127,5 +1146,5 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
 
     deploy_job['script'] = deploy_script
     deploy_job = CommentedMap(deploy_job)
-    deploy_job.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(deploy_job, common_template)
     return deploy_job

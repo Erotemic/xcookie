@@ -9,8 +9,6 @@ from typing import (
     cast,
 )
 
-import shlex
-
 import ubelt as ub
 
 from xcookie.builders import common_ci
@@ -88,25 +86,8 @@ def _action_ref(name: str) -> str:
 
 
 def _version_assign_command(applier, varname: str = 'VERSION') -> str:
-    """Return a shell command that assigns the project version.
-
-    Historically the generated workflows imported ``setup.VERSION``.  That is
-    invalid for pyproject-only repositories, so read the generated module
-    ``__version__`` assignment directly when ``setup.py`` is disabled.
-    """
-    if applier.config['use_setup_py']:
-        py_code = 'import setup; print(setup.VERSION)'
-    else:
-        rel_init = (applier.rel_mod_dpath / '__init__.py').as_posix()
-        py_code = (
-            'import ast, pathlib; '
-            f'tree = ast.parse(pathlib.Path({rel_init!r}).read_text()); '
-            'print(next(n.value.value for n in tree.body '
-            'if isinstance(n, ast.Assign) '
-            'and any(getattr(t, "id", None) == "__version__" '
-            'for t in n.targets)))'
-        )
-    return f'{varname}=$(python -c {shlex.quote(py_code)})'
+    """Return a shell command that assigns the project version."""
+    return common_ci.make_project_version_assignment(applier, varname)
 
 
 class Actions:
