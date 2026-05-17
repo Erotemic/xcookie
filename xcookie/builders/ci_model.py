@@ -297,7 +297,7 @@ def make_artifact_test_cases(
                     python_versions = install_extra_versions[variant.key]
                 for pyver in python_versions:
                     uv_resolution = None
-                    if self.config['use_pyproject_requirements']:
+                    if common_ci.ci_plan.uses_lockfile_ci(self):
                         uv_resolution = variant.uv_resolution
                     base_case = ArtifactTestCase(
                         variant=variant,

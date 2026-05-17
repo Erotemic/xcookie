@@ -160,97 +160,120 @@ jobs:
         # for testing instead of using the more concise matrix notation.
         include:
         - python-version: '3.10'
-          install-extras: tests-strict,runtime-strict
+          install-extras: tests
           os: ubuntu-latest
           arch: auto
+          uv-resolution: lowest-direct
         - python-version: '3.10'
-          install-extras: tests-strict,runtime-strict
+          install-extras: tests
           os: macOS-latest
           arch: auto
+          uv-resolution: lowest-direct
         - python-version: '3.10'
-          install-extras: tests-strict,runtime-strict
+          install-extras: tests
           os: windows-latest
           arch: auto
+          uv-resolution: lowest-direct
         - python-version: '3.14'
-          install-extras: tests-strict,runtime-strict,optional-strict
+          install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
+          uv-resolution: lowest-direct
         - python-version: '3.14'
-          install-extras: tests-strict,runtime-strict,optional-strict
+          install-extras: tests,optional
           os: macOS-latest
           arch: auto
+          uv-resolution: lowest-direct
         - python-version: '3.14'
-          install-extras: tests-strict,runtime-strict,optional-strict
+          install-extras: tests,optional
           os: windows-latest
           arch: auto
+          uv-resolution: lowest-direct
         - python-version: '3.14'
           install-extras: tests
           os: macOS-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.14'
           install-extras: tests
           os: windows-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.10'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.11'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.12'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.13'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.14'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.10'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.11'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.12'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.13'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.14'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.10'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.11'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.12'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.13'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
+          uv-resolution: highest
         - python-version: '3.14'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
+          uv-resolution: highest
     steps:
     - name: Checkout source
       uses: actions/checkout@v6.0.2
@@ -273,15 +296,16 @@ jobs:
       shell: bash
       env:
         INSTALL_EXTRAS: ${{ matrix.install-extras }}
+        UV_RESOLUTION: ${{ matrix.uv-resolution }}
       run: |-
         echo "Finding the path to the wheel"
         ls wheelhouse || echo "wheelhouse does not exist"
         echo "Installing helpers: update pip"
         python -m pip install pip uv -U
         echo "Installing helpers: setuptools"
-        python -m uv pip install setuptools>=0.8 setuptools_scm wheel build -U
+        python -m uv pip install --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U
         echo "Installing helpers: tomli and pkginfo"
-        python -m uv pip install tomli pkginfo packaging
+        python -m uv pip install --resolution=highest tomli pkginfo packaging
         export WHEEL_FPATH=$(python -c "if 1:
             import pathlib
             from packaging import tags
@@ -315,7 +339,21 @@ jobs:
             INSTALL_TARGET="${WHEEL_FPATH}"
         fi
         echo "INSTALL_TARGET=$INSTALL_TARGET"
-        python -m pip install --prefer-binary "${INSTALL_TARGET}"
+        LOCK_ARGS=()
+        if [[ -n "${UV_RESOLUTION:-}" ]]; then
+            echo "Compiling dependency constraint lock with uv resolution: $UV_RESOLUTION"
+            if [[ -n "${INSTALL_EXTRAS:-}" ]]; then
+                LOCK_TARGET=".[${INSTALL_EXTRAS}]"
+            else
+                LOCK_TARGET="."
+            fi
+            echo "LOCK_TARGET=$LOCK_TARGET"
+            python -m uv pip compile --resolution="$UV_RESOLUTION" --no-emit-project "$LOCK_TARGET" -o ci-deps.lock
+            echo "Compiled lock / constraints:"
+            cat ci-deps.lock
+            LOCK_ARGS=(--constraint ci-deps.lock)
+        fi
+        python -m uv pip install --prerelease=allow --prefer-binary "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"
         echo "Install finished."
     - name: Test wheel ${{ matrix.install-extras }}
       shell: bash

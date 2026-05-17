@@ -300,6 +300,8 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         test_steps = [
             f'export INSTALL_EXTRAS="{extra}"',
         ]
+        if case.uv_resolution is not None:
+            test_steps.append(f'export UV_RESOLUTION="{case.uv_resolution}"')
         test_steps += install_and_test_wheel_parts['install_wheel_commands']
         test_steps += install_and_test_wheel_parts['test_wheel_commands']
         test = {
@@ -606,6 +608,8 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
             )
         )
         test_steps = [f'export INSTALL_EXTRAS="{extra}"']
+        if case.uv_resolution is not None:
+            test_steps.append(f'export UV_RESOLUTION="{case.uv_resolution}"')
         test_steps += install_and_test_wheel_parts['install_wheel_commands']
         test_steps += install_and_test_wheel_parts['test_wheel_commands']
         test = {

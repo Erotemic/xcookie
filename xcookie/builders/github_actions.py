@@ -1659,7 +1659,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     )
 
     install_env = {'INSTALL_EXTRAS': '${{ matrix.install-extras }}'}
-    if self.config['use_pyproject_requirements']:
+    if common_ci.ci_plan.uses_lockfile_ci(self):
         install_env['UV_RESOLUTION'] = '${{ matrix.uv-resolution }}'
 
     special_install_lines = []

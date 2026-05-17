@@ -2,7 +2,7 @@ from xcookie.main import TemplateApplier, XCookieConfig
 
 
 def _make_applier(
-    tmp_path, *, tags, use_pyproject_requirements=False, min_python=None
+    tmp_path, *, tags, use_pyproject_requirements=False, min_python=None, use_setup_py=False
 ):
     kwargs = dict(
         repodir=tmp_path,
@@ -22,6 +22,7 @@ def _make_applier(
     cfg['linter'] = False
     cfg['ci_cpython_versions'] = cfg['ci_cpython_versions'][-2:]
     cfg['use_pyproject_requirements'] = use_pyproject_requirements
+    cfg['use_setup_py'] = use_setup_py
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -41,7 +42,7 @@ def test_github_purepy_uses_shared_workflow_plan_and_test_cases(tmp_path):
 
 def test_github_binpy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     self = _make_applier(
-        tmp_path, tags=['github', 'binpy'], min_python='3.9'
+        tmp_path, tags=['github', 'binpy'], min_python='3.10'
     )
     text = self.build_github_actions_tests()
     assert 'build_binpy_wheels:' in text
@@ -54,14 +55,17 @@ def test_github_binpy_uses_shared_workflow_plan_and_test_cases(tmp_path):
 
 
 def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
-    self = _make_applier(tmp_path, tags=['gitlab', 'purepy'])
+    self = _make_applier(tmp_path, tags=['gitlab', 'purepy'], min_python='3.10')
     text = self.build_gitlab_ci()
     assert 'build/sdist:' in text
     assert 'build/cp' in text
     assert 'test/full-loose/cp' in text
     assert 'test/minimal-strict/cp' in text
     assert 'export INSTALL_EXTRAS="tests,optional"' in text
-    assert 'export INSTALL_EXTRAS="tests-strict,runtime-strict"' in text
+    assert 'export INSTALL_EXTRAS="tests"' in text
+    assert 'export UV_RESOLUTION="lowest-direct"' in text
+    assert 'tests-strict' not in text
+    assert 'runtime-strict' not in text
 
 
 def test_gitlab_binpy_render_uses_artifact_test_cases(tmp_path):
@@ -73,9 +77,23 @@ def test_gitlab_binpy_render_uses_artifact_test_cases(tmp_path):
     assert 'test/full-loose/cp' in text
     assert 'test/minimal-strict/cp' in text
     assert 'export INSTALL_EXTRAS="tests,optional"' in text
-    assert 'export INSTALL_EXTRAS="tests-strict,runtime-strict"' in text
+    assert 'export INSTALL_EXTRAS="tests"' in text
+    assert 'export UV_RESOLUTION="lowest-direct"' in text
+    assert 'tests-strict' not in text
+    assert 'runtime-strict' not in text
     assert 'CIBW_BUILD:' in text
 
+
+
+def test_gitlab_legacy_setup_py_render_keeps_synthetic_strict_extras(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['gitlab', 'purepy'],
+        use_setup_py=True,
+        use_pyproject_requirements=False,
+    )
+    text = self.build_gitlab_ci()
+    assert 'export INSTALL_EXTRAS="tests-strict,runtime-strict"' in text
 
 def test_gitlab_purepy_gdal_cases_select_strict_and_loose_requirement_files(tmp_path):
     self = _make_applier(tmp_path, tags=['gitlab', 'purepy', 'gdal'])

@@ -260,12 +260,13 @@ def make_install_and_test_wheel_parts(
 
     # export UV_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/cpu https://download.pytorch.org/whl/nightly/cu126"
 
-    if self.config['use_pyproject_requirements']:
+    use_lockfile_ci = ci_plan.uses_lockfile_ci(self)
+    if use_lockfile_ci:
         install_helpers = [
             'echo "Installing helpers: setuptools"',
-            f'{self.PIP_INSTALL} --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+            'python -m uv pip install --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
             'echo "Installing helpers: tomli and pkginfo"',
-            f'{self.PIP_INSTALL} --resolution=highest tomli pkginfo packaging',
+            'python -m uv pip install --resolution=highest tomli pkginfo packaging',
         ]
     else:
         install_helpers = [
@@ -307,10 +308,35 @@ def make_install_and_test_wheel_parts(
             '    INSTALL_TARGET="${WHEEL_FPATH}"',
             'fi',
             'echo "INSTALL_TARGET=$INSTALL_TARGET"',
-            f'{self.PIP_INSTALL_PREFER_BINARY} "${{INSTALL_TARGET}}"',
-            'echo "Install finished."',
         ]
     )
+
+    if use_lockfile_ci:
+        install_wheel_commands += [
+            'LOCK_ARGS=()',
+            'if [[ -n "${UV_RESOLUTION:-}" ]]; then',
+            '    echo "Compiling dependency constraint lock with uv resolution: $UV_RESOLUTION"',
+            '    if [[ -n "${INSTALL_EXTRAS:-}" ]]; then',
+            '        LOCK_TARGET=".[${INSTALL_EXTRAS}]"',
+            '    else',
+            '        LOCK_TARGET="."',
+            '    fi',
+            '    echo "LOCK_TARGET=$LOCK_TARGET"',
+            '    python -m uv pip compile --resolution="$UV_RESOLUTION" --no-emit-project "$LOCK_TARGET" -o ci-deps.lock',
+            '    echo "Compiled lock / constraints:"',
+            '    cat ci-deps.lock',
+            '    LOCK_ARGS=(--constraint ci-deps.lock)',
+            'fi',
+            'python -m uv pip install --prerelease=allow --prefer-binary "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"',
+        ]
+    else:
+        install_wheel_commands += [
+            f'{self.PIP_INSTALL_PREFER_BINARY} "${{INSTALL_TARGET}}"',
+        ]
+
+    install_wheel_commands += [
+        'echo "Install finished."',
+    ]
 
     test_wheel_commands = (
         [

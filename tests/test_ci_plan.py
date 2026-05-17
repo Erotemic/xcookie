@@ -3,7 +3,7 @@ from xcookie.main import TemplateApplier, XCookieConfig
 
 
 def _make_applier(
-    tmp_path, *, tags=None, use_pyproject_requirements=False, min_python=None
+    tmp_path, *, tags=None, use_pyproject_requirements=False, min_python=None, use_setup_py=False
 ):
     if tags is None:
         tags = ['github', 'purepy']
@@ -28,6 +28,7 @@ def _make_applier(
     cfg['enable_gpg'] = False
     cfg['deploy'] = False
     cfg['use_pyproject_requirements'] = use_pyproject_requirements
+    cfg['use_setup_py'] = use_setup_py
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -66,6 +67,40 @@ headless = []
     assert variants['full-strict'].extras == ('tests', 'optional', 'headless')
     assert variants['full-strict'].uv_resolution == 'lowest-direct'
 
+
+
+def test_pyproject_only_dynamic_requirements_do_not_invent_strict_extras(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+        min_python='3.10',
+    )
+    plan = ci_plan.make_ci_plan(self)
+    variants = plan.active_variants_by_key()
+    assert variants['minimal-strict'].extras == ('tests',)
+    assert variants['full-strict'].extras == ('tests', 'optional')
+    cases = ci_model.make_artifact_test_cases(self, plan=plan, provider='github')
+    assert any(case.uv_resolution == 'lowest-direct' for case in cases)
+    assert all('strict' not in case.install_extras for case in cases)
+
+
+def test_legacy_setup_py_mode_keeps_synthetic_strict_extras(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_setup_py=True,
+        use_pyproject_requirements=False,
+    )
+    plan = ci_plan.make_ci_plan(self)
+    variants = plan.active_variants_by_key()
+    assert variants['minimal-strict'].extras == ('tests-strict', 'runtime-strict')
+    assert variants['full-strict'].extras == (
+        'tests-strict',
+        'runtime-strict',
+        'optional-strict',
+    )
 
 def test_artifact_test_cases_preserve_github_minimal_loose_platform_reduction(tmp_path):
     self = _make_applier(tmp_path, tags=['github', 'purepy'])

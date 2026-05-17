@@ -94,6 +94,27 @@ class CIPlan:
                     yield variant
 
 
+
+
+def uses_pyproject_dependency_mode(self: Any) -> bool:
+    """Return True when CI should avoid legacy setup.py synthesized extras.
+
+    Legacy setup.py mode exposes generated extras such as ``tests-strict`` and
+    ``runtime-strict``.  Pyproject-only repositories do not, even when their
+    dependencies are still dynamically read from ``requirements/*.txt``.
+    In those repositories, strictness is modeled by the installer / lock
+    resolution policy instead of by synthetic extra names.
+    """
+    return bool(
+        self.config.get('use_pyproject_requirements')
+        or not self.config.get('use_setup_py', True)
+    )
+
+
+def uses_lockfile_ci(self: Any) -> bool:
+    """Return True when CI should compile lock/constraint files with uv."""
+    return bool(uses_pyproject_dependency_mode(self) and self.config.get('use_uv'))
+
 def _unique(items: Iterable[str]) -> tuple[str, ...]:
     """Return unique non-empty strings while preserving order."""
     seen: set[str] = set()
@@ -188,7 +209,7 @@ def _base_variant_extras(self: Any) -> dict[VariantKey, list[str]]:
     if 'cv2' in self.tags:
         special_loose_tags.append('headless')
 
-    use_pyproject = bool(self.config['use_pyproject_requirements'])
+    use_pyproject = uses_pyproject_dependency_mode(self)
     if use_pyproject:
         # In pyproject mode the optional dependency table is authoritative.
         # Reuse the normal extras for strict jobs and let uv's resolver decide
@@ -238,7 +259,8 @@ def make_ci_plan(self: Any) -> CIPlan:
     variant_extras = _base_variant_extras(self)
     _apply_ci_extras(variant_extras, _load_ci_extras(self.config))
 
-    if self.config['use_pyproject_requirements']:
+    use_pyproject = uses_pyproject_dependency_mode(self)
+    if use_pyproject:
         variant_extras = {
             key: list(filter_pyproject_extras(self, extras))
             for key, extras in variant_extras.items()
@@ -262,7 +284,7 @@ def make_ci_plan(self: Any) -> CIPlan:
         variant for variant in variants if variant.key in requested_set
     )
 
-    if self.config['use_pyproject_requirements']:
+    if use_pyproject:
         desired_typecheck_extras = ['tests']
         desired_sdist_extras = ['tests']
         if 'cv2' in self.tags:
