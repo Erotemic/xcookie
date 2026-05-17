@@ -15,7 +15,7 @@ from typing import Any, Literal, Mapping
 
 import ubelt as ub
 
-from xcookie.builders import common_ci
+from xcookie.builders import ci_plan, common_ci
 from xcookie.builders.ci_plan import CIPlan, TestVariant, VariantKey
 from xcookie.util_yaml import Yaml
 
@@ -47,7 +47,8 @@ class ArtifactTestCase:
     python_version: str
     platform: CIPlatform
     install_extras: str
-    uv_resolution: str | None = None
+    use_lockfile: bool = False
+    lock_requirements: str | None = None
     gdal_requirement_txt: str | None = None
 
     @property
@@ -58,7 +59,7 @@ class ArtifactTestCase:
             self.platform.logical_os,
             self.platform.arch,
             self.install_extras,
-            self.uv_resolution,
+            self.lock_requirements if self.use_lockfile else None,
             self.gdal_requirement_txt,
         )
 
@@ -80,8 +81,9 @@ class ArtifactTestCase:
             'os': github_os,
             'arch': self.platform.arch,
         }
-        if self.uv_resolution is not None:
-            item['uv-resolution'] = self.uv_resolution
+        item['use-lockfile'] = 'true' if self.use_lockfile else 'false'
+        if self.lock_requirements is not None:
+            item['lock-requirements'] = self.lock_requirements
         if self.gdal_requirement_txt is not None:
             item['gdal-requirement-txt'] = self.gdal_requirement_txt
         return item
@@ -217,7 +219,7 @@ def _github_case_for_python(case: ArtifactTestCase) -> ArtifactTestCase | None:
             python_version=case.python_version,
             platform=platform,
             install_extras=case.install_extras,
-            uv_resolution=case.uv_resolution,
+            use_lockfile=case.use_lockfile,
             gdal_requirement_txt=case.gdal_requirement_txt,
         )
     return case
@@ -296,15 +298,21 @@ def make_artifact_test_cases(
                 else:
                     python_versions = install_extra_versions[variant.key]
                 for pyver in python_versions:
-                    uv_resolution = None
+                    use_lockfile = False
+                    lock_requirements = None
                     if common_ci.ci_plan.uses_lockfile_ci(self):
-                        uv_resolution = variant.uv_resolution
+                        use_lockfile = variant.use_lockfile
+                        if use_lockfile:
+                            lock_requirements = ci_plan.lock_requirements_path(
+                                variant.extras
+                            )
                     base_case = ArtifactTestCase(
                         variant=variant,
                         python_version=str(pyver),
                         platform=platform,
                         install_extras=variant.install_extras,
-                        uv_resolution=uv_resolution,
+                        use_lockfile=use_lockfile,
+                        lock_requirements=lock_requirements,
                         gdal_requirement_txt=_variant_gdal_requirement(
                             self, variant
                         ),

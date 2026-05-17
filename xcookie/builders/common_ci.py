@@ -291,7 +291,8 @@ def make_install_and_test_wheel_parts(
         + [
             'echo "WHEEL_FPATH=$WHEEL_FPATH"',
             'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
-            'echo "UV_RESOLUTION=$UV_RESOLUTION"',
+            'echo "USE_UV_LOCK=$USE_UV_LOCK"',
+            'echo "LOCK_REQUIREMENTS=$LOCK_REQUIREMENTS"',
             # 'echo "MOD_VERSION=$MOD_VERSION"',
             # This helps but doesn't solve the problem.
             # https://github.com/Erotemic/xdoctest/pull/158#discussion_r1697092781
@@ -314,18 +315,18 @@ def make_install_and_test_wheel_parts(
     if use_lockfile_ci:
         install_wheel_commands += [
             'LOCK_ARGS=()',
-            'if [[ -n "${UV_RESOLUTION:-}" ]]; then',
-            '    echo "Compiling dependency constraint lock with uv resolution: $UV_RESOLUTION"',
-            '    if [[ -n "${INSTALL_EXTRAS:-}" ]]; then',
-            '        LOCK_TARGET=".[${INSTALL_EXTRAS}]"',
-            '    else',
-            '        LOCK_TARGET="."',
+            'if [[ "${USE_UV_LOCK:-false}" == "true" ]]; then',
+            '    if [[ -z "${LOCK_REQUIREMENTS:-}" ]]; then',
+            '        echo "USE_UV_LOCK=true but LOCK_REQUIREMENTS is empty"',
+            '        exit 1',
             '    fi',
-            '    echo "LOCK_TARGET=$LOCK_TARGET"',
-            '    python -m uv pip compile --resolution="$UV_RESOLUTION" --no-emit-project "$LOCK_TARGET" -o ci-deps.lock',
-            '    echo "Compiled lock / constraints:"',
-            '    cat ci-deps.lock',
-            '    LOCK_ARGS=(--constraint ci-deps.lock)',
+            '    if [[ ! -f "$LOCK_REQUIREMENTS" ]]; then',
+            '        echo "Missing checked-in lock requirements: $LOCK_REQUIREMENTS"',
+            '        exit 1',
+            '    fi',
+            '    echo "Using checked-in lock requirements: $LOCK_REQUIREMENTS"',
+            '    cat "$LOCK_REQUIREMENTS"',
+            '    LOCK_ARGS=(--constraint "$LOCK_REQUIREMENTS")',
             'fi',
             'python -m uv pip install --prerelease=allow --prefer-binary "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"',
         ]

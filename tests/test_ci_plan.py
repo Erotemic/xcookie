@@ -42,6 +42,16 @@ def test_format_pyproject_install_target_omits_empty_brackets():
     )
 
 
+
+def test_lock_requirements_path_names_extras_cases():
+    assert ci_plan.lock_requirements_path([]) == 'requirements/locks/runtime.txt'
+    assert ci_plan.lock_requirements_path(['tests']) == 'requirements/locks/tests.txt'
+    assert (
+        ci_plan.lock_requirements_path(['tests', 'optional'])
+        == 'requirements/locks/tests-optional.txt'
+    )
+
+
 def test_ci_plan_filters_pyproject_extras(tmp_path):
     (tmp_path / 'pyproject.toml').write_text(
         '''
@@ -65,7 +75,7 @@ headless = []
     assert plan.typecheck_extras == ('tests',)
     variants = plan.active_variants_by_key()
     assert variants['full-strict'].extras == ('tests', 'optional', 'headless')
-    assert variants['full-strict'].uv_resolution == 'lowest-direct'
+    assert variants['full-strict'].use_lockfile is True
 
 
 
@@ -82,7 +92,12 @@ def test_pyproject_only_dynamic_requirements_do_not_invent_strict_extras(tmp_pat
     assert variants['minimal-strict'].extras == ('tests',)
     assert variants['full-strict'].extras == ('tests', 'optional')
     cases = ci_model.make_artifact_test_cases(self, plan=plan, provider='github')
-    assert any(case.uv_resolution == 'lowest-direct' for case in cases)
+    locked_cases = [case for case in cases if case.use_lockfile]
+    assert locked_cases
+    assert {case.lock_requirements for case in locked_cases} == {
+        'requirements/locks/tests.txt',
+        'requirements/locks/tests-optional.txt',
+    }
     assert all('strict' not in case.install_extras for case in cases)
 
 

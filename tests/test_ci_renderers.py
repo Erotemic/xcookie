@@ -63,7 +63,8 @@ def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
     assert 'test/minimal-strict/cp' in text
     assert 'export INSTALL_EXTRAS="tests,optional"' in text
     assert 'export INSTALL_EXTRAS="tests"' in text
-    assert 'export UV_RESOLUTION="lowest-direct"' in text
+    assert 'export USE_UV_LOCK="true"' in text
+    assert 'export LOCK_REQUIREMENTS="requirements/locks/tests.txt"' in text
     assert 'tests-strict' not in text
     assert 'runtime-strict' not in text
 
@@ -78,7 +79,8 @@ def test_gitlab_binpy_render_uses_artifact_test_cases(tmp_path):
     assert 'test/minimal-strict/cp' in text
     assert 'export INSTALL_EXTRAS="tests,optional"' in text
     assert 'export INSTALL_EXTRAS="tests"' in text
-    assert 'export UV_RESOLUTION="lowest-direct"' in text
+    assert 'export USE_UV_LOCK="true"' in text
+    assert 'export LOCK_REQUIREMENTS="requirements/locks/tests.txt"' in text
     assert 'tests-strict' not in text
     assert 'runtime-strict' not in text
     assert 'CIBW_BUILD:' in text

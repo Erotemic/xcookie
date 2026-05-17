@@ -52,11 +52,14 @@ class TestVariant:
         return ','.join(self.extras)
 
     @property
-    def uv_resolution(self) -> str:
-        """Resolution policy used when pyproject/uv installs are enabled."""
-        if self.is_strict:
-            return 'lowest-direct'
-        return 'highest'
+    def use_lockfile(self) -> bool:
+        """Whether this variant should install from the checked-in lockfile.
+
+        In pyproject-only mode, the old ``*-strict`` extras are replaced by a
+        checked-in lockfile. Loose jobs resolve normally, while strict jobs
+        export dependency constraints from ``uv.lock``.
+        """
+        return self.is_strict
 
 
 @dataclass(frozen=True)
@@ -112,8 +115,24 @@ def uses_pyproject_dependency_mode(self: Any) -> bool:
 
 
 def uses_lockfile_ci(self: Any) -> bool:
-    """Return True when CI should compile lock/constraint files with uv."""
+    """Return True when CI should use checked-in lock constraints."""
     return bool(uses_pyproject_dependency_mode(self) and self.config.get('use_uv'))
+
+
+LOCK_REQUIREMENTS_DPATH = 'requirements/locks'
+
+
+def lock_requirements_name(extras: Iterable[str]) -> str:
+    """Return the checked-in lock requirements stem for an extras set."""
+    normalized = _unique(str(extra).strip() for extra in extras)
+    if not normalized:
+        return 'runtime'
+    return '-'.join(normalized)
+
+
+def lock_requirements_path(extras: Iterable[str]) -> str:
+    """Return the checked-in lock requirements path for an extras set."""
+    return f'{LOCK_REQUIREMENTS_DPATH}/{lock_requirements_name(extras)}.txt'
 
 def _unique(items: Iterable[str]) -> tuple[str, ...]:
     """Return unique non-empty strings while preserving order."""

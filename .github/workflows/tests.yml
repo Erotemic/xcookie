@@ -163,117 +163,123 @@ jobs:
           install-extras: tests
           os: ubuntu-latest
           arch: auto
-          uv-resolution: lowest-direct
+          use-lockfile: 'true'
+          lock-requirements: requirements/locks/tests.txt
         - python-version: '3.10'
           install-extras: tests
           os: macOS-latest
           arch: auto
-          uv-resolution: lowest-direct
+          use-lockfile: 'true'
+          lock-requirements: requirements/locks/tests.txt
         - python-version: '3.10'
           install-extras: tests
           os: windows-latest
           arch: auto
-          uv-resolution: lowest-direct
+          use-lockfile: 'true'
+          lock-requirements: requirements/locks/tests.txt
         - python-version: '3.14'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
-          uv-resolution: lowest-direct
+          use-lockfile: 'true'
+          lock-requirements: requirements/locks/tests-optional.txt
         - python-version: '3.14'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
-          uv-resolution: lowest-direct
+          use-lockfile: 'true'
+          lock-requirements: requirements/locks/tests-optional.txt
         - python-version: '3.14'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
-          uv-resolution: lowest-direct
+          use-lockfile: 'true'
+          lock-requirements: requirements/locks/tests-optional.txt
         - python-version: '3.14'
           install-extras: tests
           os: macOS-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.14'
           install-extras: tests
           os: windows-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.10'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.11'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.12'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.13'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.14'
           install-extras: tests,optional
           os: ubuntu-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.10'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.11'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.12'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.13'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.14'
           install-extras: tests,optional
           os: macOS-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.10'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.11'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.12'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.13'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
         - python-version: '3.14'
           install-extras: tests,optional
           os: windows-latest
           arch: auto
-          uv-resolution: highest
+          use-lockfile: 'false'
     steps:
     - name: Checkout source
       uses: actions/checkout@v6.0.2
@@ -296,7 +302,8 @@ jobs:
       shell: bash
       env:
         INSTALL_EXTRAS: ${{ matrix.install-extras }}
-        UV_RESOLUTION: ${{ matrix.uv-resolution }}
+        USE_UV_LOCK: ${{ matrix.use-lockfile }}
+        LOCK_REQUIREMENTS: ${{ matrix.lock-requirements }}
       run: |-
         echo "Finding the path to the wheel"
         ls wheelhouse || echo "wheelhouse does not exist"
@@ -332,7 +339,8 @@ jobs:
         ")
         echo "WHEEL_FPATH=$WHEEL_FPATH"
         echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"
-        echo "UV_RESOLUTION=$UV_RESOLUTION"
+        echo "USE_UV_LOCK=$USE_UV_LOCK"
+        echo "LOCK_REQUIREMENTS=$LOCK_REQUIREMENTS"
         if [[ -n "${INSTALL_EXTRAS:-}" ]]; then
             INSTALL_TARGET="${WHEEL_FPATH}[${INSTALL_EXTRAS}]"
         else
@@ -340,18 +348,18 @@ jobs:
         fi
         echo "INSTALL_TARGET=$INSTALL_TARGET"
         LOCK_ARGS=()
-        if [[ -n "${UV_RESOLUTION:-}" ]]; then
-            echo "Compiling dependency constraint lock with uv resolution: $UV_RESOLUTION"
-            if [[ -n "${INSTALL_EXTRAS:-}" ]]; then
-                LOCK_TARGET=".[${INSTALL_EXTRAS}]"
-            else
-                LOCK_TARGET="."
+        if [[ "${USE_UV_LOCK:-false}" == "true" ]]; then
+            if [[ -z "${LOCK_REQUIREMENTS:-}" ]]; then
+                echo "USE_UV_LOCK=true but LOCK_REQUIREMENTS is empty"
+                exit 1
             fi
-            echo "LOCK_TARGET=$LOCK_TARGET"
-            python -m uv pip compile --resolution="$UV_RESOLUTION" --no-emit-project "$LOCK_TARGET" -o ci-deps.lock
-            echo "Compiled lock / constraints:"
-            cat ci-deps.lock
-            LOCK_ARGS=(--constraint ci-deps.lock)
+            if [[ ! -f "$LOCK_REQUIREMENTS" ]]; then
+                echo "Missing checked-in lock requirements: $LOCK_REQUIREMENTS"
+                exit 1
+            fi
+            echo "Using checked-in lock requirements: $LOCK_REQUIREMENTS"
+            cat "$LOCK_REQUIREMENTS"
+            LOCK_ARGS=(--constraint "$LOCK_REQUIREMENTS")
         fi
         python -m uv pip install --prerelease=allow --prefer-binary "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"
         echo "Install finished."

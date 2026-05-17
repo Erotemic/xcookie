@@ -1660,7 +1660,8 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
 
     install_env = {'INSTALL_EXTRAS': '${{ matrix.install-extras }}'}
     if common_ci.ci_plan.uses_lockfile_ci(self):
-        install_env['UV_RESOLUTION'] = '${{ matrix.uv-resolution }}'
+        install_env['USE_UV_LOCK'] = '${{ matrix.use-lockfile }}'
+        install_env['LOCK_REQUIREMENTS'] = '${{ matrix.lock-requirements }}'
 
     special_install_lines = []
     if any(case.gdal_requirement_txt is not None for case in cases):
