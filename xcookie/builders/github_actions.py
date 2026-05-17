@@ -9,6 +9,8 @@ from typing import (
     cast,
 )
 
+import shlex
+
 import ubelt as ub
 
 from xcookie.builders import common_ci
@@ -83,6 +85,28 @@ class GitHubActionsRenderer:
 def _action_ref(name: str) -> str:
     """Return the pinned GitHub Action ref for an ``owner/repo`` name."""
     return f'{name}@{ACTION_VERSIONS[name]}'
+
+
+def _version_assign_command(applier, varname: str = 'VERSION') -> str:
+    """Return a shell command that assigns the project version.
+
+    Historically the generated workflows imported ``setup.VERSION``.  That is
+    invalid for pyproject-only repositories, so read the generated module
+    ``__version__`` assignment directly when ``setup.py`` is disabled.
+    """
+    if applier.config['use_setup_py']:
+        py_code = 'import setup; print(setup.VERSION)'
+    else:
+        rel_init = (applier.rel_mod_dpath / '__init__.py').as_posix()
+        py_code = (
+            'import ast, pathlib; '
+            f'tree = ast.parse(pathlib.Path({rel_init!r}).read_text()); '
+            'print(next(n.value.value for n in tree.body '
+            'if isinstance(n, ast.Assign) '
+            'and any(getattr(t, "id", None) == "__version__" '
+            'for t in n.targets)))'
+        )
+    return f'{varname}=$(python -c {shlex.quote(py_code)})'
 
 
 class Actions:
@@ -2148,7 +2172,7 @@ def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
                 """IMPORTED_FPR=$($GPG_EXECUTABLE --list-keys --with-colons "$GPG_KEYID" | awk -F: '/^fpr/ { print $10; exit }')""",
                 'if [[ "$IMPORTED_FPR" != "$GPG_KEYID" ]]; then echo "ERROR: imported GPG fingerprint $IMPORTED_FPR does not match pinned $GPG_KEYID"; exit 1; fi',
                 'echo "GPG fingerprint verified: $IMPORTED_FPR"',
-                'VERSION=$(python -c "import setup; print(setup.VERSION)")',
+                _version_assign_command(self),
                 f'{self.UPDATE_PIP}',
                 f'{self.SYSTEM_PIP_INSTALL} packaging twine -U',
                 f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security]',
@@ -2169,7 +2193,7 @@ def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
                 '$GPG_EXECUTABLE --list-keys || true',
                 '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',
                 '$GPG_EXECUTABLE --list-keys',
-                'VERSION=$(python -c "import setup; print(setup.VERSION)")',
+                _version_assign_command(self),
                 f'{self.UPDATE_PIP}',
                 f'{self.SYSTEM_PIP_INSTALL} packaging twine -U',
                 f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security]',
@@ -2409,8 +2433,8 @@ def build_github_release(self, needs=None):
         'name': 'Tag Release Commit',
         'if': needs_tag_condition,
         'run': ub.codeblock(
-            """
-            export VERSION=$(python -c "import setup; print(setup.VERSION)")
+            f"""
+            export {_version_assign_command(self)}
             git tag "v$VERSION"
             git push origin "v$VERSION"
             """

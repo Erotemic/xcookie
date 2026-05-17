@@ -606,7 +606,9 @@ class XCookieConfig(scfg.DataConfig):
         Returns:
             bool:
         """
-        if self['interactive']:
+        if self.get('yes', False):
+            flag = default
+        elif self['interactive']:
             from rich import prompt
 
             flag = prompt.Confirm.ask(msg)
@@ -623,7 +625,9 @@ class XCookieConfig(scfg.DataConfig):
         Returns:
             bool:
         """
-        if self['interactive']:
+        if self.get('yes', False):
+            answer = default
+        elif self['interactive']:
             from xcookie.rich_ext import FuzzyPrompt
 
             answer = FuzzyPrompt.ask(msg, choices=choices)

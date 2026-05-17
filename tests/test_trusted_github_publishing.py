@@ -4,7 +4,9 @@ import types
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
-def _make_applier(tmp_path, *, trusted, enable_gpg, tags=None, min_python=None):
+def _make_applier(
+    tmp_path, *, trusted, enable_gpg, tags=None, min_python=None, use_setup_py='auto'
+):
     if tags is None:
         tags = ['github', 'erotemic', 'purepy']
     kwargs = dict(
@@ -20,6 +22,7 @@ def _make_applier(tmp_path, *, trusted, enable_gpg, tags=None, min_python=None):
     cfg = XCookieConfig(**kwargs)
     cfg['ci_pypi_trusted_publishing'] = trusted
     cfg['enable_gpg'] = enable_gpg
+    cfg['use_setup_py'] = use_setup_py
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -485,3 +488,20 @@ def test_rotate_secrets_encrypted_repo_behavior_unchanged(
     assert 'upload_github_secrets' in joined
     assert 'upload_github_gpg_secrets' not in joined
     assert _FakeQueue.created[-1].ran
+
+
+def test_release_workflow_pyproject_mode_does_not_import_setup(tmp_path):
+    text = _make_applier(
+        tmp_path, trusted=True, enable_gpg=True, use_setup_py=False
+    ).build_github_actions_release()
+
+    assert 'import setup' not in text
+    assert 'demo_pkg/__init__.py' in text
+    assert 'ast.parse' in text
+
+
+def test_yes_flag_answers_xcookie_prompts_without_stdin():
+    cfg = XCookieConfig(yes=True, interactive=True)
+
+    assert cfg.prompt('apply?', ['yes', 'no'], default='yes') == 'yes'
+    assert cfg.confirm('continue?', default=False) is False
