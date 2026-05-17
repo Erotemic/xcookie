@@ -14,7 +14,7 @@ git-python>=1.0.0
 black>=22.1.0     
 ruff>=0.15.0
 packaging>=21.3
-pyproject-fmt>=2.21.2
+pyproject-fmt>=2.21.1
 
 # PyYAML>=6.0
 # ruamel.yaml >= 0.17.21

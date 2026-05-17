@@ -1,3 +1,70 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = [
+  "setuptools>=41.0.1",
+]
+
+[project]
+name = "xcookie"
+description = "The xcookie cookie-cutter Module"
+license.text = "Apache 2"
+authors = [ { name = "Jon Crall", email = "erotemic@gmail.com" } ]
+requires-python = ">=3.10"
+classifiers = [
+  "Development Status :: 1 - Planning",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Utilities",
+]
+dynamic = [
+  "dependencies",
+  "optional-dependencies",
+  "version",
+]
+urls.Homepage = "https://github.com/Erotemic/xcookie"
+scripts.xcookie = "xcookie.__main__:main"
+
+[tool.setuptools]
+include-package-data = true
+dynamic.dependencies.file = [
+  "requirements/runtime.txt",
+]
+dynamic.optional-dependencies.docs.file = [
+  "requirements/docs.txt",
+]
+dynamic.optional-dependencies.optional.file = [
+  "requirements/optional.txt",
+]
+dynamic.optional-dependencies.tests.file = [
+  "requirements/tests.txt",
+]
+dynamic.readme.file = [
+  "README.rst",
+]
+dynamic.readme.content-type = "text/x-rst"
+dynamic.version.attr = "xcookie.__version__"
+package-data."*" = [
+  "requirements/*.txt",
+]
+package-data.xcookie = [
+  "py.typed",
+  "*.pyi",
+]
+package-data."xcookie.rc" = [
+  "*.in",
+]
+packages.find.where = [
+  ".",
+]
+packages.find.include = [
+  "xcookie*",
+]
+
 [tool.ruff]
 target-version = "py38"
 line-length = 80
@@ -6,48 +73,54 @@ format.quote-style = "single"
 format.line-ending = "auto"
 format.skip-magic-trailing-comma = false
 format.docstring-code-format = false
-# Enable Flake8 (E, F) and isort (I) rules.
-lint.select = [ "E", "F", "I" ]
-# Ignore specific rules, for example, E501 (line too long) as it's handled by the formatter.
+lint.select = [
+  "E",
+  "F",
+  "I",
+]
 lint.ignore = [
-  "E402", # Module level import not at top of file
-  "E501", # line too long
+  "E402",
+  "E501",
 ]
 
 [tool.codespell]
-skip = [ "./docs/build", "./*.egg-info", "./build", "./htmlcov" ]
+skip = [
+  "./docs/build",
+  "./*.egg-info",
+  "./build",
+  "./htmlcov",
+]
 count = true
 quiet-level = 3
-ignore-words-list = [ "wont", "cant", "ANS", "doesnt", "arent", "ans", "thats", "datas", "isnt" ]
+ignore-words-list = [
+  "wont",
+  "cant",
+  "ANS",
+  "doesnt",
+  "arent",
+  "ans",
+  "thats",
+  "datas",
+  "isnt",
+]
 
 [tool.mypy]
-# Also should really not need this
 ignore_missing_imports = true
-overrides = [
-  # This shoulnt be the case that we need to ignore ubelt.
-  { module = [
-    "ubelt",
-  ], ignore_missing_imports = true },
-]
+overrides = [ { module = [
+  "ubelt",
+], ignore_missing_imports = true } ]
 
 [tool.ty]
-overrides = [
-  { include = [ "xcookie/main.py" ] },
-  # ty 0.0.37 cannot narrow the value types in the **cli_kwargs dict
-  # forwarded into scriptconfig.Config.cli in XCookieConfig.load_from_cli_and_pyproject.
-  { rules.invalid-argument-type = "ignore" },
-]
+overrides = [ { include = [
+  "xcookie/main.py",
+] } ]
 rules.unused-type-ignore-comment = "ignore"
 rules.unresolved-import = "ignore"
-# tmp
-src.exclude = [
-  # 'ubelt/util_path.py',
-  # 'ubelt/util_stream.py'
-]
+src.exclude = []
 
 [tool.pytest]
-ini_options.addopts = "-p no:doctest --xdoctest --xdoctest-style=google --ignore-glob=setup.py"
-ini_options.norecursedirs = ".git ignore build __pycache__ dev docs _skbuild"
+ini_options.addopts = "-p no:doctest --xdoctest --xdoctest-style=google --ignore-glob=setup.py --ignore-glob=dev --ignore-glob=docs"
+ini_options.norecursedirs = ".git ignore build __pycache__ dev _skbuild docs"
 ini_options.filterwarnings = [
   "default",
   "ignore:.*No cfgstr given in Cacher constructor or call.*:Warning",
@@ -91,9 +164,6 @@ author = "Jon Crall"
 url = "https://github.com/Erotemic/xcookie"
 description = "The xcookie cookie-cutter Module"
 min_python = "3.10"
-# Reduce the CI load of this package, only test on old and new python versions
-# ci_cpython_versions = ['3.7', '3.8', '3.10', '3.10', '3.11', '3.12', '3.13']
-# ci_pypy_versions = 'auto'
 ci_pypy_versions = []
 ci_pypi_trusted_publishing = true
 enable_gpg = true
@@ -101,11 +171,16 @@ deploy = true
 deploy_pypi = true
 ci_gpg_secret_transport = "direct_ci"
 typed = true
+use_setup_py = false
+use_pyproject_requirements = false
 ci_blocklist = [ { os = "*windows*", python-version = "*rc*" } ]
 entry_points.console_scripts = [
   "xcookie=xcookie.__main__:main",
 ]
-package_data.xcookie = [ "py.typed", "*.pyi" ]
-package_data."xcookie.rc" = [ "*.in" ]
-use_setup_py = false
-use_pyproject_requirements = false
+package_data.xcookie = [
+  "py.typed",
+  "*.pyi",
+]
+package_data."xcookie.rc" = [
+  "*.in",
+]
