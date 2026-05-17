@@ -40,6 +40,15 @@ def test_template_info_rejects_ambiguous_bool_strings():
     with pytest.raises(ValueError):
         TemplateInfo.coerce({'fname': 'demo.txt', 'overwrite': 'sometimes'})
 
+
+def test_template_info_auto_bool_sentinel_is_truthy_for_legacy_config():
+    info = TemplateInfo.coerce({
+        'fname': 'setup.py',
+        'enabled': 'auto',
+    })
+    assert info.enabled is True
+
+
 def test_template_context_uses_posix_module_path(tmp_path):
     config = {
         'repo_name': 'demo_pkg',

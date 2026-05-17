@@ -146,14 +146,20 @@ def coerce_template_infos(
 
 
 def _coerce_bool(value: Any) -> bool:
-    """Coerce common TOML/CLI bool-like values without string truth traps."""
+    """Coerce common TOML/CLI bool-like values without string truth traps.
+
+    ``auto`` is a historical xcookie sentinel used by several config values.
+    Template registry booleans previously used ``bool(value)``, so ``auto``
+    behaved as enabled/true. Preserve that behavior explicitly while still
+    rejecting genuinely ambiguous strings such as ``sometimes``.
+    """
     if isinstance(value, bool):
         return value
     if value is None:
         return False
     if isinstance(value, str):
         lowered = value.strip().lower()
-        if lowered in {'1', 'true', 'yes', 'y', 'on'}:
+        if lowered in {'1', 'true', 'yes', 'y', 'on', 'auto'}:
             return True
         if lowered in {'0', 'false', 'no', 'n', 'off', 'none', 'null', ''}:
             return False
