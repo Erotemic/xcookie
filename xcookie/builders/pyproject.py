@@ -15,6 +15,102 @@ def _autodictify(value):
     return value
 
 
+def _build_xcookie_tool_config(self, pyproj_config):
+    """Build the ``[tool.xcookie]`` block without leaking inferred defaults.
+
+    ``XCookieConfig`` is resolved before builders run, so values such as
+    ``version='0.0.1'``, ``pkg_name=mod_name``, and ``os=['linux', 'osx',
+    'win']`` may be present even when the user never wrote them in
+    ``pyproject.toml``.  Persisting those values creates noisy diffs and, in
+    the case of ``version``, can produce stale metadata next to a dynamic
+    PEP 621 version declaration.
+    """
+    existing_tool = pyproj_config.get('tool', {}).get('xcookie', {}) or {}
+    existing_keys = set(existing_tool.keys())
+
+    options_to_save = [
+        'tags',
+        'mod_name',
+        'repo_name',
+        'pkg_name',
+        'rel_mod_parent_dpath',
+        'os',
+        'min_python',
+        'version',
+        'url',
+        'author',
+        'author_email',
+        'description',
+        'license',
+        'dev_status',
+        'typed',
+        'remote_host',
+        'remote_group',
+        'use_setup_py',
+        'use_pyproject_requirements',
+    ]
+    raw_config = ub.udict(ub.dict_subset(self.config, options_to_save))
+
+    # Start with the explicit on-disk settings so nested user config such as
+    # entry_points, package_data, and ci_blocklist survives regeneration.
+    config_to_save = ub.udict(existing_tool)
+
+    always_save = {
+        'tags',
+        'mod_name',
+        'repo_name',
+        'min_python',
+        'url',
+        'author',
+        'author_email',
+        'description',
+        'typed',
+        'use_setup_py',
+        'use_pyproject_requirements',
+    }
+
+    default_os = {'linux', 'osx', 'win'}
+
+    for key, value in raw_config.items():
+        if value is None:
+            continue
+
+        should_save = key in always_save or key in existing_keys
+
+        if key == 'pkg_name':
+            # ``pkg_name`` is derived from ``mod_name`` unless explicitly
+            # customized.  Avoid rewriting redundant defaults.
+            should_save = should_save or value != self.config['mod_name']
+        elif key == 'rel_mod_parent_dpath':
+            should_save = should_save or value not in {'.', ''}
+        elif key == 'os':
+            os_values = set(value) if not isinstance(value, str) else {value}
+            should_save = should_save or os_values != default_os
+        elif key == 'version':
+            # Do not introduce the resolver's placeholder version.  If a
+            # project already has a real or dynamic PEP 621 version, that is
+            # the authoritative source.  Preserve explicit tool.xcookie
+            # versions for backwards compatibility.
+            should_save = key in existing_keys and value != '0.0.1'
+        elif key == 'license':
+            should_save = should_save or value not in {'Apache 2', 'Apache-2.0'}
+        elif key == 'dev_status':
+            should_save = should_save or value != 'planning'
+        elif key in {'remote_host', 'remote_group'}:
+            # These are usually inferred from the URL and need not be persisted
+            # unless the user explicitly had them on disk already.
+            should_save = key in existing_keys
+
+        if should_save:
+            config_to_save[key] = value
+        elif key in config_to_save:
+            # If a previously explicit value has become the default, leave it
+            # alone rather than deleting user-authored config.
+            pass
+
+    return dict(config_to_save)
+
+
 def build_pyproject(self):
     """
     Returns:
@@ -173,28 +269,9 @@ def build_pyproject(self):
 
     WITH_XCOOKIE = 1
     if WITH_XCOOKIE:
-        options_to_save = [
-            'tags',
-            'mod_name',
-            'repo_name',
-            'pkg_name',
-            'rel_mod_parent_dpath',
-            'os',
-            'min_python',
-            'version',
-            'url',
-            'author',
-            'author_email',
-            'description',
-            'license',
-            'dev_status',
-            'typed',
-            'remote_host',
-            'remote_group',
-            'use_setup_py',
-        ]
-        config_to_save = ub.dict_subset(self.config, options_to_save)
-        pyproj_config['tool']['xcookie'].update(config_to_save)
+        pyproj_config['tool']['xcookie'] = _build_xcookie_tool_config(
+            self, pyproj_config
+        )
 
     use_pyproject_requirements = self.config.get('use_pyproject_requirements')
 

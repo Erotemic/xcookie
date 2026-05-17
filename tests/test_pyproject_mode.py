@@ -149,7 +149,11 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
     assert 'dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
     assert 'optional-dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
     assert pyproject_data['tool']['xcookie']['author'] == 'Existing Author'
-    assert pyproject_data['tool']['xcookie']['version'] == '1.2.3'
+    # The version is inferred from standard project/setuptools metadata for
+    # config defaults, but should not be written back into tool.xcookie unless
+    # it was explicitly present there.  The authoritative packaging version is
+    # the PEP 621 / setuptools dynamic version declaration above.
+    assert 'version' not in pyproject_data['tool']['xcookie']
 
 
 def test_pyproject_requirements_mode_preserves_project_dependencies(tmp_path) -> None:
