@@ -624,3 +624,93 @@ def test_wheel_install_command_omits_empty_extra_brackets(tmp_path) -> None:
     assert '"${WHEEL_FPATH}[${INSTALL_EXTRAS}]"' in install_text
     assert '"${WHEEL_FPATH}[]"' not in install_text
 
+
+
+def test_legacy_comma_author_metadata_generates_valid_files(tmp_path) -> None:
+    """
+    Legacy ``tool.xcookie`` metadata often stores multiple authors in a single
+    comma-delimited string. Regenerating from that metadata should not produce
+    invalid Python source, and the PEP 621 authors table should be split into
+    valid per-author entries.
+    """
+    import py_compile
+
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-mod',
+                    'description': 'Demo module',
+                    'requires-python': '>=3.10',
+                    'dynamic': ['version'],
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'repo_name': 'demo-mod',
+                        'pkg_name': 'demo-mod',
+                        'tags': ['github', 'purepy'],
+                        'author': 'Kitware Inc., Jon Crall',
+                        'author_email': (
+                            'kitware@kitware.com, jon.crall@kitware.com'
+                        ),
+                        'use_setup_py': False,
+                        'use_pyproject_requirements': True,
+                    }
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=False,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+
+    assert config['author'] == 'Kitware Inc., Jon Crall'
+    assert config['author_email'] == 'kitware@kitware.com, jon.crall@kitware.com'
+
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    init_fpath = applier.staging_dpath / 'demo_mod' / '__init__.py'
+    py_compile.compile(str(init_fpath), doraise=True)
+    init_text = init_fpath.read_text()
+    assert "__author__ = 'Kitware Inc., Jon Crall'" in init_text
+    assert "__author_email__ = 'kitware@kitware.com, jon.crall@kitware.com'" in init_text
+
+    pyproject_data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
+    assert pyproject_data['project']['authors'] == [
+        {'name': 'Kitware Inc.', 'email': 'kitware@kitware.com'},
+        {'name': 'Jon Crall', 'email': 'jon.crall@kitware.com'},
+    ]
+
+
+def test_xcookie_help_does_not_emit_scriptconfig_transition_warnings() -> None:
+    """The console entrypoint should use ``argv`` instead of dict cmdline shims."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [sys.executable, '-m', 'xcookie.main', '--help'],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert proc.returncode == 0
+    assert 'FutureWarning' not in proc.stderr
+    assert 'cmdline' not in proc.stderr
+    assert 'description' not in proc.stderr

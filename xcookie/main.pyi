@@ -8,7 +8,13 @@ class XCookieConfig(scfg.Config):
     def normalize(self) -> None: ...
     def confirm(self, msg: str, default: bool = True) -> bool: ...
     @classmethod
-    def main(cls, cmdline: int = ..., **kwargs) -> None: ...
+    def main(
+        cls,
+        argv: int = ...,
+        strict: bool = ...,
+        autocomplete: bool = ...,
+        **kwargs,
+    ) -> None: ...
 
 class TemplateApplier:
     config: Any

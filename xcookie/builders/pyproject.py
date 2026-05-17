@@ -4,6 +4,8 @@ import tempfile
 import toml
 import ubelt as ub
 
+from xcookie.util.util_metadata import coerce_author_entries
+
 
 def _autodictify(value):
     if isinstance(value, dict) and not isinstance(value, ub.AutoDict):
@@ -211,21 +213,9 @@ def build_pyproject(self):
             for key in ['dependencies', 'optional-dependencies']:
                 project_block.pop(key, None)
 
-        authors = self.config['author']
-        author_emails = self.config['author_email']
-        author_entries = []
-        if authors:
-            if not isinstance(authors, (list, tuple)):
-                authors = [authors]
-            if not isinstance(author_emails, (list, tuple)):
-                author_emails = [author_emails] if author_emails else []
-            for idx, name in enumerate(authors):
-                entry = {'name': name}
-                if idx < len(author_emails) and author_emails[idx]:
-                    entry['email'] = author_emails[idx]
-                elif isinstance(author_emails, str) and idx == 0:
-                    entry['email'] = author_emails
-                author_entries.append(entry)
+        author_entries = coerce_author_entries(
+            self.config['author'], self.config['author_email']
+        )
         if author_entries:
             project_block['authors'] = author_entries
 

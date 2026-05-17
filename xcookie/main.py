@@ -84,6 +84,7 @@ import toml
 import ubelt as ub
 import xdev
 from packaging.version import parse as Version
+
 from xcookie.resolved_config import resolve_xcookie_config
 from xcookie.staging import apply_template_context
 from xcookie.template_registry import (
@@ -91,6 +92,7 @@ from xcookie.template_registry import (
     TemplateInfo,
     coerce_template_infos,
 )
+from xcookie.util.util_metadata import metadata_text
 
 
 class SkipFile(Exception):
@@ -252,9 +254,11 @@ class XCookieConfig(scfg.DataConfig):
             None, type=str, help='repo metadata: url for the project'
         ),
         'author': scfg.Value(
-            None, help='repo metadata: author for the project'
+            None,
+            type=str,
+            help='repo metadata: author for the project',
         ),
-        'author_email': scfg.Value(None, help='repo metadata'),
+        'author_email': scfg.Value(None, type=str, help='repo metadata'),
         'description': scfg.Value(None, type=str, help='repo metadata'),
         'license': scfg.Value(None, help='repo metadata'),
         'dev_status': scfg.Value('planning'),
@@ -399,6 +403,16 @@ class XCookieConfig(scfg.DataConfig):
         'interactive': scfg.Value(True),
         'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
     }
+
+    @property
+    def _description(self):
+        """Argparse description, separate from project metadata."""
+        description = getattr(self, '__description__', None)
+        if description is None:
+            description = self.__class__.__doc__
+        if description is not None:
+            description = ub.codeblock(description)
+        return description
 
     def __post_init__(self):
         object.__setattr__(self, 'resolved', resolve_xcookie_config(self))
@@ -618,21 +632,30 @@ class XCookieConfig(scfg.DataConfig):
         return answer
 
     @classmethod
-    def load_from_cli_and_pyproject(cls, argv=False, **kwargs):
+    def load_from_cli_and_pyproject(
+        cls, argv=False, strict=True, autocomplete='auto', **kwargs
+    ):
         # We load the config multiple times to get the right defaults.
         # ideally we should fix this up
-        config = XCookieConfig.cli(argv=argv, data=kwargs, strict=True)
+        cli_kwargs = {
+            'strict': strict,
+            'autocomplete': autocomplete,
+        }
+        config = XCookieConfig.cli(argv=argv, data=kwargs, **cli_kwargs)
         # config.__post_init__()
         settings = config._load_xcookie_pyproject_settings()
         if settings:
             print(f'settings={settings}')
             config = XCookieConfig.cli(
-                argv=argv, data=kwargs, default=ub.dict_isect(settings, config)
+                argv=argv,
+                data=kwargs,
+                default=ub.dict_isect(settings, config),
+                **cli_kwargs,
             )
         return config
 
     @classmethod
-    def main(cls, argv=False, **kwargs):
+    def main(cls, argv=False, strict=True, autocomplete='auto', **kwargs):
         """
         Main entry point
 
@@ -655,7 +678,12 @@ class XCookieConfig(scfg.DataConfig):
             argv = 0
         """
         # We load the config multiple times to get the right defaults.
-        config = XCookieConfig.load_from_cli_and_pyproject(argv=argv, **kwargs)
+        config = XCookieConfig.load_from_cli_and_pyproject(
+            argv=argv,
+            strict=strict,
+            autocomplete=autocomplete,
+            **kwargs,
+        )
         # # config.__post_init__()
         # settings = config._load_xcookie_pyproject_settings()
         # if settings:
@@ -2313,15 +2341,19 @@ class TemplateApplier:
             )
         elif fname == '__init__.py':
             mkinit_target = ub.Path(info['repo_fpath']).as_posix()
+            version = metadata_text(self.config['version'])
+            author = metadata_text(self.config['author'])
+            author_email = metadata_text(self.config['author_email'])
+            url = metadata_text(self.config['url'])
             return ub.codeblock(
                 f'''
                 """
                 Basic
                 """
-                __version__ = '{self.config['version']}'
-                __author__ = '{self.config['author']}'
-                __author_email__ = '{self.config['author_email']}'
-                __url__ = '{self.config['url']}'
+                __version__ = {version!r}
+                __author__ = {author!r}
+                __author_email__ = {author_email!r}
+                __url__ = {url!r}
 
                 __mkinit__ = """
                 mkinit {mkinit_target}
@@ -2384,12 +2416,7 @@ class TemplateApplier:
 
 
 def main():
-    XCookieConfig.main(
-        argv={
-            'strict': True,
-            'autocomplete': True,
-        }
-    )
+    XCookieConfig.main(argv=True, strict=True, autocomplete=True)
 
 
 def _parse_remote_url(url):
