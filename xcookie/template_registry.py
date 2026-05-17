@@ -43,7 +43,7 @@ class TemplateInfo(MutableMapping[str, Any]):
             if key == 'tags':
                 value = _normalize_tags(value)
             elif key in {'template', 'overwrite', 'enabled', 'skip'}:
-                value = bool(value)
+                value = _coerce_bool(value)
             if key in cls._field_names:
                 known[key] = value
             else:
@@ -61,7 +61,7 @@ class TemplateInfo(MutableMapping[str, Any]):
         if key == 'tags':
             value = _normalize_tags(value)
         elif key in {'template', 'overwrite', 'enabled', 'skip'}:
-            value = bool(value)
+            value = _coerce_bool(value)
         if key in self._field_names:
             setattr(self, key, value)
         else:
@@ -142,6 +142,23 @@ def coerce_template_infos(
 ) -> list[TemplateInfo]:
     """Normalize raw registry dictionaries into typed template records."""
     return [TemplateInfo.coerce(info) for info in infos]
+
+
+
+def _coerce_bool(value: Any) -> bool:
+    """Coerce common TOML/CLI bool-like values without string truth traps."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {'1', 'true', 'yes', 'y', 'on'}:
+            return True
+        if lowered in {'0', 'false', 'no', 'n', 'off', 'none', 'null', ''}:
+            return False
+        raise ValueError(f'Cannot coerce {value!r} to bool')
+    return bool(value)
 
 
 def _normalize_tags(value: Any) -> frozenset[str]:

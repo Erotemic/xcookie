@@ -85,6 +85,7 @@ import ubelt as ub
 import xdev
 from packaging.version import parse as Version
 
+from xcookie.patch_plan import PatchPlan
 from xcookie.resolved_config import resolve_xcookie_config
 from xcookie.staging import apply_template_context
 from xcookie.template_registry import (
@@ -1329,11 +1330,9 @@ class TemplateApplier:
         return self
 
     def copy_staged_files(self):
-        stats, tasks = self.gather_tasks()
-        copy_tasks = tasks['copy']
-        perm_tasks = tasks['perms']
-        mkdir_tasks = tasks['mkdir']
-        task_summary = ub.map_vals(len, tasks)
+        plan = self.gather_tasks()
+        self.render_patch_plan(plan)
+        task_summary = plan.task_summary
         if any(task_summary.values()):
             print('task_summary = {}'.format(ub.urepr(task_summary, nl=1)))
             answer = self.config.prompt(
@@ -1342,26 +1341,13 @@ class TemplateApplier:
                 default='yes',
             )
             if answer in {'all', 'yes'}:
-                dirs = {d.parent for s, d in copy_tasks}
-                for d in dirs:
-                    d.ensuredir()
-                for d in mkdir_tasks:
-                    d.ensuredir()
-                for src, dst in copy_tasks:
-                    shutil.copy2(src, dst)
-                for fname, mode in perm_tasks:
-                    os.chmod(fname, mode)
+                plan.apply_all()
             elif answer == 'some':
-                dirs = {d.parent for s, d in copy_tasks}
-                for d in dirs:
-                    d.ensuredir()
-                for d in mkdir_tasks:
-                    d.ensuredir()
-                for src, dst in copy_tasks:
-                    if self.config.confirm(f'Apply {dst}?'):
-                        shutil.copy2(src, dst)
-                for fname, mode in perm_tasks:
-                    os.chmod(fname, mode)
+                selected = []
+                for task in plan.copy:
+                    if self.config.confirm(f'Apply {task.dst}?'):
+                        selected.append(task.dst)
+                plan.apply_some(selected)
 
     def vcs_checks(self):
         # repodir = self.config['repodir']
@@ -1616,7 +1602,7 @@ class TemplateApplier:
                         value = tags_satisfied(directive, tags)
                         if value:
                             action = uncomment_line
-                            print(f'action={action}')
+                            # print(f'action={action}')
                             did_work = 1
                     if action is not None:
                         # print(f'directive.name={directive.name}')
@@ -1641,27 +1627,18 @@ class TemplateApplier:
             else:
                 self.staging_infos.append(info)
 
-        if 1:
-            # print('self.staging_infos = {}'.format(ub.urepr(self.staging_infos, nl=1)))
+        if self.config.get('verbose', 0) > 2:
             print(
-                ub.urepr(
-                    [info.to_dict() for info in self.staging_infos], nl=1
+                'self.staging_infos = {}'.format(
+                    ub.urepr(
+                        [info.to_dict() for info in self.staging_infos],
+                        nl=1,
+                    )
                 )
             )
 
-    def gather_tasks(self):
-        tasks = {
-            'copy': [],
-            'perms': [],
-            'mkdir': [],
-        }
-        stats = {
-            'missing': [],
-            'modified': [],
-            'dirty': [],
-            'clean': [],
-            'missing_dir': [],
-        }
+    def gather_tasks(self) -> PatchPlan:
+        plan = PatchPlan()
 
         if self.config['regen'] is not None:
             regen_pat = xdev.Pattern.coerce(self.config['regen'])
@@ -1669,13 +1646,42 @@ class TemplateApplier:
             regen_pat = None
 
         if self.config['only_generate'] is not None:
+            import fnmatch
+            import re
             import kwutil
 
-            onlygen_pat = kwutil.MultiPattern.coerce(
-                self.config['only_generate']
-            )
+            onlygen_spec = self.config['only_generate']
+            onlygen_pat = kwutil.MultiPattern.coerce(onlygen_spec)
+
+            def onlygen_matches(text):
+                # Prefer kwutil multipattern semantics when they match, but
+                # keep historical search-style behavior for simple strings
+                # such as ``keep`` matching ``keep.txt``.
+                if onlygen_pat.match(text):
+                    return True
+
+                if isinstance(onlygen_spec, str):
+                    patterns = [onlygen_spec]
+                elif isinstance(onlygen_spec, (list, tuple, set)):
+                    patterns = list(onlygen_spec)
+                else:
+                    patterns = []
+
+                for pattern in patterns:
+                    if not isinstance(pattern, str):
+                        continue
+                    if pattern in text:
+                        return True
+                    if fnmatch.fnmatch(text, pattern):
+                        return True
+                    try:
+                        if re.search(pattern, text):
+                            return True
+                    except re.error:
+                        pass
+                return False
         else:
-            onlygen_pat = None
+            onlygen_matches = None
 
         diff_style = 'unified'
         for info in self.staging_infos:
@@ -1683,16 +1689,16 @@ class TemplateApplier:
             repo_fpath = info['repo_fpath']
             if info.get('skip', False):
                 continue
-            if onlygen_pat is not None:
-                if not onlygen_pat.match(info['fname']):
+            if onlygen_matches is not None:
+                if not onlygen_matches(info['fname']):
                     continue
             if not repo_fpath.exists():
                 if stage_fpath.is_dir():
-                    tasks['mkdir'].append(repo_fpath)
-                    stats['missing_dir'].append(repo_fpath)
+                    plan.add_mkdir(repo_fpath)
+                    plan.missing_dir.append(repo_fpath)
                 else:
-                    stats['missing'].append(repo_fpath)
-                    tasks['copy'].append((stage_fpath, repo_fpath))
+                    plan.missing.append(repo_fpath)
+                    plan.add_copy(stage_fpath, repo_fpath)
                     stage_text = stage_fpath.read_text()
                     # TODO: add style when available
                     try:
@@ -1716,9 +1722,7 @@ class TemplateApplier:
                             )
                             + '...and more'
                         )
-                    print(f'<NEW FPATH={repo_fpath}>')
-                    print(difftext)
-                    print(f'<END FPATH={repo_fpath}>')
+                    plan.diff_texts[repo_fpath] = difftext
             else:
                 assert stage_fpath.exists()
                 if stage_fpath.is_dir():
@@ -1750,15 +1754,13 @@ class TemplateApplier:
                                 want_rewrite = True
 
                     if want_rewrite:
-                        tasks['copy'].append((stage_fpath, repo_fpath))
-                        stats['dirty'].append(repo_fpath)
-                        print(f'<DIFF FOR repo_fpath={repo_fpath}>')
-                        print(difftext)
-                        print(f'<END DIFF repo_fpath={repo_fpath}>')
+                        plan.add_copy(stage_fpath, repo_fpath)
+                        plan.dirty.append(repo_fpath)
+                        plan.diff_texts[repo_fpath] = difftext
                     else:
-                        stats['modified'].append(repo_fpath)
+                        plan.modified.append(repo_fpath)
                 else:
-                    stats['clean'].append(repo_fpath)
+                    plan.clean.append(repo_fpath)
 
             if 'x' in info.get('perms', ''):
                 import stat
@@ -1767,12 +1769,26 @@ class TemplateApplier:
                     st = ub.Path(info['repo_fpath']).stat()
                     mode_want = st.st_mode | stat.S_IEXEC
                     if mode_want != st.st_mode:
-                        tasks['perms'].append((info['repo_fpath'], mode_want))
+                        plan.add_perm(info['repo_fpath'], mode_want)
                 # else:
-                #     tasks['perms'].append((info['repo_fpath'], mode_want))
+                #     plan.add_perm(info['repo_fpath'], mode_want)
 
-        print('stats = {}'.format(ub.urepr(stats, nl=2)))
-        return stats, tasks
+        return plan
+
+    def render_patch_plan(self, plan: PatchPlan) -> None:
+        for fpath in plan.missing:
+            difftext = plan.diff_texts.get(fpath)
+            if difftext:
+                print(f'<NEW FPATH={fpath}>')
+                print(difftext)
+                print(f'<END FPATH={fpath}>')
+        for fpath in plan.dirty:
+            difftext = plan.diff_texts.get(fpath)
+            if difftext:
+                print(f'<DIFF FOR repo_fpath={fpath}>')
+                print(difftext)
+                print(f'<END DIFF repo_fpath={fpath}>')
+        print('stats = {}'.format(ub.urepr(plan.stats, nl=2)))
 
     def build_requirements_txt(self):
         if self.config['use_pyproject_requirements']:

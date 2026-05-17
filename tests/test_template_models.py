@@ -16,6 +16,30 @@ def test_template_info_normalizes_tags():
     assert info['overwrite'] is True
 
 
+
+def test_template_info_bool_strings_are_coerced():
+    info = TemplateInfo.coerce({
+        'fname': 'demo.txt',
+        'overwrite': 'false',
+        'enabled': '0',
+        'skip': 'none',
+        'template': 'yes',
+    })
+    assert info.overwrite is False
+    assert info.enabled is False
+    assert info.skip is False
+    assert info.template is True
+
+    info['overwrite'] = 'true'
+    assert info.overwrite is True
+
+
+def test_template_info_rejects_ambiguous_bool_strings():
+    import pytest
+
+    with pytest.raises(ValueError):
+        TemplateInfo.coerce({'fname': 'demo.txt', 'overwrite': 'sometimes'})
+
 def test_template_context_uses_posix_module_path(tmp_path):
     config = {
         'repo_name': 'demo_pkg',
