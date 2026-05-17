@@ -1,4 +1,9 @@
-from xcookie.patch_plan import PatchPlan, coerce_legacy_patch_plan
+from xcookie.patch_plan import (
+    PatchPlan,
+    SearchPattern,
+    coerce_legacy_patch_plan,
+    render_patch_plan,
+)
 
 
 def test_patch_plan_apply_all(tmp_path):
@@ -65,3 +70,40 @@ def test_patch_plan_legacy_shape_roundtrip(tmp_path):
     assert plan.tasks['copy'] == [(src, dst)]
     assert plan.tasks['perms'] == [(dst, 0o755)]
     assert plan.tasks['mkdir'] == [tmp_path / 'pkg']
+
+
+def test_search_pattern_preserves_search_style_strings():
+    matcher = SearchPattern.coerce('keep')
+
+    assert matcher is not None
+    assert matcher.matches('keep.txt')
+    assert matcher.matches('pkg/keep/__init__.py')
+    assert not matcher.matches('skip.txt')
+
+
+def test_search_pattern_supports_globs_and_regex_lists():
+    matcher = SearchPattern.coerce(['*.toml', r'docs/.+\.md$'])
+
+    assert matcher is not None
+    assert matcher.matches('pyproject.toml')
+    assert matcher.matches('docs/index.md')
+    assert not matcher.matches('docs/index.rst')
+
+
+def test_search_pattern_none_disables_matcher():
+    assert SearchPattern.coerce(None) is None
+
+
+def test_render_patch_plan_is_separate_from_gathering(tmp_path, capsys):
+    missing = tmp_path / 'new.txt'
+    dirty = tmp_path / 'dirty.txt'
+    plan = PatchPlan(missing=[missing], dirty=[dirty])
+    plan.diff_texts[missing] = 'new diff'
+    plan.diff_texts[dirty] = 'dirty diff'
+
+    render_patch_plan(plan)
+
+    captured = capsys.readouterr()
+    assert '<NEW FPATH=' in captured.out
+    assert '<DIFF FOR repo_fpath=' in captured.out
+    assert 'stats = ' in captured.out

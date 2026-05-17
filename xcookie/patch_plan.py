@@ -9,7 +9,9 @@ before applying filesystem changes.
 
 from __future__ import annotations
 
+import fnmatch
 import os
+import re
 import shutil
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -46,6 +48,72 @@ class MkdirTask:
     """Create a repository directory."""
 
     path: Path
+
+
+@dataclass(frozen=True)
+class SearchPattern:
+    """Small compatibility wrapper for xcookie path matching options.
+
+    Historically options such as ``regen='pyproject'`` and
+    ``only_generate='README'`` were search-style matches against generated
+    relative paths.  The third-party pattern helpers xcookie uses do not all
+    expose the same ``search`` API, so this wrapper centralizes the compatibility
+    behavior and keeps :meth:`TemplateApplier.gather_tasks` focused on staging
+    decisions.
+    """
+
+    spec: Any
+
+    @classmethod
+    def coerce(cls, spec: Any) -> SearchPattern | None:
+        """Return a matcher for ``spec`` or ``None`` when no filter is active."""
+        if spec is None:
+            return None
+        return cls(spec)
+
+    def matches(self, text: os.PathLike[str] | str) -> bool:
+        """Return True when ``text`` matches this pattern specification."""
+        text = os.fspath(text)
+        if self._matches_multipattern(text):
+            return True
+        return any(
+            self._matches_string_pattern(pattern, text)
+            for pattern in self._string_patterns()
+        )
+
+    def _matches_multipattern(self, text: str) -> bool:
+        try:
+            import kwutil
+        except Exception:
+            return False
+        try:
+            matcher = kwutil.MultiPattern.coerce(self.spec)
+            return bool(matcher.match(text))
+        except (AttributeError, TypeError, ValueError, NotImplementedError):
+            return False
+
+    def _string_patterns(self) -> list[str]:
+        spec = self.spec
+        if isinstance(spec, str):
+            return [spec]
+        if isinstance(spec, Mapping):
+            return []
+        try:
+            items = list(spec)
+        except TypeError:
+            return []
+        return [item for item in items if isinstance(item, str)]
+
+    @staticmethod
+    def _matches_string_pattern(pattern: str, text: str) -> bool:
+        if pattern in text:
+            return True
+        if fnmatch.fnmatch(text, pattern):
+            return True
+        try:
+            return bool(re.search(pattern, text))
+        except re.error:
+            return False
 
 
 @dataclass
@@ -145,6 +213,25 @@ class PatchPlan:
     def parent_directories(self) -> set[Path]:
         """Return parent directories required by all copy tasks."""
         return {task.dst.parent for task in self.copy}
+
+
+def render_patch_plan(plan: PatchPlan) -> None:
+    """Print the human-readable patch summary for a staging plan."""
+    import pprint
+
+    for fpath in plan.missing:
+        difftext = plan.diff_texts.get(fpath)
+        if difftext:
+            print(f'<NEW FPATH={fpath}>')
+            print(difftext)
+            print(f'<END FPATH={fpath}>')
+    for fpath in plan.dirty:
+        difftext = plan.diff_texts.get(fpath)
+        if difftext:
+            print(f'<DIFF FOR repo_fpath={fpath}>')
+            print(difftext)
+            print(f'<END DIFF repo_fpath={fpath}>')
+    print('stats = {}'.format(pprint.pformat(plan.stats)))
 
 
 def coerce_legacy_patch_plan(

@@ -85,7 +85,7 @@ import ubelt as ub
 import xdev
 from packaging.version import parse as Version
 
-from xcookie.patch_plan import PatchPlan
+from xcookie.patch_plan import PatchPlan, SearchPattern, render_patch_plan
 from xcookie.resolved_config import resolve_xcookie_config
 from xcookie.staging import apply_template_context
 from xcookie.template_registry import (
@@ -1640,48 +1640,8 @@ class TemplateApplier:
     def gather_tasks(self) -> PatchPlan:
         plan = PatchPlan()
 
-        if self.config['regen'] is not None:
-            regen_pat = xdev.Pattern.coerce(self.config['regen'])
-        else:
-            regen_pat = None
-
-        if self.config['only_generate'] is not None:
-            import fnmatch
-            import re
-            import kwutil
-
-            onlygen_spec = self.config['only_generate']
-            onlygen_pat = kwutil.MultiPattern.coerce(onlygen_spec)
-
-            def onlygen_matches(text):
-                # Prefer kwutil multipattern semantics when they match, but
-                # keep historical search-style behavior for simple strings
-                # such as ``keep`` matching ``keep.txt``.
-                if onlygen_pat.match(text):
-                    return True
-
-                if isinstance(onlygen_spec, str):
-                    patterns = [onlygen_spec]
-                elif isinstance(onlygen_spec, (list, tuple, set)):
-                    patterns = list(onlygen_spec)
-                else:
-                    patterns = []
-
-                for pattern in patterns:
-                    if not isinstance(pattern, str):
-                        continue
-                    if pattern in text:
-                        return True
-                    if fnmatch.fnmatch(text, pattern):
-                        return True
-                    try:
-                        if re.search(pattern, text):
-                            return True
-                    except re.error:
-                        pass
-                return False
-        else:
-            onlygen_matches = None
+        regen_pat = SearchPattern.coerce(self.config.get('regen'))
+        onlygen_pat = SearchPattern.coerce(self.config.get('only_generate'))
 
         diff_style = 'unified'
         for info in self.staging_infos:
@@ -1689,8 +1649,8 @@ class TemplateApplier:
             repo_fpath = info['repo_fpath']
             if info.get('skip', False):
                 continue
-            if onlygen_matches is not None:
-                if not onlygen_matches(info['fname']):
+            if onlygen_pat is not None:
+                if not onlygen_pat.matches(info['fname']):
                     continue
             if not repo_fpath.exists():
                 if stage_fpath.is_dir():
@@ -1750,7 +1710,7 @@ class TemplateApplier:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:
                         if regen_pat is not None:
-                            if regen_pat.search(os.fspath(info['fname'])):
+                            if regen_pat.matches(info['fname']):
                                 want_rewrite = True
 
                     if want_rewrite:
@@ -1776,19 +1736,7 @@ class TemplateApplier:
         return plan
 
     def render_patch_plan(self, plan: PatchPlan) -> None:
-        for fpath in plan.missing:
-            difftext = plan.diff_texts.get(fpath)
-            if difftext:
-                print(f'<NEW FPATH={fpath}>')
-                print(difftext)
-                print(f'<END FPATH={fpath}>')
-        for fpath in plan.dirty:
-            difftext = plan.diff_texts.get(fpath)
-            if difftext:
-                print(f'<DIFF FOR repo_fpath={fpath}>')
-                print(difftext)
-                print(f'<END DIFF repo_fpath={fpath}>')
-        print('stats = {}'.format(ub.urepr(plan.stats, nl=2)))
+        render_patch_plan(plan)
 
     def build_requirements_txt(self):
         if self.config['use_pyproject_requirements']:

@@ -5,7 +5,18 @@ We are currently working on porting this changelog to the specifications in
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## Version 0.3.4 - Unreleased
+## Version 0.4.0 - Unreleased
+
+### Added
+* Added a structured `PatchPlan` staging model with explicit copy, permission, and directory tasks.
+* Added tests for staging-plan classification, selective application, search-style generation filters, and template boolean coercion.
+
+### Changed
+* Refactored staged-file gathering so it returns a side-effect-light plan instead of a pair of nested dictionaries.
+* Moved patch-plan rendering and generation-filter matching into testable helper code.
+* Cleaned up generated Sphinx configuration defaults to avoid stale theme path, source suffix, static path, and unsupported theme-option warnings.
+* Stopped placing both `auto/{mod_name}` and `auto/modules` in the generated docs index to avoid duplicate toctree entries.
+* Hardened `TemplateInfo` boolean coercion so strings like `"false"` no longer behave as truthy values.
 
 
 ## Version 0.3.3 - Released 2026-04-12
