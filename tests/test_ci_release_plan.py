@@ -54,10 +54,27 @@ def test_github_release_plan_describes_trusted_publishing(tmp_path):
     assert plan.package_kind == 'purepy'
     assert plan.build_job_keys == ('build_sdist', 'build_purepy_wheels')
     assert plan.deploy_job_keys == ('test_deploy', 'live_deploy', 'release')
-    assert [target.name for target in plan.publish_targets] == ['testpypi', 'pypi']
-    assert all(target.trusted_publishing for target in plan.publish_targets)
-    assert all(target.requires_oidc for target in plan.publish_targets)
-    assert {target.environment for target in plan.publish_targets} == {'testpypi', 'pypi'}
+    assert [target.name for target in plan.publish_targets] == [
+        'testpypi',
+        'pypi',
+        'github-release',
+    ]
+    package_targets = [
+        target
+        for target in plan.publish_targets
+        if target.name in {'testpypi', 'pypi'}
+    ]
+    assert all(target.trusted_publishing for target in package_targets)
+    assert all(target.requires_oidc for target in package_targets)
+    assert {target.environment for target in package_targets} == {'testpypi', 'pypi'}
+    release_targets = [
+        target
+        for target in plan.publish_targets
+        if target.name == 'github-release'
+    ]
+    assert len(release_targets) == 1
+    assert not release_targets[0].trusted_publishing
+    assert not release_targets[0].requires_oidc
 
 
 def test_release_plan_distribution_and_artifact_globs_track_gpg(tmp_path):
