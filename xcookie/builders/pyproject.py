@@ -15,6 +15,26 @@ def _autodictify(value):
     return value
 
 
+# Common free-text license names mapped to SPDX identifiers.  PEP 639 (and
+# setuptools >= 77) require the ``project.license`` field to be a string
+# containing a valid SPDX expression rather than the older ``{text = ...}``
+# table form.
+_SPDX_LICENSE_ALIASES = {
+    'Apache 2': 'Apache-2.0',
+    'Apache 2.0': 'Apache-2.0',
+    'Apache2': 'Apache-2.0',
+    'BSD-3': 'BSD-3-Clause',
+    'BSD3': 'BSD-3-Clause',
+    'MIT': 'MIT',
+    'GPL3': 'GPL-3.0-only',
+}
+
+
+def _coerce_spdx_license(value: str) -> str:
+    """Coerce a configured license value into a valid SPDX expression."""
+    return _SPDX_LICENSE_ALIASES.get(value, value)
+
+
 def _build_xcookie_tool_config(self, pyproj_config):
     """Build the ``[tool.xcookie]`` block without leaking inferred defaults.
 
@@ -93,7 +113,11 @@ def _build_xcookie_tool_config(self, pyproj_config):
             # versions for backwards compatibility.
             should_save = key in existing_keys and value != '0.0.1'
         elif key == 'license':
-            should_save = should_save or value not in {'Apache 2', 'Apache-2.0'}
+            should_save = should_save or value not in {
+                'Apache 2',
+                'Apache 2.0',
+                'Apache-2.0',
+            }
         elif key == 'dev_status':
             should_save = should_save or value != 'planning'
         elif key in {'remote_host', 'remote_group'}:
@@ -130,7 +154,7 @@ def build_pyproject(self):
         )
         build_system_requires.extend(
             [
-                'setuptools>=41.0.1',
+                'setuptools>=77',
                 # setuptools_scm[toml]
                 # "wheel",
                 'scikit-build>=0.11.1',
@@ -200,7 +224,7 @@ def build_pyproject(self):
         )
         build_system_requires.extend(
             [
-                'setuptools>=41.0.1',
+                'setuptools>=77',
                 # setuptools_scm[toml]
                 # "wheel>=0.37.1",
             ]
@@ -298,7 +322,12 @@ def build_pyproject(self):
 
         project_block['classifiers'] = self._project_classifiers()
         if self.config['license']:
-            project_block['license'] = {'text': self.config['license']}
+            # PEP 639: ``license`` is a string SPDX expression; license files
+            # are listed separately under ``license-files``.
+            project_block['license'] = _coerce_spdx_license(
+                self.config['license']
+            )
+            project_block['license-files'] = ['LICENSE']
         if self.config['url']:
             urls = project_block.get('urls', {})
             urls['Homepage'] = str(self.config['url'])

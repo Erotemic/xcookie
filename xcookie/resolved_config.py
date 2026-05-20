@@ -83,7 +83,7 @@ class ResolvedXCookieConfig:
 
         license_text = config['license']
         if license_text is None:
-            license_text = 'Apache 2'
+            license_text = 'Apache-2.0'
 
         author_email = config['author_email']
         if author_email is None:
