@@ -328,7 +328,10 @@ def make_install_and_test_wheel_parts(
             '    cat "$LOCK_REQUIREMENTS"',
             '    LOCK_ARGS=(--constraint "$LOCK_REQUIREMENTS")',
             'fi',
-            'python -m uv pip install --prerelease=allow --prefer-binary "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"',
+            # uv prefers binary wheels by default; the pip --prefer-binary
+            # flag does not exist in ``uv pip install`` and was rejected at
+            # runtime, so omit it here.
+            'python -m uv pip install --prerelease=allow "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"',
         ]
     else:
         install_wheel_commands += [
