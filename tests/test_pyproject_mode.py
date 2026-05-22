@@ -718,3 +718,108 @@ def test_xcookie_help_does_not_emit_scriptconfig_transition_warnings() -> None:
     assert 'FutureWarning' not in proc.stderr
     assert 'cmdline' not in proc.stderr
     assert 'description' not in proc.stderr
+
+
+def test_uv_exclude_newer_is_stamped_on_fresh_repo(tmp_path) -> None:
+    """A fresh uv-using repo should get a [tool.uv] exclude-newer cutoff."""
+    import datetime as _dt
+    from xcookie.builders.pyproject import build_pyproject
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['github', 'purepy'],
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_vcs=False,
+        use_uv=True,
+    )
+    applier = TemplateApplier(config)
+    pyproject_text = build_pyproject(applier)
+    pyproject_data = (
+        toml.loads(pyproject_text)
+        if isinstance(pyproject_text, str)
+        else pyproject_text
+    )
+    assert pyproject_data['tool']['uv']['exclude-newer'] == (
+        _dt.date.today().isoformat()
+    )
+
+
+def test_uv_exclude_newer_preserves_existing_value(tmp_path) -> None:
+    """Regen must not bump a user's chosen exclude-newer date."""
+    from xcookie.builders.pyproject import build_pyproject
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {'name': 'demo-mod'},
+                'tool': {
+                    'uv': {'exclude-newer': '2024-01-15'},
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'use_uv': True,
+                    },
+                },
+            }
+        )
+    )
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['github', 'purepy'],
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_vcs=False,
+        use_uv=True,
+    )
+    applier = TemplateApplier(config)
+    pyproject_text = build_pyproject(applier)
+    pyproject_data = (
+        toml.loads(pyproject_text)
+        if isinstance(pyproject_text, str)
+        else pyproject_text
+    )
+    assert pyproject_data['tool']['uv']['exclude-newer'] == '2024-01-15'
+
+
+def test_uv_exclude_newer_disabled_by_config(tmp_path) -> None:
+    """Setting uv_exclude_newer=False should omit the setting entirely."""
+    from xcookie.builders.pyproject import build_pyproject
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['github', 'purepy'],
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_vcs=False,
+        use_uv=True,
+        uv_exclude_newer=False,
+    )
+    applier = TemplateApplier(config)
+    pyproject_text = build_pyproject(applier)
+    pyproject_data = (
+        toml.loads(pyproject_text)
+        if isinstance(pyproject_text, str)
+        else pyproject_text
+    )
+    assert 'exclude-newer' not in pyproject_data.get('tool', {}).get('uv', {})

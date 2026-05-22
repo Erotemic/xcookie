@@ -387,6 +387,18 @@ class XCookieConfig(scfg.DataConfig):
                 'if False use plain pip, otherwise use uv instead'
             ),
         ),
+        'uv_exclude_newer': scfg.Value(
+            'auto',
+            help=ub.paragraph(
+                """
+            Supply-chain guard: passed through to ``[tool.uv] exclude-newer``
+            in the generated pyproject.toml. ``'auto'`` (default) preserves
+            an existing value if one is on disk, otherwise stamps today's
+            date. Set to ``False``/``None`` to disable. Set to a specific
+            ISO date string (e.g. ``'2026-05-22'``) to pin a cutoff.
+            """
+            ),
+        ),
         'use_pyproject_requirements': scfg.Value(
             False, help=ub.paragraph('experimental new style version testing')
         ),

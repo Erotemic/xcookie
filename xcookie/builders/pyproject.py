@@ -1,3 +1,4 @@
+import datetime as _datetime
 import json
 import tempfile
 
@@ -5,6 +6,33 @@ import toml
 import ubelt as ub
 
 from xcookie.util.util_metadata import coerce_author_entries
+
+
+def _resolve_uv_exclude_newer(self, pyproj_config):
+    """Decide the ``[tool.uv] exclude-newer`` value to write.
+
+    The supply-chain guard pins ``uv lock`` to ignore packages published
+    after a given date. Behavior:
+
+    * ``False``/``None`` → disable (do not emit the setting).
+    * ``'auto'`` → preserve any existing value on disk; otherwise stamp
+      today's UTC date.
+    * any other string → use verbatim.
+    """
+    configured = self.config.get('uv_exclude_newer', 'auto')
+    if configured in (False, None, 'false', 'False', 'off'):
+        return None
+
+    existing = (
+        pyproj_config.get('tool', {})
+        .get('uv', {})
+        .get('exclude-newer')
+    )
+    if configured == 'auto':
+        if existing:
+            return existing
+        return _datetime.date.today().isoformat()
+    return str(configured)
 
 
 def _autodictify(value):
@@ -235,6 +263,13 @@ def build_pyproject(self):
         pyproj_config['build-system'].setdefault(
             'build-backend', 'setuptools.build_meta'
         )
+
+    if self.config.get('use_uv'):
+        exclude_newer = _resolve_uv_exclude_newer(self, pyproj_config)
+        if exclude_newer:
+            tool_uv = pyproj_config['tool'].get('uv') or {}
+            tool_uv['exclude-newer'] = exclude_newer
+            pyproj_config['tool']['uv'] = tool_uv
 
     WITH_PYTEST_INI = 1
     if WITH_PYTEST_INI:
