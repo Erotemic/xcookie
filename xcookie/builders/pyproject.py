@@ -375,6 +375,19 @@ def build_pyproject(self):
             if 'postgresql' in self.tags:
                 extras.append('postgresql')
 
+            # Auto-discover any additional requirements/<name>.txt files so
+            # they become optional extras. Mirrors the legacy setup.py
+            # builder which exposed one extra per requirements file.
+            requirements_dpath = self.repodir / 'requirements'
+            if requirements_dpath.exists():
+                discovered = sorted(
+                    f.stem for f in requirements_dpath.glob('*.txt')
+                )
+                # ``runtime`` is the install_requires source, not an extra.
+                extras = list(ub.oset(extras + [
+                    name for name in discovered if name != 'runtime'
+                ]))
+
             optional_dynamic = {}
             for name in extras:
                 optional_dynamic[name] = {'file': [f'requirements/{name}.txt']}
