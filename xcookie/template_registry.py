@@ -48,7 +48,7 @@ class TemplateInfo(MutableMapping[str, Any]):
                 known[key] = value
             else:
                 extra[key] = value
-        info = cls(**known)
+        info = cls(**known)  # type: ignore
         info.extra.update(extra)
         return info
 
@@ -142,7 +142,6 @@ def coerce_template_infos(
 ) -> list[TemplateInfo]:
     """Normalize raw registry dictionaries into typed template records."""
     return [TemplateInfo.coerce(info) for info in infos]
-
 
 
 def _coerce_bool(value: Any) -> bool:

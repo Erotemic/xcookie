@@ -221,7 +221,11 @@ def build_setup(self):
         setupkw_parts['scripts'] = ub.urepr(pyproject_settings['scripts'])
     if 'package_data' in pyproject_settings:
         setupkw_parts.setdefault('package_data', {})
-        setupkw_parts['package_data'].update(pyproject_settings['package_data'])
+        _package_data_dst = setupkw_parts['package_data']
+        _package_data_new = pyproject_settings['package_data']
+        assert isinstance(_package_data_new, dict)
+        assert isinstance(_package_data_dst, dict)
+        _package_data_dst.update(_package_data_new)
 
     for k, v in setupkw_parts.items():
         parts.append(ub.indent(f'setupkw[{k!r}] = {v}'))
