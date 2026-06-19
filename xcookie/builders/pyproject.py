@@ -370,6 +370,8 @@ def build_pyproject(self):
 
         setuptools_block = pyproj_config['tool']['setuptools']
         setuptools_block['include-package-data'] = True
+        if isinstance(setuptools_block.get('packages'), list):
+            setuptools_block['packages'] = ub.AutoDict()
         setuptools_block['packages']['find']['where'] = [
             self.config['rel_mod_parent_dpath']
         ]

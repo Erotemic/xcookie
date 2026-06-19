@@ -823,3 +823,67 @@ def test_uv_exclude_newer_disabled_by_config(tmp_path) -> None:
         else pyproject_text
     )
     assert 'exclude-newer' not in pyproject_data.get('tool', {}).get('uv', {})
+
+
+def test_explicit_packages_list_is_converted_to_find_dict(tmp_path) -> None:
+    """
+    When an existing pyproject.toml uses the explicit list form for
+    ``[tool.setuptools] packages``, xcookie must not crash trying to subscript
+    it like a dict.  The list should be replaced with the ``find`` style.
+    """
+    from xcookie.builders.pyproject import build_pyproject
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '0.1.0'\n")
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-mod',
+                    'description': 'Demo module',
+                    'requires-python': '>=3.10',
+                    'version': '0.1.0',
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'tags': ['github', 'purepy'],
+                    },
+                    'setuptools': {
+                        'packages': ['demo_mod', 'demo_mod.sub'],
+                        'include-package-data': True,
+                    },
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['github', 'purepy'],
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_vcs=False,
+    )
+    applier = TemplateApplier(config)
+    pyproject_text = build_pyproject(applier)
+    pyproject_data = (
+        toml.loads(pyproject_text)
+        if isinstance(pyproject_text, str)
+        else pyproject_text
+    )
+
+    packages = pyproject_data['tool']['setuptools']['packages']
+    assert isinstance(packages, dict), (
+        "packages must be converted from a list to a find-dict"
+    )
+    assert 'find' in packages
+    assert 'where' in packages['find']
+    assert 'include' in packages['find']
