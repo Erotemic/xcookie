@@ -769,7 +769,6 @@ class TemplateApplier:
         if self.config['use_vcs']:
             if self.config['rotate_secrets']:
                 self.rotate_secrets()
-        self.print_help_tips()
 
         if self.config['use_vcs']:
             if self.config['autostage']:
@@ -1902,24 +1901,6 @@ class TemplateApplier:
             )
             if proc.returncode != 0:
                 raise SystemExit(proc.returncode)
-
-    def print_help_tips(self):
-        text = ub.codeblock(
-            """
-            Things that xcookie might eventually do that you should do for
-            yourself for now:
-
-            * Add typing to the module
-
-                # xdev requires the non-binary mypy
-                pip install -U mypy --no-binary :all:
-
-                # Then make sure you have typed = true in the [tool.xcookie]
-                # section of pyproject.toml and regenerate setup.py
-
-            """
-        )
-        print(text)
 
     def build_readthedocs(self):
         """
