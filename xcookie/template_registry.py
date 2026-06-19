@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import ubelt as ub
 
@@ -88,9 +88,9 @@ class TemplateInfo(MutableMapping[str, Any]):
     def values(self):
         return self.to_dict().values()
 
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: object, default: Any = None) -> Any:
         try:
-            return self[key]
+            return self[cast(str, key)]
         except KeyError:
             return default
 
