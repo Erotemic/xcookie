@@ -20,6 +20,19 @@ DEV_PYTHON_VERSIONS: List[str] = [
     # '3.14',
 ]
 
+# The major.minor PyPy versions that have been released and that GitHub Actions
+# / pypy.org currently distribute. PyPy tracks CPython compatibility, so each
+# entry corresponds to the CPython language level that version implements.
+# Update this as new PyPy releases land (e.g. pypy3.12).
+# References:
+# https://www.pypy.org/download.html
+# https://github.com/actions/setup-python (supports pypy-3.x)
+KNOWN_PYPY_VERSIONS: List[str] = [
+    '3.9',
+    '3.10',
+    '3.11',
+]
+
 
 KNOWN_CPYTHON_DOCKER_IMAGES: Dict[str, str] = {
     # TODO allow rc?

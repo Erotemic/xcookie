@@ -114,7 +114,17 @@ class ResolvedXCookieConfig:
 
         ci_pypy_versions = config['ci_pypy_versions']
         if ci_pypy_versions == 'auto':
-            ci_pypy_versions = ('3.9',) if 'purepy' in tags else ()
+            if 'purepy' in tags:
+                ci_pypy_versions = _infer_pypy_versions(
+                    supported_python_versions
+                )
+            else:
+                ci_pypy_versions = ()
+        else:
+            ci_pypy_versions = _coerce_tuple(ci_pypy_versions)
+            _warn_unsupported_pypy_versions(
+                ci_pypy_versions, supported_python_versions
+            )
         ci_pypy_versions = _coerce_tuple(ci_pypy_versions)
 
         use_uv = config['use_uv']
@@ -255,6 +265,58 @@ def _infer_supported_python_versions(
     return tuple(
         version for version in KNOWN_PYTHON_VERSIONS if satisfies_minmax(version)
     )
+
+
+def _infer_pypy_versions(
+    supported_python_versions: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Choose a default PyPy version to test on the CI.
+
+    Picks the most recent known PyPy version whose CPython language level falls
+    within the project's supported Python range. Returns an empty tuple when no
+    released PyPy version is compatible (e.g. the project only supports a Python
+    version that PyPy has not yet implemented).
+    """
+    from xcookie.constants import KNOWN_PYPY_VERSIONS
+
+    if not supported_python_versions:
+        return ()
+
+    min_version = Version(supported_python_versions[0])
+    max_version = Version(supported_python_versions[-1])
+
+    compatible = [
+        pyver
+        for pyver in KNOWN_PYPY_VERSIONS
+        if min_version <= Version(pyver) <= max_version
+    ]
+    if not compatible:
+        return ()
+    # Default to a single, most-recent compatible PyPy to keep the CI matrix
+    # lean. Projects that want more can set ``ci_pypy_versions`` explicitly.
+    latest = max(compatible, key=Version)
+    return (latest,)
+
+
+def _warn_unsupported_pypy_versions(
+    ci_pypy_versions: tuple[str, ...],
+    supported_python_versions: tuple[str, ...],
+) -> None:
+    """Warn when explicit PyPy versions fall outside the supported range."""
+    if not ci_pypy_versions or not supported_python_versions:
+        return
+    min_version = Version(supported_python_versions[0])
+    max_version = Version(supported_python_versions[-1])
+    for pyver in ci_pypy_versions:
+        if not (min_version <= Version(pyver) <= max_version):
+            import warnings
+
+            warnings.warn(
+                f'Configured pypy version {pyver!r} is outside the supported '
+                f'python range [{supported_python_versions[0]}, '
+                f'{supported_python_versions[-1]}]. Installing the package on '
+                f'this PyPy may fail its python_requires constraint.'
+            )
 
 
 def _coerce_tuple(value: Any) -> tuple[str, ...]:

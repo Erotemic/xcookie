@@ -95,6 +95,66 @@ def test_resolved_config_apply_to_config(tmp_path):
     assert resolved.pkg_name == resolved.mod_name
     assert resolved.tags == ('github', 'purepy')
     assert set(resolved.os) == {'linux', 'osx', 'win'}
+    # PyPy auto-selection should lock onto the supported python range rather
+    # than the legacy hardcoded 3.9.
+    assert resolved.ci_pypy_versions == ('3.11',)
     resolved.apply_to_config(config)
     assert config['repo_name'] == resolved.repo_name
     assert config['supported_python_versions'] == ['3.11']
+    assert config['ci_pypy_versions'] == ['3.11']
+
+
+def _resolve_pypy(tmp_path, *, tags, min_python, max_python=None,
+                  ci_pypy_versions='auto'):
+    config = {
+        'repodir': tmp_path,
+        'repo_name': None,
+        'mod_name': None,
+        'pkg_name': None,
+        'rel_mod_parent_dpath': 'src',
+        'tags': tags,
+        'os': 'linux',
+        'is_new': 'auto',
+        'rotate_secrets': 'auto',
+        'refresh_docs': 'auto',
+        'author': 'Example Author',
+        'author_email': 'author@example.com',
+        'license': None,
+        'version': None,
+        'description': None,
+        'supported_python_versions': 'auto',
+        'ci_cpython_versions': 'auto',
+        'ci_pypy_versions': ci_pypy_versions,
+        'use_uv': 'auto',
+        'min_python': min_python,
+        'max_python': max_python,
+    }
+    return ResolvedXCookieConfig.from_config(config)
+
+
+def test_pypy_auto_locks_to_supported_range(tmp_path):
+    # A project requiring python >= 3.10 must not request pypy 3.9.
+    resolved = _resolve_pypy(tmp_path, tags='github,purepy', min_python='3.10')
+    assert '3.9' not in resolved.ci_pypy_versions
+    for pyver in resolved.ci_pypy_versions:
+        assert pyver in resolved.supported_python_versions
+
+
+def test_pypy_auto_disabled_without_purepy(tmp_path):
+    resolved = _resolve_pypy(tmp_path, tags='github,binpy', min_python='3.8')
+    assert resolved.ci_pypy_versions == ()
+
+
+def test_pypy_auto_empty_when_no_compatible_release(tmp_path):
+    # PyPy has not released a 3.13-only interpreter, so a 3.13-min project gets
+    # no pypy job rather than an invalid one.
+    resolved = _resolve_pypy(tmp_path, tags='github,purepy', min_python='3.13')
+    assert resolved.ci_pypy_versions == ()
+
+
+def test_pypy_explicit_versions_pass_through(tmp_path):
+    resolved = _resolve_pypy(
+        tmp_path, tags='github,purepy', min_python='3.9',
+        ci_pypy_versions=['3.10', '3.11'],
+    )
+    assert resolved.ci_pypy_versions == ('3.10', '3.11')

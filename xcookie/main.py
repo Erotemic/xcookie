@@ -216,8 +216,11 @@ class XCookieConfig(scfg.DataConfig):
             'auto',
             help=ub.paragraph(
                 """
-            Specify the major.minor PyPy versions to use on the CI.
-            Defaults will depend on purepy vs binpy tags.
+            Specify the major.minor PyPy versions to use on the CI as a list,
+            e.g. ["3.10", "3.11"]. With "auto", purepy repos test on the most
+            recent released PyPy whose CPython level is within the supported
+            python range (and no PyPy job if none is compatible); binpy repos
+            default to no PyPy.
             """
             ),
         ),

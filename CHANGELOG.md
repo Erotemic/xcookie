@@ -10,8 +10,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 * Added a structured `PatchPlan` staging model with explicit copy, permission, and directory tasks.
 * Added tests for staging-plan classification, selective application, search-style generation filters, and template boolean coercion.
+* Added `KNOWN_PYPY_VERSIONS` constant enumerating the released PyPy interpreters.
 
 ### Changed
+* Auto-selection of `ci_pypy_versions` now locks onto the supported python range
+  instead of hardcoding PyPy 3.9. Purepy repos test on the most recent released
+  PyPy compatible with the supported python versions (e.g. a `python >= 3.10`
+  project now uses PyPy 3.11), and emit no PyPy job when no released PyPy is
+  compatible. Explicit `ci_pypy_versions` outside the supported range now warn.
 * Refactored staged-file gathering so it returns a side-effect-light plan instead of a pair of nested dictionaries.
 * Moved patch-plan rendering and generation-filter matching into testable helper code.
 * Cleaned up generated Sphinx configuration defaults to avoid stale theme path, source suffix, static path, and unsupported theme-option warnings.
