@@ -1,4 +1,3 @@
-import datetime as _datetime
 import json
 import tempfile
 
@@ -8,16 +7,24 @@ import ubelt as ub
 from xcookie.util.util_metadata import coerce_author_entries
 
 
+# Default rolling window for the ``[tool.uv] exclude-newer`` supply-chain
+# guard. ``uv`` accepts ISO 8601 durations, so ``P7D`` means "ignore packages
+# published in the last 7 days" -- this keeps the guard from going stale the
+# way a hard-coded absolute date would.
+DEFAULT_UV_EXCLUDE_NEWER = 'P7D'
+
+
 def _resolve_uv_exclude_newer(self, pyproj_config):
     """Decide the ``[tool.uv] exclude-newer`` value to write.
 
-    The supply-chain guard pins ``uv lock`` to ignore packages published
-    after a given date. Behavior:
+    The supply-chain guard tells ``uv lock`` to ignore packages published
+    too recently. Behavior:
 
     * ``False``/``None`` → disable (do not emit the setting).
-    * ``'auto'`` → preserve any existing value on disk; otherwise stamp
-      today's UTC date.
-    * any other string → use verbatim.
+    * ``'auto'`` → preserve any existing value on disk; otherwise use the
+      relative default :data:`DEFAULT_UV_EXCLUDE_NEWER`.
+    * any other string → use verbatim (e.g. a relative ``'30 days'`` /
+      ``'P30D'`` window, or a fixed ``'2026-05-22'`` date).
     """
     configured = self.config.get('uv_exclude_newer', 'auto')
     if configured in (False, None, 'false', 'False', 'off'):
@@ -31,7 +38,7 @@ def _resolve_uv_exclude_newer(self, pyproj_config):
     if configured == 'auto':
         if existing:
             return existing
-        return _datetime.date.today().isoformat()
+        return DEFAULT_UV_EXCLUDE_NEWER
     return str(configured)
 
 
@@ -428,6 +435,25 @@ def build_pyproject(self):
             optional_dynamic = {}
             for name in extras:
                 optional_dynamic[name] = {'file': [f'requirements/{name}.txt']}
+
+            # Recreate the legacy ``all`` convenience extra so users can run
+            # ``pip install pkg[all]``. setuptools concatenates a list of
+            # requirement files for a single dynamic extra, so no aggregate
+            # file needs to be generated. Development-only extras are excluded
+            # because ``all`` is meant for end users pulling in optional runtime
+            # features. The loose/strict distinction is handled by lock-file
+            # constraints in CI, so there is intentionally no ``all-strict``.
+            DEV_EXTRAS = {'tests', 'docs', 'linting'}
+            all_extra_names = [
+                name
+                for name in extras
+                if name not in DEV_EXTRAS and name != 'all'
+            ]
+            if all_extra_names:
+                optional_dynamic['all'] = {
+                    'file': [f'requirements/{name}.txt' for name in all_extra_names]
+                }
+
             setuptools_dynamic['optional-dependencies'] = optional_dynamic
 
         entry_points = pyproject_settings.get('entry_points', {})
@@ -483,18 +509,37 @@ def build_pyproject(self):
         )
         text = temp_fpath.read_text()
 
+    # ``toml.dumps`` cannot emit comments, so re-inject the documentation for
+    # the supply-chain pin and normalize the package name in a single pass.
+    uv_exclude_newer_comment = [
+        '# Supply-chain guard: ignore packages published too recently.',
+        '# Accepts a relative window (e.g. "P7D" / "30 days") or a fixed'
+        ' date.',
+    ]
     project_name = pyproj_config.get('project', {}).get('name')
-    if project_name:
-        section_name = None
-        fixed_lines = []
-        for line in text.splitlines():
-            if line.startswith('[') and line.endswith(']'):
-                section_name = line.strip()[1:-1]
-                fixed_lines.append(line)
-                continue
-            if section_name == 'project' and line.lstrip().startswith('name = '):
-                indent = line[: len(line) - len(line.lstrip())]
-                line = f'{indent}name = {json.dumps(project_name)}'
+    section_name = None
+    fixed_lines = []
+    for line in text.splitlines():
+        if line.startswith('[') and line.endswith(']'):
+            section_name = line.strip()[1:-1]
             fixed_lines.append(line)
-        text = '\n'.join(fixed_lines)
+            continue
+        if section_name == 'tool.uv' and line.lstrip().startswith(
+            'exclude-newer = '
+        ):
+            indent = line[: len(line) - len(line.lstrip())]
+            fixed_lines.extend(
+                f'{indent}{comment}' for comment in uv_exclude_newer_comment
+            )
+        if (
+            project_name
+            and section_name == 'project'
+            and line.lstrip().startswith('name = ')
+        ):
+            indent = line[: len(line) - len(line.lstrip())]
+            line = f'{indent}name = {json.dumps(project_name)}'
+        fixed_lines.append(line)
+    # ``splitlines`` drops the trailing newline; restore it so the rewritten
+    # file keeps a POSIX-friendly final newline.
+    text = '\n'.join(fixed_lines) + '\n'
     return text

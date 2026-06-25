@@ -11,8 +11,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 * Added a structured `PatchPlan` staging model with explicit copy, permission, and directory tasks.
 * Added tests for staging-plan classification, selective application, search-style generation filters, and template boolean coercion.
 * Added `KNOWN_PYPY_VERSIONS` constant enumerating the released PyPy interpreters.
+* Restored the legacy `all` convenience extra in pure-pyproject mode so users
+  can run `pip install pkg[all]`. It aggregates the runtime-optional extras via
+  a multi-file dynamic `optional-dependencies` entry and excludes development
+  extras (`tests`, `docs`, `linting`). The loose/strict split remains handled by
+  lock-file constraints in CI, so there is intentionally no `all-strict`.
+
+### Fixed
+* The generated `pyproject.toml` now keeps a trailing newline and re-emits the
+  `[tool.uv] exclude-newer` supply-chain comment that `toml.dumps` would
+  otherwise strip.
 
 ### Changed
+* The default `[tool.uv] exclude-newer` supply-chain guard is now a relative
+  `P7D` window (ignore packages published in the last 7 days) instead of a
+  hard-coded current date, so the value no longer goes stale. Existing values
+  on disk are still preserved, and `uv_exclude_newer=False` disables the guard.
 * Auto-selection of `ci_pypy_versions` now locks onto the supported python range
   instead of hardcoding PyPy 3.9. Purepy repos test on the most recent released
   PyPy compatible with the supported python versions (e.g. a `python >= 3.10`

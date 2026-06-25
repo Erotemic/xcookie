@@ -50,6 +50,53 @@ def test_use_setup_py_false_generates_pep621(tmp_path) -> None:
     assert package_data['*'] == ['requirements/*.txt']
 
 
+def test_all_extra_aggregates_runtime_optional_requirements(tmp_path) -> None:
+    """
+    The legacy ``[all]`` convenience extra must be regenerated so users can
+    run ``pip install pkg[all]``. It aggregates the runtime-optional extras
+    via a multi-file dynamic entry and excludes development-only extras
+    (tests/docs/linting). There is intentionally no ``all-strict`` (the
+    loose/strict split is handled by lock-file constraints in CI).
+    """
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['github', 'purepy'],
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_vcs=False,
+    )
+
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    pyproject_text = (applier.staging_dpath / 'pyproject.toml').read_text()
+    pyproject_data = toml.loads(pyproject_text)
+
+    optional = pyproject_data['tool']['setuptools']['dynamic'][
+        'optional-dependencies'
+    ]
+    assert 'all' in optional, 'the all convenience extra must be present'
+    assert 'all-strict' not in optional, 'strict is handled via lock files'
+
+    all_files = optional['all']['file']
+    assert 'requirements/optional.txt' in all_files
+    # Development-only extras must not be pulled into the user-facing ``all``.
+    assert 'requirements/tests.txt' not in all_files
+    assert 'requirements/docs.txt' not in all_files
+
+    # The rewritten file must keep a trailing newline.
+    assert pyproject_text.endswith('\n')
+
+
 def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None:
     """
     Existing pyproject metadata should seed xcookie defaults, and unrelated
@@ -721,9 +768,11 @@ def test_xcookie_help_does_not_emit_scriptconfig_transition_warnings() -> None:
 
 
 def test_uv_exclude_newer_is_stamped_on_fresh_repo(tmp_path) -> None:
-    """A fresh uv-using repo should get a [tool.uv] exclude-newer cutoff."""
-    import datetime as _dt
-    from xcookie.builders.pyproject import build_pyproject
+    """A fresh uv-using repo should get a relative [tool.uv] exclude-newer."""
+    from xcookie.builders.pyproject import (
+        DEFAULT_UV_EXCLUDE_NEWER,
+        build_pyproject,
+    )
     from xcookie.main import TemplateApplier, XCookieConfig
 
     repodir = tmp_path / 'demo'
@@ -747,9 +796,18 @@ def test_uv_exclude_newer_is_stamped_on_fresh_repo(tmp_path) -> None:
         if isinstance(pyproject_text, str)
         else pyproject_text
     )
+    # The default is a relative window so the value does not go stale the
+    # way a hard-coded absolute date would.
     assert pyproject_data['tool']['uv']['exclude-newer'] == (
-        _dt.date.today().isoformat()
+        DEFAULT_UV_EXCLUDE_NEWER
     )
+    # ``toml.dumps`` cannot emit comments, so the supply-chain rationale is
+    # re-injected as a comment above the pin and the file ends with a newline.
+    assert (
+        '# Supply-chain guard: ignore packages published too recently.'
+        in pyproject_text
+    )
+    assert pyproject_text.endswith('\n')
 
 
 def test_uv_exclude_newer_preserves_existing_value(tmp_path) -> None:

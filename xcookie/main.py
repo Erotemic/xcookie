@@ -396,9 +396,11 @@ class XCookieConfig(scfg.DataConfig):
                 """
             Supply-chain guard: passed through to ``[tool.uv] exclude-newer``
             in the generated pyproject.toml. ``'auto'`` (default) preserves
-            an existing value if one is on disk, otherwise stamps today's
-            date. Set to ``False``/``None`` to disable. Set to a specific
-            ISO date string (e.g. ``'2026-05-22'``) to pin a cutoff.
+            an existing value if one is on disk, otherwise uses a relative
+            ``'P7D'`` window (ignore packages published in the last 7 days).
+            Set to ``False``/``None`` to disable the guard entirely. Set to
+            any other string to use it verbatim, e.g. a relative window
+            (``'30 days'`` / ``'P30D'``) or a fixed ISO date (``'2026-05-22'``).
             """
             ),
         ),
