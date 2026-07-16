@@ -74,8 +74,20 @@ class GitHubActionsRenderer:
                 self.applier, needs=['live_deploy']
             )
 
-        on_lines = """
+        # Only refs that can actually deploy trigger the release workflow:
+        # test_deploy fires on pushes to the default branch, and
+        # live_deploy/release fire on release branches and tags. An
+        # unfiltered `push:` would run the (expensive) sdist/wheel build
+        # jobs on every push to every branch and then deploy nothing.
+        defaultbranch = self.applier.config['defaultbranch']
+        release_branches = ub.oset([defaultbranch, 'main'])
+        release_branches_str = ', '.join(
+            list(release_branches) + ["'release*'"]
+        )
+        on_lines = f"""
         push:
+          branches: [ {release_branches_str} ]
+          tags: [ '*' ]
         workflow_dispatch:
         """
         footer = _build_github_footer(self.applier)

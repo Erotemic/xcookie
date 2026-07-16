@@ -14,6 +14,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   multi-author `tool.xcookie.author` now survives config loading intact.
 
 ### Fixed
+* The generated `release.yml` workflow now only triggers on pushes to the
+  default branch, `release*` branches, and tags (plus `workflow_dispatch`).
+  Previously an unfiltered `push:` trigger ran its sdist/wheel build jobs on
+  every push to every branch even though the deploy jobs were ref-gated and
+  would deploy nothing.
 * Multi-author repos no longer generate a syntactically invalid `docs/conf.py`
   (and mangled PEP 621 author entries): list-valued author metadata was being
   flattened to its Python repr by the resolved-config round trip and template
