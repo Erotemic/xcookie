@@ -28,8 +28,11 @@ class ResolvedXCookieConfig:
     is_new: bool
     rotate_secrets: bool
     refresh_docs: bool
-    author: str
-    author_email: str
+    # Author metadata may be a single string or a list of names/emails.
+    # It must round-trip unflattened: str() on a list produces its Python
+    # repr, which leaks into generated files (e.g. invalid docs/conf.py).
+    author: str | list[str]
+    author_email: str | list[str]
     license: str
     version: str
     description: str
@@ -145,8 +148,8 @@ class ResolvedXCookieConfig:
             is_new=is_new,
             rotate_secrets=rotate_secrets,
             refresh_docs=refresh_docs,
-            author=str(author),
-            author_email=str(author_email),
+            author=_coerce_meta_text(author),
+            author_email=_coerce_meta_text(author_email),
             license=str(license_text),
             version=str(version),
             description=str(description),
@@ -195,6 +198,13 @@ def resolve_xcookie_config(config: Any) -> ResolvedXCookieConfig:
     resolved = ResolvedXCookieConfig.from_config(config)
     resolved.apply_to_config(config)
     return resolved
+
+
+def _coerce_meta_text(value: Any) -> str | list[str]:
+    """Coerce metadata to text, preserving list structure."""
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return str(value)
 
 
 def _resolve_repodir(value: Any) -> ub.Path:

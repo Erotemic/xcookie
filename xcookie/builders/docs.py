@@ -152,11 +152,9 @@ def build_docs_conf(self):
 
     docs_builder = DocsBuilder(self.config)
 
-    author = self.config['author']
-    if isinstance(author, list):
-        author_str = ' '.join(author)
-    else:
-        author_str = author
+    from xcookie.util.util_metadata import metadata_text
+
+    author_str = metadata_text(self.config['author'])
 
     fmtkw = {
         'repo_name': self.config['repo_name'],

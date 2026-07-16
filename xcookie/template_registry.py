@@ -116,6 +116,8 @@ class TemplateContext:
 
     @classmethod
     def from_config(cls, config: Any) -> TemplateContext:
+        from xcookie.util.util_metadata import metadata_text
+
         rel_mod_dpath = ub.Path(config['rel_mod_parent_dpath']) / config['mod_name']
         rel_mod_dpath_text = os.fspath(rel_mod_dpath)
         return cls(
@@ -123,8 +125,10 @@ class TemplateContext:
             mod_name=str(config['mod_name']),
             rel_mod_dpath=rel_mod_dpath_text,
             rel_mod_dpath_posix=rel_mod_dpath.as_posix(),
-            author=str(config['author']),
-            author_email=str(config['author_email']),
+            # metadata_text flattens list-valued metadata to "A, B" text;
+            # str() on a list would leak its Python repr into templates.
+            author=metadata_text(config['author']),
+            author_email=metadata_text(config['author_email']),
         )
 
     def replacements(self) -> dict[str, str]:
