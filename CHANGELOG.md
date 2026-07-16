@@ -7,6 +7,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Version 0.4.0 - Unreleased
 
+### Changed
+* Migrated `XCookieConfig` from scriptconfig to kwconf. CLI behavior is
+  unchanged (fuzzy hyphens, flags, aliases, autocomplete); kwconf only applies
+  string parsers to CLI/env input, so list-valued TOML metadata such as
+  multi-author `tool.xcookie.author` now survives config loading intact.
+
+### Fixed
+* Multi-author repos no longer generate a syntactically invalid `docs/conf.py`
+  (and mangled PEP 621 author entries): list-valued author metadata was being
+  flattened to its Python repr by the resolved-config round trip and template
+  renderers.
+
 ### Added
 * Added a structured `PatchPlan` staging model with explicit copy, permission, and directory tasks.
 * Added tests for staging-plan classification, selective application, search-style generation filters, and template boolean coercion.

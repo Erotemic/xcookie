@@ -1,14 +1,14 @@
-# Add requirements here, use the script for help 
+# Add requirements here, use the script for help
 # xdev availpkg pygments
 # xdev availpkg ubelt
-# xdev availpkg scriptconfig
+# xdev availpkg kwconf
 # xdev availpkg toml
 # xdev availpkg rich
 
-xdev>=1.5.3   
-ubelt>=1.3.6 
-toml>=0.10.2   
-scriptconfig>=0.8.4  
+xdev>=1.5.3
+ubelt>=1.3.6
+toml>=0.10.2
+kwconf>=0.10.0
 rich>=12.3.0
 git-python>=1.0.0   
 black>=22.1.0     

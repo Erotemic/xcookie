@@ -79,7 +79,7 @@ import warnings
 from collections.abc import MutableMapping
 from typing import Any
 
-import scriptconfig as scfg
+import kwconf
 import toml
 import ubelt as ub
 import xdev
@@ -102,7 +102,7 @@ class SkipFile(Exception):
 
 # TODO: split up into a configuration that is saved to pyproject.toml and one
 # that is on only used when executing
-class XCookieConfig(scfg.DataConfig):
+class XCookieConfig(kwconf.Config):
     """
     The XCookie CLI
     """
@@ -117,19 +117,19 @@ class XCookieConfig(scfg.DataConfig):
     xcookie --repo_name=cookiecutter_binpy --repodir="$HOME"/code/cookiecutter_binpy --tags="github,binpy,gdal"
     """
     __default__ = {
-        'repodir': scfg.Value(
+        'repodir': kwconf.Value(
             '.', help='path to the new or existing repo', position=1
         ),
-        'repo_name': scfg.Value(None, help='defaults to ``repodir.name``'),
-        'mod_name': scfg.Value(
+        'repo_name': kwconf.Value(None, help='defaults to ``repodir.name``'),
+        'mod_name': kwconf.Value(
             None,
             help='The name of the importable Python module. defaults to ``repo_name``',
         ),
-        'pkg_name': scfg.Value(
+        'pkg_name': kwconf.Value(
             None,
             help='The distribution project name of the installable Python package (i.e. what you pass to ``pip install``). defaults to ``mod_name``',
         ),
-        'rel_mod_parent_dpath': scfg.Value(
+        'rel_mod_parent_dpath': kwconf.Value(
             '.',
             help=ub.paragraph(
                 """
@@ -139,29 +139,29 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'rotate_secrets': scfg.Value(
+        'rotate_secrets': kwconf.Value(
             'auto', help='If True will execute secret rotation', isflag=True
         ),
-        'refresh_docs': scfg.Value(
+        'refresh_docs': kwconf.Value(
             'auto', help='If True will refresh the docs', isflag=True
         ),
-        'deploy': scfg.Value(
+        'deploy': kwconf.Value(
             True, help='If False, disable all deployment', isflag=True
         ),
-        'deploy_pypi': scfg.Value(
+        'deploy_pypi': kwconf.Value(
             True, help='If False, disable pypi deployment', isflag=True
         ),
-        'deploy_tags': scfg.Value(
+        'deploy_tags': kwconf.Value(
             True, help='If False, disable tags deployment', isflag=True
         ),
-        'deploy_artifacts': scfg.Value(
+        'deploy_artifacts': kwconf.Value(
             True, help='If False, disable github/gitlab deployment', isflag=True
         ),
-        'deploy_gitlab': scfg.Value(
+        'deploy_gitlab': kwconf.Value(
             True, help='If False, disable gitlab deployment', isflag=True
         ),
-        'os': scfg.Value('all', help='all or any of win,osx,linux'),
-        'is_new': scfg.Value(
+        'os': kwconf.Value('all', help='all or any of win,osx,linux'),
+        'is_new': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -172,7 +172,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'init_new_remotes': scfg.Value(
+        'init_new_remotes': kwconf.Value(
             True,
             help=ub.paragraph(
                 """
@@ -181,20 +181,20 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'min_python': scfg.Value(
+        'min_python': kwconf.Value(
             '3.7', type=str, help='used to infer supported_python_versions'
         ),
-        'max_python': scfg.Value(
+        'max_python': kwconf.Value(
             None, type=str, help='used to infer supported_python_versions'
         ),
-        'main_python': scfg.Value(
+        'main_python': kwconf.Value(
             'max',
             help='The main version of Python to use for version agnostic jobs. A value of max uses the maximum version',
         ),
-        'typed': scfg.Value(
+        'typed': kwconf.Value(
             None, help='Should be None, False, True, partial or full'
         ),
-        'supported_python_versions': scfg.Value(
+        'supported_python_versions': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -203,7 +203,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'ci_cpython_versions': scfg.Value(
+        'ci_cpython_versions': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -212,7 +212,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'ci_pypy_versions': scfg.Value(
+        'ci_pypy_versions': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -224,7 +224,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'ci_blocklist': scfg.Value(
+        'ci_blocklist': kwconf.Value(
             [],
             help=ub.paragraph(
                 """
@@ -233,41 +233,50 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'ci_versions_minimal_strict': scfg.Value('min', help='todo: sus out'),
-        'ci_versions_full_strict': scfg.Value('main'),
-        'ci_versions_minimal_loose': scfg.Value('main'),
-        'ci_versions_full_loose': scfg.Value('*'),
-        'remote_host': scfg.Value(
+        'ci_versions_minimal_strict': kwconf.Value('min', help='todo: sus out'),
+        'ci_versions_full_strict': kwconf.Value('main'),
+        'ci_versions_minimal_loose': kwconf.Value('main'),
+        'ci_versions_full_loose': kwconf.Value('*'),
+        'remote_host': kwconf.Value(
             None, help='if unspecified, attempt to infer from tags'
         ),
-        'remote_group': scfg.Value(
+        'remote_group': kwconf.Value(
             None, help='if unspecified, attempt to infer from tags'
         ),
-        'autostage': scfg.Value(
+        'autostage': kwconf.Value(
             False, help='if true, automatically add changes to version control'
         ),
-        'visibility': scfg.Value(
+        'visibility': kwconf.Value(
             'public', help='or private. Does limit what we can do'
         ),
-        'test_env': scfg.Value(
+        'test_env': kwconf.Value(
             None,
             help='A YAML coercible dictionary of environment variables to use in test stages. (TOTO',
         ),
-        'version': scfg.Value(None, help='repo metadata: url for the project'),
-        'url': scfg.Value(
+        'version': kwconf.Value(None, help='repo metadata: url for the project'),
+        'url': kwconf.Value(
             None, type=str, help='repo metadata: url for the project'
         ),
-        'author': scfg.Value(
+        # Note: these may be a string or a list of strings. kwconf only
+        # applies the parser to CLI/env strings, so list-valued TOML
+        # metadata passes through unmangled (scriptconfig's type=str cast
+        # used to stringify lists into their repr).
+        'author': kwconf.Value(
             None,
             type=str,
-            help='repo metadata: author for the project',
+            help='repo metadata: author for the project. '
+                 'A string or a list of strings.',
         ),
-        'author_email': scfg.Value(None, type=str, help='repo metadata'),
-        'description': scfg.Value(None, type=str, help='repo metadata'),
-        'license': scfg.Value(None, help='repo metadata'),
-        'dev_status': scfg.Value('planning'),
-        'enable_gpg': scfg.Value(True),
-        'ci_gpg_secret_transport': scfg.Value(
+        'author_email': kwconf.Value(
+            None,
+            type=str,
+            help='repo metadata. A string or a list of strings.',
+        ),
+        'description': kwconf.Value(None, type=str, help='repo metadata'),
+        'license': kwconf.Value(None, help='repo metadata'),
+        'dev_status': kwconf.Value('planning'),
+        'enable_gpg': kwconf.Value(True),
+        'ci_gpg_secret_transport': kwconf.Value(
             'direct_ci',
             help=ub.paragraph(
                 """
@@ -283,24 +292,24 @@ class XCookieConfig(scfg.DataConfig):
                 """
             ),
         ),
-        'defaultbranch': scfg.Value('main'),
-        'xdoctest_style': scfg.Value('google', help='type of xdoctest style'),
-        'test_command': scfg.Value(
+        'defaultbranch': kwconf.Value('main'),
+        'xdoctest_style': kwconf.Value('google', help='type of xdoctest style'),
+        'test_command': kwconf.Value(
             'auto', help='The pytest command to run in the CL'
         ),
-        'ci_pypi_live_password_varname': scfg.Value(
+        'ci_pypi_live_password_varname': kwconf.Value(
             'TWINE_PASSWORD',
             help='variable of the live twine password in your secrets',
         ),
-        'ci_pypi_test_password_varname': scfg.Value(
+        'ci_pypi_test_password_varname': kwconf.Value(
             'TEST_TWINE_PASSWORD',
             help='variable of the test twine password in your secrets',
         ),
-        'ci_pypi_trusted_publishing': scfg.Value(
+        'ci_pypi_trusted_publishing': kwconf.Value(
             True,
             help='if True, github deploy jobs use PyPI trusted publishing instead of twine password secrets',
         ),
-        'regen': scfg.Value(
+        'regen': kwconf.Value(
             None,
             help=ub.paragraph(
                 """
@@ -309,7 +318,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'only_generate': scfg.Value(
+        'only_generate': kwconf.Value(
             None,
             alias=['only_gen'],
             help=ub.paragraph(
@@ -318,7 +327,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'tags': scfg.Value(
+        'tags': kwconf.Value(
             'auto',
             nargs='*',
             help=ub.paragraph(
@@ -341,16 +350,16 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'linter': scfg.Value(
+        'linter': kwconf.Value(
             True, help=ub.paragraph('if true enables lint checks in CI')
         ),
-        'skip_autogen': scfg.Value(
+        'skip_autogen': kwconf.Value(
             None,
             help=ub.paragraph(
                 'list of targets to not auto-generate by default'
             ),
         ),
-        'render_doc_images': scfg.Value(
+        'render_doc_images': kwconf.Value(
             False,
             help=ub.paragraph(
                 """
@@ -360,11 +369,11 @@ class XCookieConfig(scfg.DataConfig):
         ),
         # TODO: Better mechanism for controlling which of the loose / strict /
         # minimal / full variants will be run.
-        'test_variants': scfg.Value(
+        'test_variants': kwconf.Value(
             ['full-loose', 'full-strict', 'minimal-loose', 'minimal-strict'],
             help='A list of which CI loose / strict / minimal / full variants to use',
         ),
-        'ci_extras': scfg.Value(
+        'ci_extras': kwconf.Value(
             None,
             help=ub.paragraph(
                 """
@@ -376,7 +385,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'use_vcs': scfg.Value(
+        'use_vcs': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -384,13 +393,13 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'use_uv': scfg.Value(
+        'use_uv': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 'if False use plain pip, otherwise use uv instead'
             ),
         ),
-        'uv_exclude_newer': scfg.Value(
+        'uv_exclude_newer': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -404,10 +413,10 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'use_pyproject_requirements': scfg.Value(
+        'use_pyproject_requirements': kwconf.Value(
             False, help=ub.paragraph('experimental new style version testing')
         ),
-        'use_setup_py': scfg.Value(
+        'use_setup_py': kwconf.Value(
             False,
             help=ub.paragraph(
                 """
@@ -418,8 +427,8 @@ class XCookieConfig(scfg.DataConfig):
             ),
         ),
         # ---
-        'interactive': scfg.Value(True),
-        'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
+        'interactive': kwconf.Value(True),
+        'yes': kwconf.Value(False, help=ub.paragraph('Say yes to everything')),
     }
 
     @property
