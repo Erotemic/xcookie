@@ -10,7 +10,7 @@ shape and provider syntax.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Mapping, cast
+from typing import Any, Iterable, Literal, Mapping
 
 VariantKey = Literal[
     'minimal-loose',
@@ -256,18 +256,25 @@ def _base_variant_extras(self: Any) -> dict[VariantKey, list[str]]:
         }
 
 
+# Maps a user-facing ci_extras key to the variant keys it expands to.
+# Expressed as a lookup table (rather than an if/elif chain with an
+# ``in VARIANT_KEYS`` membership test) so type checkers do not need to
+# narrow a plain ``str`` key to ``VariantKey`` — narrowing semantics for
+# membership tests differ across checkers and versions.
+_CI_EXTRAS_TARGETS: dict[str, tuple[VariantKey, ...]] = {
+    'loose': ('minimal-loose', 'full-loose'),
+    'strict': ('minimal-strict', 'full-strict'),
+    **{key: (key,) for key in VARIANT_KEYS},
+}
+
+
 def _apply_ci_extras(
     variant_extras: dict[VariantKey, list[str]], ci_extras: Mapping[str, list[str]]
 ) -> None:
     """Apply user extras in-place to variant-specific desired extras."""
     for variant_key, extras_list in ci_extras.items():
-        if variant_key == 'loose':
-            target_keys: tuple[VariantKey, ...] = ('minimal-loose', 'full-loose')
-        elif variant_key == 'strict':
-            target_keys = ('minimal-strict', 'full-strict')
-        elif variant_key in VARIANT_KEYS:
-            target_keys = (cast(VariantKey, variant_key),)
-        else:
+        target_keys = _CI_EXTRAS_TARGETS.get(variant_key)
+        if target_keys is None:
             continue
         for key in target_keys:
             variant_extras[key] = variant_extras[key] + list(extras_list)
