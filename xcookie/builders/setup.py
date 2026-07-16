@@ -196,7 +196,7 @@ def build_setup(self):
         package_data[f'{self.mod_name}.rc.requirements'] = ['*.txt']
 
     if self.config['typed']:
-        package_data[self.mod_name] = ['py.typed', '*.pyi']
+        package_data[self.mod_name] = ['py.typed']
 
     if package_data:
         setupkw_parts['package_data'] = package_data

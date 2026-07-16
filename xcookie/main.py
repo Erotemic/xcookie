@@ -76,8 +76,8 @@ import re
 import shutil
 import tempfile
 import warnings
-from collections.abc import MutableMapping
-from typing import Any
+from collections.abc import MutableMapping, Sequence
+from typing import Any, cast
 
 import kwconf
 import toml
@@ -624,7 +624,7 @@ class XCookieConfig(kwconf.Config):
 
         return config
 
-    def confirm(self, msg, default=True):
+    def confirm(self, msg: str, default: bool = True) -> bool:
         """
         Args:
             msg (str): display to the user
@@ -643,7 +643,12 @@ class XCookieConfig(kwconf.Config):
             flag = default
         return flag
 
-    def prompt(self, msg, choices, default=True):
+    def prompt(
+        self,
+        msg: str,
+        choices: list[str],
+        default: str | bool = True,
+    ) -> str | bool:
         """
         Args:
             msg (str): display to the user
@@ -664,31 +669,53 @@ class XCookieConfig(kwconf.Config):
 
     @classmethod
     def load_from_cli_and_pyproject(
-        cls, argv=False, strict=True, autocomplete='auto', **kwargs
-    ):
+        cls,
+        argv: int | bool | str | Sequence[str] | None = False,
+        strict: bool = True,
+        autocomplete: bool | str = 'auto',
+        **kwargs: Any,
+    ) -> XCookieConfig:
         # We load the config multiple times to get the right defaults.
         # ideally we should fix this up
-        config = XCookieConfig.cli(
-            argv=argv,
-            data=kwargs,
-            strict=strict,
-            autocomplete=autocomplete,
+        if isinstance(argv, int) and not isinstance(argv, bool):
+            if argv != 0:
+                raise ValueError('integer argv values must be 0')
+            cli_argv: bool | str | Sequence[str] | None = False
+        else:
+            cli_argv = argv
+        config = cast(
+            XCookieConfig,
+            cls.cli(
+                argv=cli_argv,
+                data=kwargs,
+                strict=strict,
+                autocomplete=autocomplete,
+            ),
         )
         # config.__post_init__()
         settings = config._load_xcookie_pyproject_settings()
         if settings:
             print(f'settings={settings}')
-            config = XCookieConfig.cli(
-                argv=argv,
-                data=kwargs,
-                default=ub.dict_isect(settings, config),
-                strict=strict,
-                autocomplete=autocomplete,
+            config = cast(
+                XCookieConfig,
+                cls.cli(
+                    argv=cli_argv,
+                    data=kwargs,
+                    default=ub.dict_isect(settings, config),
+                    strict=strict,
+                    autocomplete=autocomplete,
+                ),
             )
         return config
 
     @classmethod
-    def main(cls, argv=False, strict=True, autocomplete='auto', **kwargs):
+    def main(
+        cls,
+        argv: int | bool | str | Sequence[str] | None = False,
+        strict: bool = True,
+        autocomplete: bool | str = 'auto',
+        **kwargs: Any,
+    ) -> TemplateApplier:
         """
         Main entry point
 
@@ -749,7 +776,7 @@ class TemplateApplier:
         things).
     """
 
-    def __init__(self, config):
+    def __init__(self, config: XCookieConfig | dict[str, Any]) -> None:
         if isinstance(config, dict):
             config = XCookieConfig(**config)
 
@@ -759,7 +786,7 @@ class TemplateApplier:
         self.repo_name = self.resolved.repo_name
         self._tmpdir = tempfile.TemporaryDirectory(prefix=self.repo_name)
 
-        self.template_infos: list[TemplateInfo] | None = None
+        self.template_infos: list[TemplateInfo] = []
         try:
             xcookie_dpath = ub.Path(__file__).parent.parent
         except NameError:
@@ -815,15 +842,15 @@ class TemplateApplier:
         return self.resolved.mod_dpath
 
     @property
-    def mod_name(self):
+    def mod_name(self) -> str:
         return self.resolved.mod_name
 
     @property
-    def pkg_name(self):
+    def pkg_name(self) -> str:
         return self.resolved.pkg_name
 
     @property
-    def pkg_fname_prefix(self):
+    def pkg_fname_prefix(self) -> str:
         # the files have underscores replaced in the prefix
         return self.config['pkg_name'].replace('-', '_')
 
@@ -2504,7 +2531,8 @@ class TemplateApplier:
         else:
             raise KeyError(fname)
 
-    def _docs_quickstart():
+    @staticmethod
+    def _docs_quickstart() -> None:
         # Probably just need to copy/paste the conf.py
         r"""
 

@@ -50,6 +50,40 @@ def test_use_setup_py_false_generates_pep621(tmp_path) -> None:
     assert package_data['*'] == ['requirements/*.txt']
 
 
+def test_typed_package_data_uses_inline_annotations(tmp_path) -> None:
+    """Typed projects ship ``py.typed`` without reserving a stub glob."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['github', 'purepy'],
+        typed=True,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_vcs=False,
+    )
+
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    pyproject_text = (applier.staging_dpath / 'pyproject.toml').read_text()
+    pyproject_data = toml.loads(pyproject_text)
+    package_data = pyproject_data['tool']['setuptools']['package-data']
+    assert package_data['demo_mod'] == ['py.typed']
+    assert '*.pyi' not in pyproject_text
+
+    setup_text = applier.build_setup()
+    assert "'demo_mod': ['py.typed']" in setup_text
+    assert '*.pyi' not in setup_text
+
+
 def test_all_extra_aggregates_runtime_optional_requirements(tmp_path) -> None:
     """
     The legacy ``[all]`` convenience extra must be regenerated so users can

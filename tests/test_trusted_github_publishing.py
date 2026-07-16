@@ -29,7 +29,7 @@ def _make_applier(
 
 
 class _FakeQueue:
-    created = []
+    created: list['_FakeQueue'] = []
 
     def __init__(self):
         self.commands = []

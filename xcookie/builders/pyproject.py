@@ -394,7 +394,7 @@ def build_pyproject(self):
         package_data = setuptools_block['package-data']
         package_data['*'] = ['requirements/*.txt']
         if self.config['typed']:
-            package_data[self.mod_name] = ['py.typed', '*.pyi']
+            package_data[self.mod_name] = ['py.typed']
         for key, value in pyproject_settings.get('package_data', {}).items():
             normalized_key = '*' if key == '' else key
             package_data[normalized_key] = value

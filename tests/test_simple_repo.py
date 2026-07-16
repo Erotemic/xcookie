@@ -8,6 +8,8 @@ def test_simple_repo() -> None:
               without errors.
 
     """
+    from typing import Any
+
     import ubelt as ub
 
     if ub.WIN32:
@@ -22,7 +24,7 @@ def test_simple_repo() -> None:
     from xcookie import main
     # import rich
 
-    kwargs = dict(
+    kwargs: dict[str, Any] = dict(
         repodir=dpath,
         mod_name='simple_mod',
         remote_group='demo_group',

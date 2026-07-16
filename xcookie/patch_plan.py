@@ -185,12 +185,12 @@ class PatchPlan:
         """Apply all planned tasks without prompting."""
         for dpath in sorted(self.parent_directories()):
             Path(dpath).mkdir(parents=True, exist_ok=True)
-        for task in self.mkdir:
-            task.path.mkdir(parents=True, exist_ok=True)
-        for task in self.copy:
-            shutil.copy2(task.src, task.dst)
-        for task in self.perms:
-            os.chmod(task.path, task.mode)
+        for mkdir_task in self.mkdir:
+            mkdir_task.path.mkdir(parents=True, exist_ok=True)
+        for copy_task in self.copy:
+            shutil.copy2(copy_task.src, copy_task.dst)
+        for perm_task in self.perms:
+            os.chmod(perm_task.path, perm_task.mode)
 
     def apply_some(self, include: Iterable[os.PathLike[str]]) -> None:
         """Apply copy tasks whose destinations are present in ``include``.
@@ -203,12 +203,12 @@ class PatchPlan:
         copy_tasks = [task for task in self.copy if task.dst in include_paths]
         for dpath in sorted({task.dst.parent for task in copy_tasks}):
             dpath.mkdir(parents=True, exist_ok=True)
-        for task in self.mkdir:
-            task.path.mkdir(parents=True, exist_ok=True)
-        for task in copy_tasks:
-            shutil.copy2(task.src, task.dst)
-        for task in self.perms:
-            os.chmod(task.path, task.mode)
+        for mkdir_task in self.mkdir:
+            mkdir_task.path.mkdir(parents=True, exist_ok=True)
+        for copy_task in copy_tasks:
+            shutil.copy2(copy_task.src, copy_task.dst)
+        for perm_task in self.perms:
+            os.chmod(perm_task.path, perm_task.mode)
 
     def parent_directories(self) -> set[Path]:
         """Return parent directories required by all copy tasks."""
