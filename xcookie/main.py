@@ -373,6 +373,21 @@ class XCookieConfig(kwconf.Config):
             ['full-loose', 'full-strict', 'minimal-loose', 'minimal-strict'],
             help='A list of which CI loose / strict / minimal / full variants to use',
         ),
+        'ci_versionless_wheels': kwconf.Value(
+            False,
+            isflag=True,
+            help=ub.paragraph(
+                """
+                If True, the project's binary wheels are python-version
+                independent (e.g. py3-none tags from pure ctypes bindings),
+                so CI builds a single wheel per platform instead of one per
+                CPython version. The interpreter that performs the build is
+                pinned in the [tool.cibuildwheel] section of pyproject.toml.
+                The default (False) keeps per-python-version builds, which
+                repos that link against the CPython C API require.
+                """
+            ),
+        ),
         'ci_extras': kwconf.Value(
             None,
             help=ub.paragraph(
