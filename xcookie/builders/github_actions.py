@@ -1026,6 +1026,20 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
 
     build_parts = common_ci.make_build_sdist_parts(self, wheelhouse_dpath)
 
+    # Respect an explicitly configured test_command in the sdist test steps;
+    # 'auto' keeps the historical hardcoded invocation. The steps define
+    # MOD_DPATH and MOD_NAME so a configured command can reference them the
+    # same way the wheel-test job does.
+    test_command = self.config['test_command']
+    if test_command == 'auto':
+        sdist_test_commands = [
+            f'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
+        ]
+    else:
+        if isinstance(test_command, str):
+            test_command = [test_command]
+        sdist_test_commands = list(test_command)
+
     if self.config['use_pyproject_requirements']:
         # Always include the test extras selected by the shared CI plan so
         # pytest is available in the sdist test steps below.  The plan filters
@@ -1110,9 +1124,9 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
                     '# Get path to installed package',
                     f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
                     'echo "MOD_DPATH = $MOD_DPATH"',
+                    f'MOD_NAME={self.mod_name}',
                     # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
-                    # TODO: change to test command
-                    f'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
+                    *sdist_test_commands,
                     'cd ..',
                 ],
             },
@@ -1133,8 +1147,8 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
                     '# Get path to installed package',
                     f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
                     'echo "MOD_DPATH = $MOD_DPATH"',
-                    # TODO: change to test command
-                    f'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
+                    f'MOD_NAME={self.mod_name}',
+                    *sdist_test_commands,
                     # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
                     # Move coverage file to a new name
                     # 'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
@@ -1549,7 +1563,10 @@ def build_purewheel_job(self) -> dict[str, JSON]:
     main_python_version = supported_platform_info['main_python_version']
     # pypy_versions = supported_platform_info['pypy_versions']
     job: dict[str, JSON] = {
-        'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
+        # Name the build job distinctly from the artifact-test jobs: this job
+        # never runs tests, and sharing their "{python} on {os} ..." template
+        # made a green build read as a green test run.
+        'name': 'Build wheel ${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
             'fail-fast': False,
