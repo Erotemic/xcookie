@@ -412,6 +412,7 @@ def build_docs_conf(self):
             'xdoctest': ('https://xdoctest.readthedocs.io/en/latest/', None),
             'networkx': ('https://networkx.org/documentation/stable/', None),
             'scriptconfig': ('https://scriptconfig.readthedocs.io/en/latest/', None),
+            'kwconf': ('https://kwconf.readthedocs.io/en/latest/', None),
             'rich': ('https://rich.readthedocs.io/en/latest/', None),
 
             'numpy': ('https://numpy.org/doc/stable/', None),
