@@ -19,3 +19,11 @@ This file applies to the entire repository.
 ## PR expectations
 - Include a concise summary of changes and the tests executed.
 - Cite files and line numbers in summaries where feasible to help reviewers locate modifications.
+
+## Release workflow invariants
+- Before modifying GitHub release generation, read `docs/source/manual/release_workflow_design.rst`.
+- The intended release trigger is `git push origin main:release`; maintainers do not manually create the release tag.
+- The release commit is already expected to have passed review and CI on `main`. Do not add a full release-time test rerun or byte-identical artifact-promotion system unless explicitly requested.
+- Live PyPI publication intentionally happens before the version tag is created. PyPI uploads are not repairable, whereas tags and GitHub releases are.
+- After PyPI succeeds, create or verify `v$VERSION`, then associate the GitHub release with that exact tag. Never use the triggering release-branch ref as `tag_name`.
+- Retries may reuse an existing version tag only when it points to the same release commit; never move an existing release tag automatically.

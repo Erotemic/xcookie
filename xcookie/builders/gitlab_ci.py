@@ -1,7 +1,48 @@
+from __future__ import annotations
+
+from typing import Any
+
 import ubelt as ub
 
+from xcookie.builders import ci_model
 from xcookie.builders import common_ci
+from xcookie.builders.ci_plan import CIPlan
 
+
+class GitLabCIRenderer:
+    """Render GitLab CI YAML from a provider-neutral CI plan."""
+
+    def __init__(self, applier, plan: CIPlan | None = None):
+        self.applier = applier
+        self.plan = plan if plan is not None else common_ci.make_ci_plan(applier)
+
+    def render(self) -> str:
+        if 'purepy' in self.applier.tags:
+            return make_purepy_ci_jobs(self.applier, plan=self.plan)
+        elif 'binpy' in self.applier.tags:
+            return make_binpy_ci_jobs(self.applier, plan=self.plan)
+        else:
+            raise NotImplementedError
+
+
+
+def _add_yaml_merge(target, referent):
+    """Attach a YAML merge key across ruamel.yaml versions.
+
+    Older xcookie code used ``add_yaml_merge([(0, referent)])``.  Newer
+    ruamel.yaml releases expect a ``MergeValue`` object; plain lists can be
+    accepted by ``add_yaml_merge`` but fail later while dumping because they do
+    not provide ``sequence`` / ``merge_pos`` attributes.
+    """
+    try:
+        from ruamel.yaml.mergevalue import MergeValue
+    except Exception:  # pragma: no cover - old ruamel fallback
+        target.add_yaml_merge([(0, referent)])
+    else:
+        merge_value = MergeValue()
+        merge_value.merge_pos = 0
+        merge_value.append(referent)
+        target.add_yaml_merge(merge_value)
 
 def build_gitlab_ci(self):
     """
@@ -18,12 +59,7 @@ def build_gitlab_ci(self):
         >>> text = build_gitlab_ci(self)
         >>> print(ub.highlight_code(text, 'yaml'))
     """
-    if 'purepy' in self.tags:
-        return make_purepy_ci_jobs(self)
-    elif 'binpy' in self.tags:
-        return make_binpy_ci_jobs(self)
-    else:
-        raise NotImplementedError
+    return GitLabCIRenderer(self).render()
 
 
 def build_gitlab_rules(self):
@@ -96,7 +132,9 @@ def workflow_section():
     )
 
 
-def make_purepy_ci_jobs(self):
+def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     import ruamel.yaml  # NOQA
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
     from xcookie.util_yaml import Yaml
@@ -130,7 +168,7 @@ def make_purepy_ci_jobs(self):
     body['stages'] = CommentedSeq(stages)
     body.yaml_add_eol_comment('stages', 'TEMPLATE1,c 1')
 
-    common_template = ub.udict(
+    common_template_data = ub.udict(
         Yaml.loads(
             ub.codeblock(
                 """
@@ -159,7 +197,7 @@ def make_purepy_ci_jobs(self):
         )
     )
 
-    common_template = CommentedMap(common_template)
+    common_template = CommentedMap(common_template_data)
     common_template.yaml_set_anchor('common_template')
     body['.common_template'] = common_template
 
@@ -188,7 +226,7 @@ def make_purepy_ci_jobs(self):
         build_sdist_template = CommentedMap(build_sdist_template)
         build_sdist_template.yaml_set_anchor('build_sdist_template')
         body['.build_sdist_template'] = build_sdist_template
-        build_sdist_template.add_yaml_merge([(0, common_template)])
+        _add_yaml_merge(build_sdist_template, common_template)
 
     # Make the wheel build template
     enable_wheel = True
@@ -210,7 +248,7 @@ def make_purepy_ci_jobs(self):
         build_wheel_template = CommentedMap(build_wheel_template)
         build_wheel_template.yaml_set_anchor('build_wheel_template')
         body['.build_wheel_template'] = build_wheel_template
-        build_wheel_template.add_yaml_merge([(0, common_template)])
+        _add_yaml_merge(build_wheel_template, common_template)
 
     common_test_template = {
         'stage': 'test',
@@ -223,7 +261,7 @@ def make_purepy_ci_jobs(self):
 
     common_test_template = CommentedMap(common_test_template)
     common_test_template.yaml_set_anchor('common_test_template')
-    common_test_template.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(common_test_template, common_template)
     body['.common_test_template'] = common_test_template
 
     setup_venv_template = Yaml.CodeBlock(
@@ -241,81 +279,18 @@ def make_purepy_ci_jobs(self):
         """
     )
 
-    test_templates = {}
-    loose_cv2 = ''
-    strict_cv2 = ''
-    if 'cv2' in self.tags:
-        loose_cv2 = ',headless'
-        strict_cv2 = ',headless-strict'
 
-    # Parse ci_extras configuration if specified
-    from xcookie.util_yaml import Yaml
-
-    ci_extras = {}
-    if self.config.get('ci_extras'):
-        ci_extras = Yaml.loads(self.config['ci_extras'])
-
-    # Build the base install extras dictionary
-    all_install_extras = ub.udict(
-        {
-            'minimal-loose': ['tests']
-            + ([loose_cv2.strip(',')] if loose_cv2 else []),
-            'full-loose': ['tests', 'optional']
-            + ([loose_cv2.strip(',')] if loose_cv2 else []),
-            'minimal-strict': ['tests-strict', 'runtime-strict']
-            + ([strict_cv2.strip(',')] if strict_cv2 else []),
-            'full-strict': ['tests-strict', 'runtime-strict', 'optional-strict']
-            + ([strict_cv2.strip(',')] if strict_cv2 else []),
-        }
+    artifact_test_cases = ci_model.make_artifact_test_cases(
+        self, plan=plan, provider='gitlab'
     )
-
-    # Apply ci_extras to the install_extra_tags
-    # ci_extras can specify: 'loose', 'strict', 'minimal-loose', 'full-loose',
-    # 'minimal-strict', 'full-strict'
-    for variant_key, extras_list in ci_extras.items():
-        if variant_key == 'loose':
-            # Apply to all loose variants
-            for key in ['minimal-loose', 'full-loose']:
-                if key in all_install_extras:
-                    all_install_extras[key] = (
-                        all_install_extras[key] + extras_list
-                    )
-        elif variant_key == 'strict':
-            # Apply to all strict variants
-            for key in ['minimal-strict', 'full-strict']:
-                if key in all_install_extras:
-                    all_install_extras[key] = (
-                        all_install_extras[key] + extras_list
-                    )
-        elif variant_key in all_install_extras:
-            # Apply to specific variant
-            all_install_extras[variant_key] = (
-                all_install_extras[variant_key] + extras_list
-            )
-
-    # Convert back to comma-separated strings
-    all_install_extras_str = ub.udict(
-        {k: ','.join(v) for k, v in all_install_extras.items()}
-    )
-
-    install_extras = (
-        ub.udict(all_install_extras_str) & self.config.test_variants
-    )
-    for extra_key, extra in install_extras.items():
-        if 'gdal' in self.tags:
-            if extra_key.endswith('-strict'):
-                special_install_lines = [
-                    """
-                    sed 's/>=/==/' "requirements/gdal.txt" > "requirements/gdal-strict.txt"
-                    """.strip(),
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal-strict.txt',
-                ]
-            else:
-                special_install_lines = [
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt',
-                ]
-        else:
-            special_install_lines = []
+    install_extras = plan.active_install_extras()
+    test_templates: dict[str, Any] = {}
+    for case in ci_model.unique_variant_cases(artifact_test_cases):
+        extra_key = case.variant.key
+        extra = case.install_extras
+        special_install_lines = case.gitlab_special_install_lines(
+            self.PIP_INSTALL_PREFER_BINARY
+        )
         workspace_dname = 'sandbox'
         install_and_test_wheel_parts = (
             common_ci.make_install_and_test_wheel_parts(
@@ -325,6 +300,13 @@ def make_purepy_ci_jobs(self):
         test_steps = [
             f'export INSTALL_EXTRAS="{extra}"',
         ]
+        if common_ci.ci_plan.uses_lockfile_ci(self):
+            use_uv_lock = 'true' if case.use_lockfile else 'false'
+            lock_requirements = case.lock_requirements or ''
+            test_steps.append(f'export USE_UV_LOCK="{use_uv_lock}"')
+            test_steps.append(
+                f'export LOCK_REQUIREMENTS="{lock_requirements}"'
+            )
         test_steps += install_and_test_wheel_parts['install_wheel_commands']
         test_steps += install_and_test_wheel_parts['test_wheel_commands']
         test = {
@@ -334,7 +316,7 @@ def make_purepy_ci_jobs(self):
         anchor = f'test_{extra_key}_template'
         test = CommentedMap(test)
         test.yaml_set_anchor(anchor)
-        test.add_yaml_merge([(0, common_test_template)])
+        _add_yaml_merge(test, common_test_template)
         body['.' + anchor] = test
         test_templates[extra_key] = test
 
@@ -358,7 +340,7 @@ def make_purepy_ci_jobs(self):
             'image': main_image,
         }
         build_job = CommentedMap(build_job)
-        build_job.add_yaml_merge([(0, build_sdist_template)])
+        _add_yaml_merge(build_job, build_sdist_template)
         jobs[build_name] = build_job
 
         sdist_test_python_versions = [pyver]
@@ -377,46 +359,48 @@ def make_purepy_ci_jobs(self):
                     ],
                 }
                 test_job = CommentedMap(test_job)
-                test_job.add_yaml_merge([(0, common_test_template)])
+                _add_yaml_merge(test_job, common_test_template)
                 jobs[test_name] = test_job
         body.update(jobs)
 
-    if enable_wheel:
-        # Construct the explicit build / test job pairs
-        jobs = {}
-        opsys = 'linux'
-        arch = 'x86_64'
-        for pyver in self.config['ci_cpython_versions']:
-            cpver = 'cp' + pyver.replace('.', '')
-            if cpver in KNOWN_CPYTHON_DOCKER_IMAGES:
-                swenv_key = (
-                    f'{cpver}-{opsys}-{arch}'  # software environment key
-                )
-                build_name = f'build/{swenv_key}'
-                build_names.append(build_name)
 
+    if enable_wheel:
+        # Construct the explicit build / test job pairs from the shared
+        # provider-neutral artifact test cases.  GitLab still renders one job
+        # per case, while GitHub renders the same cases as matrix entries.
+        jobs = {}
+        build_job_names = set()
+        for case in artifact_test_cases:
+            cpver = case.gitlab_cpver
+            if cpver not in KNOWN_CPYTHON_DOCKER_IMAGES:
+                continue
+            swenv_key = case.gitlab_swenv_key
+            build_name = f'build/{swenv_key}'
+            if build_name not in build_job_names:
+                build_names.append(build_name)
                 build_job = {
                     'image': KNOWN_CPYTHON_DOCKER_IMAGES[cpver],
                 }
                 build_job = CommentedMap(build_job)
-                build_job.add_yaml_merge([(0, build_wheel_template)])
+                _add_yaml_merge(build_job, build_wheel_template)
                 jobs[build_name] = build_job
+                build_job_names.add(build_name)
 
-                for extra_key, common_test_template in test_templates.items():
-                    test_name = f'test/{extra_key}/{swenv_key}'
-                    test_job = {
-                        'image': KNOWN_CPYTHON_DOCKER_IMAGES[cpver],
-                        'needs': [
-                            build_name,
-                        ],
-                    }
-                    test_job = CommentedMap(test_job)
-                    test_job.add_yaml_merge([(0, common_test_template)])
-                    jobs[test_name] = test_job
+            common_test_template = test_templates[case.variant.key]
+            test_name = f'test/{case.variant.key}/{swenv_key}'
+            test_job = {
+                'image': KNOWN_CPYTHON_DOCKER_IMAGES[cpver],
+                'needs': [
+                    build_name,
+                ],
+            }
+            test_job = CommentedMap(test_job)
+            _add_yaml_merge(test_job, common_test_template)
+            jobs[test_name] = test_job
         body.update(jobs)
 
     if enable_lint:
-        lint_job = build_lint_job(self, common_template, main_image)
+        lint_job = build_lint_job(self, common_template, main_image, plan=plan)
         body['lint'] = lint_job
 
     if enable_gpg:
@@ -460,7 +444,9 @@ def make_purepy_ci_jobs(self):
     return text
 
 
-def make_binpy_ci_jobs(self):
+def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     import ruamel.yaml  # NOQA
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
     from xcookie.util_yaml import Yaml
@@ -477,7 +463,7 @@ def make_binpy_ci_jobs(self):
         stages.append('gpgsign')
     body['stages'] = CommentedSeq(stages)
 
-    common_template = ub.udict(
+    common_template_data = ub.udict(
         Yaml.loads(
             ub.codeblock(
                 """
@@ -499,7 +485,7 @@ def make_binpy_ci_jobs(self):
         )
     )
 
-    common_template = CommentedMap(common_template)
+    common_template = CommentedMap(common_template_data)
     common_template.yaml_set_anchor('common_template')
     body['.common_template'] = common_template
 
@@ -591,7 +577,7 @@ def make_binpy_ci_jobs(self):
     }
     common_test_template = CommentedMap(common_test_template)
     common_test_template.yaml_set_anchor('common_test_template')
-    common_test_template.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(common_test_template, common_template)
     body['.common_test_template'] = common_test_template
 
     setup_venv_template = Yaml.CodeBlock(
@@ -609,38 +595,17 @@ def make_binpy_ci_jobs(self):
         """
     )
 
-    test_templates = {}
-    loose_cv2 = ''
-    strict_cv2 = ''
-    if 'cv2' in self.tags:
-        loose_cv2 = ',headless'
-        strict_cv2 = ',headless-strict'
-    all_install_extras = ub.udict(
-        {
-            'minimal-loose': 'tests' + loose_cv2,
-            'full-loose': 'tests,optional' + loose_cv2,
-            'minimal-strict': 'tests-strict,runtime-strict' + strict_cv2,
-            'full-strict': 'tests-strict,runtime-strict,optional-strict'
-            + strict_cv2,
-        }
+    workflow_plan = ci_model.make_binpy_workflow_plan(
+        self, plan=plan, provider='gitlab'
     )
-
-    install_extras = ub.udict(all_install_extras) & self.config.test_variants
-    for extra_key, extra in install_extras.items():
-        if 'gdal' in self.tags:
-            if extra_key.endswith('-strict'):
-                special_install_lines = [
-                    """
-                    sed 's/>=/==/' "requirements/gdal.txt" > "requirements/gdal-strict.txt
-                    """.strip(),
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal-strict.txt',
-                ]
-            else:
-                special_install_lines = [
-                    f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
-                ]
-        else:
-            special_install_lines = []
+    artifact_test_cases = list(workflow_plan.artifact_test_cases)
+    test_templates: dict[str, Any] = {}
+    for case in ci_model.unique_variant_cases(artifact_test_cases):
+        extra_key = case.variant.key
+        extra = case.install_extras
+        special_install_lines = case.gitlab_special_install_lines(
+            self.PIP_INSTALL_PREFER_BINARY
+        )
         workspace_dname = 'sandbox'
         install_and_test_wheel_parts = (
             common_ci.make_install_and_test_wheel_parts(
@@ -648,6 +613,13 @@ def make_binpy_ci_jobs(self):
             )
         )
         test_steps = [f'export INSTALL_EXTRAS="{extra}"']
+        if common_ci.ci_plan.uses_lockfile_ci(self):
+            use_uv_lock = 'true' if case.use_lockfile else 'false'
+            lock_requirements = case.lock_requirements or ''
+            test_steps.append(f'export USE_UV_LOCK="{use_uv_lock}"')
+            test_steps.append(
+                f'export LOCK_REQUIREMENTS="{lock_requirements}"'
+            )
         test_steps += install_and_test_wheel_parts['install_wheel_commands']
         test_steps += install_and_test_wheel_parts['test_wheel_commands']
         test = {
@@ -657,7 +629,7 @@ def make_binpy_ci_jobs(self):
         anchor = f'test_{extra_key}_template'
         test = CommentedMap(test)
         test.yaml_set_anchor(anchor)
-        test.add_yaml_merge([(0, common_test_template)])
+        _add_yaml_merge(test, common_test_template)
         body['.' + anchor] = test
         test_templates[extra_key] = test
 
@@ -666,16 +638,17 @@ def make_binpy_ci_jobs(self):
     main_cpver = 'cp' + main_pyver.replace('.', '')
     main_image = KNOWN_CPYTHON_DOCKER_IMAGES[main_cpver]
 
-    build_names = []
-    jobs = {}
-    opsys = 'linux'
-    arch = 'x86_64'
-    for pyver in self.config['ci_cpython_versions']:
-        cpver = 'cp' + pyver.replace('.', '')
+    build_names: list[str] = []
+    jobs: dict[str, Any] = {}
+    build_job_names: set[str] = set()
+    for case in artifact_test_cases:
+        cpver = case.gitlab_cpver
+        if cpver not in KNOWN_CPYTHON_DOCKER_IMAGES:
+            continue
         image = KNOWN_CPYTHON_DOCKER_IMAGES[cpver]
 
         # TODO: handle this case in other variants
-        extra_environs = {}
+        extra_environs: dict[str, str] = {}
 
         # fixme: might not be a robust check, e.g. python could release, but
         # packages might not have official wheels yet.
@@ -697,29 +670,36 @@ def make_binpy_ci_jobs(self):
                     }
                 )
 
-        swenv_key = f'{cpver}-{opsys}-{arch}'
-        build_name = f'build/{swenv_key}'
-        build_job = {
-            'variables': {
-                'CIBW_BUILD': f'{cpver}-*',
+        swenv_key = case.gitlab_swenv_key
+        build_name = workflow_plan.wheel_build_job_key.format(
+            swenv_key=swenv_key
+        )
+        if build_name not in build_job_names:
+            build_job = {
+                'variables': {
+                    'CIBW_BUILD': f'{cpver}-*',
+                }
             }
-        }
-        build_job = CommentedMap(build_job)
-        build_job.add_yaml_merge([(0, cibuildwheel_template)])
-        jobs[build_name] = build_job
-        build_names.append(build_name)
+            build_job = CommentedMap(build_job)
+            _add_yaml_merge(build_job, cibuildwheel_template)
+            jobs[build_name] = build_job
+            build_names.append(build_name)
+            build_job_names.add(build_name)
 
-        for extra_key, common_test_template in test_templates.items():
-            test_name = f'test/{extra_key}/{swenv_key}'
-            test_job = {
-                'image': image,
-                'needs': [build_name],
-            }
-            test_job = CommentedMap(test_job)
-            test_job.add_yaml_merge([(0, common_test_template)])
-            if extra_environs:
-                test_job['variables'] = extra_environs.copy()
-            jobs[test_name] = test_job
+        common_test_template = test_templates[case.variant.key]
+        test_name = workflow_plan.artifact_test_job_key.format(
+            variant_key=case.variant.key,
+            swenv_key=swenv_key,
+        )
+        test_job = {
+            'image': image,
+            'needs': [build_name],
+        }
+        test_job = CommentedMap(test_job)
+        _add_yaml_merge(test_job, common_test_template)
+        if extra_environs:
+            test_job['variables'] = extra_environs.copy()
+        jobs[test_name] = test_job
 
     body.update(jobs)
 
@@ -753,12 +733,12 @@ def make_binpy_ci_jobs(self):
     return text
 
 
-def build_lint_job(self, common_template, deploy_image):
+def build_lint_job(self, common_template, deploy_image, plan: CIPlan | None = None):
     from ruamel.yaml.comments import CommentedMap
 
     from xcookie.util_yaml import Yaml
 
-    lint_job = {}
+    lint_job: dict[str, Any] = {}
     lint_job.update(
         ub.udict(
             Yaml.loads(
@@ -793,7 +773,7 @@ def build_lint_job(self, common_template, deploy_image):
 
     # Add typechecking commands (mypy + ty by default) unless disabled
     if 'notypes' not in self.tags:
-        typecheck_cmds = common_ci.make_typecheck_parts(self)
+        typecheck_cmds = common_ci.make_typecheck_parts(self, plan=plan)
         # Ensure the script key exists and is a list
         script_list = lint_job.get('script') or []
         # Extend script with typecheck commands
@@ -801,7 +781,7 @@ def build_lint_job(self, common_template, deploy_image):
         lint_job['script'] = script_list
 
     lint_job = CommentedMap(lint_job)
-    lint_job.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(lint_job, common_template)
 
     lint_job['allow_failure'] = True
     return lint_job
@@ -813,7 +793,9 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
 
     from xcookie.util_yaml import Yaml
 
-    ci_gpg_transport = self.config.get('ci_gpg_secret_transport', 'encrypted_repo')
+    ci_gpg_transport = self.config.get(
+        'ci_gpg_secret_transport', 'encrypted_repo'
+    )
     use_direct_gpg = ci_gpg_transport == 'direct_ci'
 
     _dist_patterns = []
@@ -877,9 +859,9 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
             'echo "Importing GPG keys from CI secrets"',
             # Import public key first so the primary fingerprint is visible
             # before the secret subkey is imported
-            "printf '%s' \"$GPG_PUBLIC_KEY_B64\" | base64 -d | $GPG_EXECUTABLE --import",
-            "printf '%s' \"$GPG_OWNER_TRUST_B64\" | base64 -d | $GPG_EXECUTABLE --import-ownertrust",
-            "printf '%s' \"$GPG_SECRET_SIGNING_SUBKEY_B64\" | base64 -d | $GPG_EXECUTABLE --import",
+            'printf \'%s\' "$GPG_PUBLIC_KEY_B64" | base64 -d | $GPG_EXECUTABLE --import',
+            'printf \'%s\' "$GPG_OWNER_TRUST_B64" | base64 -d | $GPG_EXECUTABLE --import-ownertrust',
+            'printf \'%s\' "$GPG_SECRET_SIGNING_SUBKEY_B64" | base64 -d | $GPG_EXECUTABLE --import',
             # Verify imported key matches the repo-pinned fingerprint
             'IMPORTED_FPR=$($GPG_EXECUTABLE --list-keys --with-colons "$GPG_KEYID" | awk -F: \'/^fpr/ { print $10; exit }\')',
             '[[ "$IMPORTED_FPR" == "$GPG_KEYID" ]] || { echo "ERROR: fingerprint mismatch: $IMPORTED_FPR != $GPG_KEYID"; exit 1; }',
@@ -932,7 +914,7 @@ def build_gpg_job(self, common_template, deploy_image, wheelhouse_dpath):
     gpgsign_job['script'].append(f'ls {wheelhouse_dpath}')
 
     gpgsign_job = CommentedMap(gpgsign_job)
-    gpgsign_job.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(gpgsign_job, common_template)
 
     enable_otc = True
     if enable_otc:
@@ -1010,10 +992,13 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
     if self.config['deploy_tags']:
         deploy_script += [
             Yaml.CodeBlock(
-                r"""
-                set -e
+                'set -e\n'
+                + common_ci.make_project_version_assignment(
+                    self, 'PROJECT_VERSION', export=True
+                )
+                + '\n'
+                + r"""
                 # Have the server git-tag the release and push the tags
-                export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
                 # do sed twice to handle the case of https clone with and without a read token
                 URL_HOST=$(git remote get-url origin | sed -e 's|https\?://.*@||g' | sed -e 's|https\?://||g' | sed -e 's|git@||g' | sed -e 's|:|/|g')
                 source dev/secrets_configuration.sh
@@ -1050,7 +1035,7 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                 echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
                 echo "CI_API_V4_URL=$CI_API_V4_URL"
 
-                export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+                {common_ci.make_project_version_assignment(self, 'PROJECT_VERSION', export=True)}
                 echo "PROJECT_VERSION=$PROJECT_VERSION"
 
                 # If running on CI use CI authentication, otherwise
@@ -1110,7 +1095,7 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                     echo "CI_PROJECT_NAME=$CI_PROJECT_NAME"
                     echo "CI_API_V4_URL=$CI_API_V4_URL"
 
-                    export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+                    {common_ci.make_project_version_assignment(self, 'PROJECT_VERSION', export=True)}
 
                     # Building this dummy variable requires some wheels built
                     # in the local dir, the next step wont use them directly
@@ -1129,8 +1114,11 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                 __note__
             deploy_script += [
                 Yaml.CodeBlock(
-                    r"""
-                    export PROJECT_VERSION=$(python -c "import setup; print(setup.VERSION)")
+                    common_ci.make_project_version_assignment(
+                        self, 'PROJECT_VERSION', export=True
+                    )
+                    + '\n'
+                    + r"""
                     echo "PROJECT_VERSION=$PROJECT_VERSION"
                     TAG_NAME="v$PROJECT_VERSION"
 
@@ -1174,5 +1162,5 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
 
     deploy_job['script'] = deploy_script
     deploy_job = CommentedMap(deploy_job)
-    deploy_job.add_yaml_merge([(0, common_template)])
+    _add_yaml_merge(deploy_job, common_template)
     return deploy_job

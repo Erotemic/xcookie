@@ -4,7 +4,9 @@ import types
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
-def _make_applier(tmp_path, *, trusted, enable_gpg, tags=None, min_python=None):
+def _make_applier(
+    tmp_path, *, trusted, enable_gpg, tags=None, min_python=None, use_setup_py='auto'
+):
     if tags is None:
         tags = ['github', 'erotemic', 'purepy']
     kwargs = dict(
@@ -20,13 +22,14 @@ def _make_applier(tmp_path, *, trusted, enable_gpg, tags=None, min_python=None):
     cfg = XCookieConfig(**kwargs)
     cfg['ci_pypi_trusted_publishing'] = trusted
     cfg['enable_gpg'] = enable_gpg
+    cfg['use_setup_py'] = use_setup_py
     self = TemplateApplier(cfg)
     self._presetup()
     return self
 
 
 class _FakeQueue:
-    created = []
+    created: list['_FakeQueue'] = []
 
     def __init__(self):
         self.commands = []
@@ -54,6 +57,36 @@ class _FakeQueue:
         self.ran = True
         self.run_kwargs = kwargs
         return None
+
+    def finalize_text(self, **kwargs):
+        # TemplateApplier.rotate_secrets now bypasses Queue.run() so it can
+        # call cmd_queue's finalize_text(with_gaurds=False) and run the
+        # resulting bash with xtrace guards disabled.  Keep this test double
+        # side-effect-free while preserving the old "ran" signal and the
+        # submitted commands for orchestration assertions below.
+        self.ran = True
+        self.run_kwargs = kwargs
+        return 'true\n'
+
+
+def _patch_rotate_secret_shell(monkeypatch):
+    """Avoid invoking platform bash from rotate_secrets unit tests.
+
+    These tests verify the cmd_queue orchestration decisions.  The actual
+    subprocess execution is covered by production code and should not depend on
+    whether the test platform has a usable bash executable, especially on
+    Windows where GitHub-hosted runners may resolve ``bash`` to WSL.
+    """
+    calls = []
+
+    def fake_run(cmd, cwd=None, **kwargs):
+        calls.append({'cmd': cmd, 'cwd': cwd, 'kwargs': kwargs})
+        return types.SimpleNamespace(returncode=0)
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    return calls
 
 
 def test_template_registry_contains_tests_and_release_workflows(tmp_path):
@@ -125,15 +158,25 @@ def test_release_workflow_trusted_footer_drops_twine_act_secrets(tmp_path):
     assert 'Trusted publishing setup checklist' in text
     assert '.github/workflows/release.yml' in text
     assert 'https://github.com/Erotemic/demo_pkg/settings/environments' in text
-    assert 'https://github.com/Erotemic/demo_pkg/actions/workflows/release.yml' in text
-    assert 'https://pypi.org/manage/project/demo-pkg/settings/publishing/' in text
-    assert 'https://test.pypi.org/manage/project/demo-pkg/settings/publishing/' in text
+    assert (
+        'https://github.com/Erotemic/demo_pkg/actions/workflows/release.yml'
+        in text
+    )
+    assert (
+        'https://pypi.org/manage/project/demo-pkg/settings/publishing/' in text
+    )
+    assert (
+        'https://test.pypi.org/manage/project/demo-pkg/settings/publishing/'
+        in text
+    )
     assert 'https://pypi.org/manage/account/publishing/' in text
     assert 'https://test.pypi.org/manage/account/publishing/' in text
-    assert 'Trusted publishing cannot be fully emulated with local act secrets.' in text
+    assert (
+        'Trusted publishing cannot be fully emulated with local act secrets.'
+        in text
+    )
     assert 'EROTEMIC_TWINE_PASSWORD' not in text
     assert 'EROTEMIC_TEST_TWINE_PASSWORD' not in text
-    assert 'EROTEMIC_CI_SECRET' in text
 
 
 def test_release_workflow_legacy_footer_keeps_twine_act_secrets(tmp_path):
@@ -145,31 +188,46 @@ def test_release_workflow_legacy_footer_keeps_twine_act_secrets(tmp_path):
     assert 'EROTEMIC_TEST_TWINE_PASSWORD' in text
 
 
-def test_rotate_secrets_trusted_without_gpg_skips_secret_upload(monkeypatch, tmp_path):
+def test_rotate_secrets_trusted_without_gpg_skips_secret_upload(
+    monkeypatch, tmp_path
+):
     _FakeQueue.created.clear()
     fake_cmd_queue = types.SimpleNamespace(Queue=_FakeQueue)
     monkeypatch.setitem(sys.modules, 'cmd_queue', fake_cmd_queue)
 
     self = _make_applier(tmp_path, trusted=True, enable_gpg=False)
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     queue = _FakeQueue.created[-1]
     joined = '\n'.join(queue.commands)
 
+    joined_posix = joined.replace('\\', '/')
+
     assert 'setup_package_environs_github_erotemic' in joined
-    assert 'source $(secret_loader.sh)' in joined
+    assert 'dev/setup_secrets.sh' in joined_posix
+    assert 'source $(secret_loader.sh)' not in joined
     assert 'export_encrypted_code_signing_keys' not in joined
     assert 'upload_github_secrets' not in joined
     assert 'no additional CI secrets' in joined
     assert queue.ran
 
 
-def test_rotate_secrets_trusted_with_gpg_keeps_gpg_export_and_secret_upload(monkeypatch, tmp_path):
+def test_rotate_secrets_trusted_with_gpg_keeps_gpg_export_and_secret_upload(
+    monkeypatch, tmp_path
+):
+    """
+    With the legacy ``encrypted_repo`` transport, rotate_secrets must still
+    export the encrypted code-signing keys and upload the CI_SECRET-bearing
+    repo secrets, even when trusted publishing is enabled.
+    """
     _FakeQueue.created.clear()
     fake_cmd_queue = types.SimpleNamespace(Queue=_FakeQueue)
     monkeypatch.setitem(sys.modules, 'cmd_queue', fake_cmd_queue)
 
     self = _make_applier(tmp_path, trusted=True, enable_gpg=True)
+    self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     queue = _FakeQueue.created[-1]
@@ -184,9 +242,12 @@ def test_rotate_secrets_trusted_with_gpg_keeps_gpg_export_and_secret_upload(monk
 # Helpers for direct_ci transport mode tests
 # ---------------------------------------------------------------------------
 
+
 def _make_direct_gpg_applier(tmp_path, *, trusted, enable_gpg=True, tags=None):
     """Build a TemplateApplier with ci_gpg_secret_transport='direct_ci'."""
-    self = _make_applier(tmp_path, trusted=trusted, enable_gpg=enable_gpg, tags=tags)
+    self = _make_applier(
+        tmp_path, trusted=trusted, enable_gpg=enable_gpg, tags=tags
+    )
     self.config['ci_gpg_secret_transport'] = 'direct_ci'
     return self
 
@@ -195,8 +256,11 @@ def _make_direct_gpg_applier(tmp_path, *, trusted, enable_gpg=True, tags=None):
 # Template generation — GitHub Actions
 # ---------------------------------------------------------------------------
 
+
 def test_direct_gpg_github_env_has_gpg_secrets_not_ci_secret(tmp_path):
-    text = _make_direct_gpg_applier(tmp_path, trusted=False).build_github_actions_release()
+    text = _make_direct_gpg_applier(
+        tmp_path, trusted=False
+    ).build_github_actions_release()
     assert 'GPG_SECRET_SIGNING_SUBKEY_B64' in text
     assert 'GPG_PUBLIC_KEY_B64' in text
     assert 'GPG_OWNER_TRUST_B64' in text
@@ -204,14 +268,18 @@ def test_direct_gpg_github_env_has_gpg_secrets_not_ci_secret(tmp_path):
 
 
 def test_direct_gpg_github_has_no_openssl_decrypt(tmp_path):
-    text = _make_direct_gpg_applier(tmp_path, trusted=False).build_github_actions_release()
+    text = _make_direct_gpg_applier(
+        tmp_path, trusted=False
+    ).build_github_actions_release()
     assert 'openssl enc' not in text
     assert '.pgp.enc' not in text
     assert 'Decrypting Keys' not in text
 
 
 def test_direct_gpg_github_reads_anchor_from_repo_and_verifies(tmp_path):
-    text = _make_direct_gpg_applier(tmp_path, trusted=False).build_github_actions_release()
+    text = _make_direct_gpg_applier(
+        tmp_path, trusted=False
+    ).build_github_actions_release()
     assert 'cat dev/public_gpg_key' in text
     assert 'base64 -d' in text
     assert 'IMPORTED_FPR' in text
@@ -219,18 +287,24 @@ def test_direct_gpg_github_reads_anchor_from_repo_and_verifies(tmp_path):
 
 
 def test_direct_gpg_github_uses_printf_not_echo_for_decode(tmp_path):
-    text = _make_direct_gpg_applier(tmp_path, trusted=False).build_github_actions_release()
-    assert "printf '%s'" in text or 'printf \'%s\'' in text
+    text = _make_direct_gpg_applier(
+        tmp_path, trusted=False
+    ).build_github_actions_release()
+    assert "printf '%s'" in text or "printf '%s'" in text
 
 
 def test_direct_gpg_github_non_trusted_has_twine_and_gpg_secrets(tmp_path):
-    text = _make_direct_gpg_applier(tmp_path, trusted=False).build_github_actions_release()
+    text = _make_direct_gpg_applier(
+        tmp_path, trusted=False
+    ).build_github_actions_release()
     assert 'TWINE_PASSWORD' in text
     assert 'GPG_SECRET_SIGNING_SUBKEY_B64' in text
 
 
 def test_direct_gpg_trusted_github_has_no_ci_secret_no_twine(tmp_path):
-    text = _make_direct_gpg_applier(tmp_path, trusted=True).build_github_actions_release()
+    text = _make_direct_gpg_applier(
+        tmp_path, trusted=True
+    ).build_github_actions_release()
     # CI_SECRET must not be referenced as a secret in the job env; it may
     # still appear in footer comments explaining the two transport modes.
     assert 'secrets.CI_SECRET' not in text
@@ -239,21 +313,25 @@ def test_direct_gpg_trusted_github_has_no_ci_secret_no_twine(tmp_path):
     assert 'pypa/gh-action-pypi-publish' in text
 
 
-def test_encrypted_repo_github_unchanged_when_transport_explicit(tmp_path):
-    """Default mode must produce identical output whether the key is set
-    explicitly or left at its default."""
+def test_default_transport_matches_explicit_direct_ci(tmp_path):
+    """The ``ci_gpg_secret_transport`` default must produce identical output
+    whether the key is left at its default or set to its named value
+    (``direct_ci``).
+    """
     baseline = _make_applier(
         tmp_path, trusted=False, enable_gpg=True
     ).build_github_actions_release()
     explicit = _make_applier(tmp_path, trusted=False, enable_gpg=True)
-    explicit.config['ci_gpg_secret_transport'] = 'encrypted_repo'
+    explicit.config['ci_gpg_secret_transport'] = 'direct_ci'
     assert baseline == explicit.build_github_actions_release()
 
 
 def test_direct_gpg_github_job_has_environment_set(tmp_path):
     """deploy jobs must declare the GitHub environment so environment-scoped
     secrets are injected by the runner."""
-    text = _make_direct_gpg_applier(tmp_path, trusted=False).build_github_actions_release()
+    text = _make_direct_gpg_applier(
+        tmp_path, trusted=False
+    ).build_github_actions_release()
     assert 'environment: pypi' in text
     assert 'environment: testpypi' in text
 
@@ -261,6 +339,7 @@ def test_direct_gpg_github_job_has_environment_set(tmp_path):
 # ---------------------------------------------------------------------------
 # Template generation — GitLab CI
 # ---------------------------------------------------------------------------
+
 
 def test_direct_gpg_gitlab_no_ci_secret_no_openssl(tmp_path):
     text = _make_direct_gpg_applier(
@@ -294,15 +373,23 @@ def test_direct_gpg_gitlab_no_secrets_configuration_in_gpgsign_job(tmp_path):
     assert 'CI_SECRET=${!VARNAME_CI_SECRET}' not in text
 
 
-def test_encrypted_repo_gitlab_unchanged_by_new_config_key(tmp_path):
-    """Default GitLab CI output must be identical with or without the new key."""
+def test_default_transport_gitlab_matches_explicit_direct_ci(tmp_path):
+    """Default GitLab CI output must be identical to setting
+    ``ci_gpg_secret_transport='direct_ci'`` explicitly.
+    """
     baseline = _make_applier(
-        tmp_path, trusted=False, enable_gpg=True, tags=['gitlab', 'kitware', 'purepy']
+        tmp_path,
+        trusted=False,
+        enable_gpg=True,
+        tags=['gitlab', 'kitware', 'purepy'],
     ).build_gitlab_ci()
     explicit = _make_applier(
-        tmp_path, trusted=False, enable_gpg=True, tags=['gitlab', 'kitware', 'purepy']
+        tmp_path,
+        trusted=False,
+        enable_gpg=True,
+        tags=['gitlab', 'kitware', 'purepy'],
     )
-    explicit.config['ci_gpg_secret_transport'] = 'encrypted_repo'
+    explicit.config['ci_gpg_secret_transport'] = 'direct_ci'
     assert baseline == explicit.build_gitlab_ci()
 
 
@@ -310,11 +397,17 @@ def test_encrypted_repo_gitlab_unchanged_by_new_config_key(tmp_path):
 # rotate_secrets orchestration
 # ---------------------------------------------------------------------------
 
-def test_rotate_secrets_direct_gpg_calls_gpg_upload_not_encrypt(monkeypatch, tmp_path):
+
+def test_rotate_secrets_direct_gpg_calls_gpg_upload_not_encrypt(
+    monkeypatch, tmp_path
+):
     _FakeQueue.created.clear()
-    monkeypatch.setitem(sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue))
+    monkeypatch.setitem(
+        sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue)
+    )
 
     self = _make_direct_gpg_applier(tmp_path, trusted=False)
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -327,11 +420,16 @@ def test_rotate_secrets_direct_gpg_calls_gpg_upload_not_encrypt(monkeypatch, tmp
     assert _FakeQueue.created[-1].ran
 
 
-def test_rotate_secrets_direct_gpg_trusted_skips_non_gpg_upload(monkeypatch, tmp_path):
+def test_rotate_secrets_direct_gpg_trusted_skips_non_gpg_upload(
+    monkeypatch, tmp_path
+):
     _FakeQueue.created.clear()
-    monkeypatch.setitem(sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue))
+    monkeypatch.setitem(
+        sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue)
+    )
 
     self = _make_direct_gpg_applier(tmp_path, trusted=True)
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -342,15 +440,20 @@ def test_rotate_secrets_direct_gpg_trusted_skips_non_gpg_upload(monkeypatch, tmp
     assert _FakeQueue.created[-1].ran
 
 
-def test_rotate_secrets_direct_gpg_gitlab_excludes_ci_secret(monkeypatch, tmp_path):
+def test_rotate_secrets_direct_gpg_gitlab_excludes_ci_secret(
+    monkeypatch, tmp_path
+):
     """GitLab direct_ci rotate: gpg secrets uploaded, repo secrets called with
     direct_gpg mode (excluding CI_SECRET), and CI_SECRET not in any command."""
     _FakeQueue.created.clear()
-    monkeypatch.setitem(sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue))
+    monkeypatch.setitem(
+        sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue)
+    )
 
     self = _make_direct_gpg_applier(
         tmp_path, trusted=False, tags=['gitlab', 'kitware', 'purepy']
     )
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -361,13 +464,23 @@ def test_rotate_secrets_direct_gpg_gitlab_excludes_ci_secret(monkeypatch, tmp_pa
     assert _FakeQueue.created[-1].ran
 
 
-def test_rotate_secrets_encrypted_repo_behavior_unchanged(monkeypatch, tmp_path):
-    """Regression: default encrypted_repo path must be byte-identical before
-    and after adding ci_gpg_secret_transport to the config schema."""
+def test_rotate_secrets_encrypted_repo_behavior_unchanged(
+    monkeypatch, tmp_path
+):
+    """Regression: when ``ci_gpg_secret_transport='encrypted_repo'`` is
+    selected explicitly, rotate_secrets must still produce the legacy
+    encrypted-repo orchestration (``export_encrypted_code_signing_keys`` +
+    ``upload_github_secrets``) without falling through to the new
+    ``upload_github_gpg_secrets`` path.
+    """
     _FakeQueue.created.clear()
-    monkeypatch.setitem(sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue))
+    monkeypatch.setitem(
+        sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue)
+    )
 
     self = _make_applier(tmp_path, trusted=False, enable_gpg=True)
+    self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
+    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -375,3 +488,43 @@ def test_rotate_secrets_encrypted_repo_behavior_unchanged(monkeypatch, tmp_path)
     assert 'upload_github_secrets' in joined
     assert 'upload_github_gpg_secrets' not in joined
     assert _FakeQueue.created[-1].ran
+
+
+def test_release_workflow_pyproject_mode_does_not_import_setup(tmp_path):
+    text = _make_applier(
+        tmp_path, trusted=True, enable_gpg=True, use_setup_py=False
+    ).build_github_actions_release()
+
+    assert 'import setup' not in text
+    assert 'demo_pkg/__init__.py' in text
+    assert 'ast.parse' in text
+
+
+def test_gitlab_deploy_pyproject_mode_does_not_import_setup(tmp_path):
+    text = _make_applier(
+        tmp_path,
+        trusted=False,
+        enable_gpg=True,
+        tags=['gitlab', 'kitware', 'purepy'],
+        use_setup_py=False,
+    ).build_gitlab_ci()
+
+    assert 'import setup; print(setup.VERSION)' not in text
+    assert 'demo_pkg/__init__.py' in text
+    assert 'ast.parse' in text
+
+
+def test_gitlab_yaml_merge_generation_supports_current_ruamel(tmp_path):
+    text = _make_direct_gpg_applier(
+        tmp_path, trusted=False, tags=['gitlab', 'kitware', 'purepy']
+    ).build_gitlab_ci()
+
+    assert '<<:' in text
+    assert 'gpgsign/wheels:' in text
+
+
+def test_yes_flag_answers_xcookie_prompts_without_stdin():
+    cfg = XCookieConfig(yes=True, interactive=True)
+
+    assert cfg.prompt('apply?', ['yes', 'no'], default='yes') == 'yes'
+    assert cfg.confirm('continue?', default=False) is False

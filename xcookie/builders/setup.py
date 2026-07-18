@@ -177,7 +177,7 @@ def build_setup(self):
     setupkw_parts['url'] = f'{self.config["url"]!r}'
     setupkw_parts['description'] = f'{self.config["description"]!r}'
     setupkw_parts['long_description'] = 'parse_description()'
-    setupkw_parts['long_description_content_type'] = "'text/x-rst'"
+    setupkw_parts['long_description_content_type'] = 'readme_content_type()'
     setupkw_parts['license'] = f'{self.config["license"]!r}'
     setupkw_parts['packages'] = (
         f'find_packages({self.config["rel_mod_parent_dpath"]!r})'
@@ -196,7 +196,7 @@ def build_setup(self):
         package_data[f'{self.mod_name}.rc.requirements'] = ['*.txt']
 
     if self.config['typed']:
-        package_data[self.mod_name] = ['py.typed', '*.pyi']
+        package_data[self.mod_name] = ['py.typed']
 
     if package_data:
         setupkw_parts['package_data'] = package_data
@@ -221,7 +221,11 @@ def build_setup(self):
         setupkw_parts['scripts'] = ub.urepr(pyproject_settings['scripts'])
     if 'package_data' in pyproject_settings:
         setupkw_parts.setdefault('package_data', {})
-        setupkw_parts['package_data'].update(pyproject_settings['package_data'])
+        _package_data_dst = setupkw_parts['package_data']
+        _package_data_new = pyproject_settings['package_data']
+        assert isinstance(_package_data_new, dict)
+        assert isinstance(_package_data_dst, dict)
+        _package_data_dst.update(_package_data_new)
 
     for k, v in setupkw_parts.items():
         parts.append(ub.indent(f'setupkw[{k!r}] = {v}'))

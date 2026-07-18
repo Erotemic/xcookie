@@ -18,6 +18,9 @@ Welcome to xcookie's documentation!
    :maxdepth: 8
 
    xcookie
+   manual/release_workflow_design
+   manual/trusted_github_publishing
+   dev/refactor_plan
 
 
 

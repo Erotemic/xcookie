@@ -354,7 +354,7 @@ class DirectiveExtractor:
         return extracted
 
 
-_MODNAME_EXISTS_CACHE = {}
+_MODNAME_EXISTS_CACHE: dict[str, bool] = {}
 
 
 def _module_exists(modname):

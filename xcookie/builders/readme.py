@@ -52,6 +52,11 @@ class ReadmeBuilder:
 
 
 def build_readme(self):
+    # Leave an existing Markdown README in place. This keeps repos that already
+    # use Markdown from being converted back to reStructuredText on regen.
+    if (self.repodir / 'README.md').exists():
+        return None
+
     badges = {}
     remote_info = self.remote_info
     main_branch = 'main'

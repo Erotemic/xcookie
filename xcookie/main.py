@@ -69,16 +69,31 @@ ExampleUsage:
         --use_pyproject_requirements=True --use_setup_py=False
 """
 
+from __future__ import annotations
+
 import os
+import re
 import shutil
 import tempfile
 import warnings
+from collections.abc import MutableMapping, Sequence
+from typing import Any, cast
 
-import scriptconfig as scfg
+import kwconf
 import toml
 import ubelt as ub
 import xdev
 from packaging.version import parse as Version
+
+from xcookie.patch_plan import PatchPlan, SearchPattern, render_patch_plan
+from xcookie.resolved_config import resolve_xcookie_config
+from xcookie.staging import apply_template_context
+from xcookie.template_registry import (
+    TemplateContext,
+    TemplateInfo,
+    coerce_template_infos,
+)
+from xcookie.util.util_metadata import metadata_text
 
 
 class SkipFile(Exception):
@@ -87,7 +102,7 @@ class SkipFile(Exception):
 
 # TODO: split up into a configuration that is saved to pyproject.toml and one
 # that is on only used when executing
-class XCookieConfig(scfg.DataConfig):
+class XCookieConfig(kwconf.Config):
     """
     The XCookie CLI
     """
@@ -102,19 +117,19 @@ class XCookieConfig(scfg.DataConfig):
     xcookie --repo_name=cookiecutter_binpy --repodir="$HOME"/code/cookiecutter_binpy --tags="github,binpy,gdal"
     """
     __default__ = {
-        'repodir': scfg.Value(
+        'repodir': kwconf.Value(
             '.', help='path to the new or existing repo', position=1
         ),
-        'repo_name': scfg.Value(None, help='defaults to ``repodir.name``'),
-        'mod_name': scfg.Value(
+        'repo_name': kwconf.Value(None, help='defaults to ``repodir.name``'),
+        'mod_name': kwconf.Value(
             None,
             help='The name of the importable Python module. defaults to ``repo_name``',
         ),
-        'pkg_name': scfg.Value(
+        'pkg_name': kwconf.Value(
             None,
             help='The distribution project name of the installable Python package (i.e. what you pass to ``pip install``). defaults to ``mod_name``',
         ),
-        'rel_mod_parent_dpath': scfg.Value(
+        'rel_mod_parent_dpath': kwconf.Value(
             '.',
             help=ub.paragraph(
                 """
@@ -124,29 +139,29 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'rotate_secrets': scfg.Value(
+        'rotate_secrets': kwconf.Value(
             'auto', help='If True will execute secret rotation', isflag=True
         ),
-        'refresh_docs': scfg.Value(
+        'refresh_docs': kwconf.Value(
             'auto', help='If True will refresh the docs', isflag=True
         ),
-        'deploy': scfg.Value(
+        'deploy': kwconf.Value(
             True, help='If False, disable all deployment', isflag=True
         ),
-        'deploy_pypi': scfg.Value(
+        'deploy_pypi': kwconf.Value(
             True, help='If False, disable pypi deployment', isflag=True
         ),
-        'deploy_tags': scfg.Value(
+        'deploy_tags': kwconf.Value(
             True, help='If False, disable tags deployment', isflag=True
         ),
-        'deploy_artifacts': scfg.Value(
+        'deploy_artifacts': kwconf.Value(
             True, help='If False, disable github/gitlab deployment', isflag=True
         ),
-        'deploy_gitlab': scfg.Value(
+        'deploy_gitlab': kwconf.Value(
             True, help='If False, disable gitlab deployment', isflag=True
         ),
-        'os': scfg.Value('all', help='all or any of win,osx,linux'),
-        'is_new': scfg.Value(
+        'os': kwconf.Value('all', help='all or any of win,osx,linux'),
+        'is_new': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -157,7 +172,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'init_new_remotes': scfg.Value(
+        'init_new_remotes': kwconf.Value(
             True,
             help=ub.paragraph(
                 """
@@ -166,20 +181,20 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'min_python': scfg.Value(
+        'min_python': kwconf.Value(
             '3.7', type=str, help='used to infer supported_python_versions'
         ),
-        'max_python': scfg.Value(
+        'max_python': kwconf.Value(
             None, type=str, help='used to infer supported_python_versions'
         ),
-        'main_python': scfg.Value(
+        'main_python': kwconf.Value(
             'max',
             help='The main version of Python to use for version agnostic jobs. A value of max uses the maximum version',
         ),
-        'typed': scfg.Value(
+        'typed': kwconf.Value(
             None, help='Should be None, False, True, partial or full'
         ),
-        'supported_python_versions': scfg.Value(
+        'supported_python_versions': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -188,7 +203,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'ci_cpython_versions': scfg.Value(
+        'ci_cpython_versions': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -197,16 +212,19 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'ci_pypy_versions': scfg.Value(
+        'ci_pypy_versions': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
-            Specify the major.minor PyPy versions to use on the CI.
-            Defaults will depend on purepy vs binpy tags.
+            Specify the major.minor PyPy versions to use on the CI as a list,
+            e.g. ["3.10", "3.11"]. With "auto", purepy repos test on the most
+            recent released PyPy whose CPython level is within the supported
+            python range (and no PyPy job if none is compatible); binpy repos
+            default to no PyPy.
             """
             ),
         ),
-        'ci_blocklist': scfg.Value(
+        'ci_blocklist': kwconf.Value(
             [],
             help=ub.paragraph(
                 """
@@ -215,72 +233,83 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'ci_versions_minimal_strict': scfg.Value('min', help='todo: sus out'),
-        'ci_versions_full_strict': scfg.Value('main'),
-        'ci_versions_minimal_loose': scfg.Value('main'),
-        'ci_versions_full_loose': scfg.Value('*'),
-        'remote_host': scfg.Value(
+        'ci_versions_minimal_strict': kwconf.Value('min', help='todo: sus out'),
+        'ci_versions_full_strict': kwconf.Value('main'),
+        'ci_versions_minimal_loose': kwconf.Value('main'),
+        'ci_versions_full_loose': kwconf.Value('*'),
+        'remote_host': kwconf.Value(
             None, help='if unspecified, attempt to infer from tags'
         ),
-        'remote_group': scfg.Value(
+        'remote_group': kwconf.Value(
             None, help='if unspecified, attempt to infer from tags'
         ),
-        'autostage': scfg.Value(
+        'autostage': kwconf.Value(
             False, help='if true, automatically add changes to version control'
         ),
-        'visibility': scfg.Value(
+        'visibility': kwconf.Value(
             'public', help='or private. Does limit what we can do'
         ),
-        'test_env': scfg.Value(
+        'test_env': kwconf.Value(
             None,
             help='A YAML coercible dictionary of environment variables to use in test stages. (TOTO',
         ),
-        'version': scfg.Value(None, help='repo metadata: url for the project'),
-        'url': scfg.Value(
+        'version': kwconf.Value(None, help='repo metadata: url for the project'),
+        'url': kwconf.Value(
             None, type=str, help='repo metadata: url for the project'
         ),
-        'author': scfg.Value(
-            None, help='repo metadata: author for the project'
+        # Note: these may be a string or a list of strings. kwconf only
+        # applies the parser to CLI/env strings, so list-valued TOML
+        # metadata passes through unmangled (scriptconfig's type=str cast
+        # used to stringify lists into their repr).
+        'author': kwconf.Value(
+            None,
+            type=str,
+            help='repo metadata: author for the project. '
+                 'A string or a list of strings.',
         ),
-        'author_email': scfg.Value(None, help='repo metadata'),
-        'description': scfg.Value(None, type=str, help='repo metadata'),
-        'license': scfg.Value(None, help='repo metadata'),
-        'dev_status': scfg.Value('planning'),
-        'enable_gpg': scfg.Value(True),
-        'ci_gpg_secret_transport': scfg.Value(
-            'encrypted_repo',
+        'author_email': kwconf.Value(
+            None,
+            type=str,
+            help='repo metadata. A string or a list of strings.',
+        ),
+        'description': kwconf.Value(None, type=str, help='repo metadata'),
+        'license': kwconf.Value(None, help='repo metadata'),
+        'dev_status': kwconf.Value('planning'),
+        'enable_gpg': kwconf.Value(True),
+        'ci_gpg_secret_transport': kwconf.Value(
+            'direct_ci',
             help=ub.paragraph(
                 """
                 Controls how GPG signing key material is transported to CI.
-                "encrypted_repo" (default): key material is encrypted with
-                CI_SECRET and committed to the repository as .enc files.
-                CI decrypts at runtime using the CI_SECRET variable.
-                "direct_ci": key material is uploaded directly to the CI
-                provider as environment-scoped secrets. No encrypted files
-                are committed to the repo. CI imports the key material from
-                provider secrets and verifies the identity against
+                "direct_ci" (default): key material is uploaded directly to
+                the CI provider as environment-scoped secrets. No encrypted
+                files are committed to the repo. CI imports the key material
+                from provider secrets and verifies the identity against
                 dev/public_gpg_key.
+                "encrypted_repo" (legacy): key material is encrypted with
+                CI_SECRET and committed to the repository as .enc files; CI
+                decrypts at runtime using the CI_SECRET variable.
                 """
             ),
         ),
-        'defaultbranch': scfg.Value('main'),
-        'xdoctest_style': scfg.Value('google', help='type of xdoctest style'),
-        'test_command': scfg.Value(
+        'defaultbranch': kwconf.Value('main'),
+        'xdoctest_style': kwconf.Value('google', help='type of xdoctest style'),
+        'test_command': kwconf.Value(
             'auto', help='The pytest command to run in the CL'
         ),
-        'ci_pypi_live_password_varname': scfg.Value(
+        'ci_pypi_live_password_varname': kwconf.Value(
             'TWINE_PASSWORD',
             help='variable of the live twine password in your secrets',
         ),
-        'ci_pypi_test_password_varname': scfg.Value(
+        'ci_pypi_test_password_varname': kwconf.Value(
             'TEST_TWINE_PASSWORD',
             help='variable of the test twine password in your secrets',
         ),
-        'ci_pypi_trusted_publishing': scfg.Value(
-            False,
+        'ci_pypi_trusted_publishing': kwconf.Value(
+            True,
             help='if True, github deploy jobs use PyPI trusted publishing instead of twine password secrets',
         ),
-        'regen': scfg.Value(
+        'regen': kwconf.Value(
             None,
             help=ub.paragraph(
                 """
@@ -289,7 +318,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'only_generate': scfg.Value(
+        'only_generate': kwconf.Value(
             None,
             alias=['only_gen'],
             help=ub.paragraph(
@@ -298,7 +327,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'tags': scfg.Value(
+        'tags': kwconf.Value(
             'auto',
             nargs='*',
             help=ub.paragraph(
@@ -321,16 +350,16 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'linter': scfg.Value(
+        'linter': kwconf.Value(
             True, help=ub.paragraph('if true enables lint checks in CI')
         ),
-        'skip_autogen': scfg.Value(
+        'skip_autogen': kwconf.Value(
             None,
             help=ub.paragraph(
                 'list of targets to not auto-generate by default'
             ),
         ),
-        'render_doc_images': scfg.Value(
+        'render_doc_images': kwconf.Value(
             False,
             help=ub.paragraph(
                 """
@@ -340,11 +369,26 @@ class XCookieConfig(scfg.DataConfig):
         ),
         # TODO: Better mechanism for controlling which of the loose / strict /
         # minimal / full variants will be run.
-        'test_variants': scfg.Value(
+        'test_variants': kwconf.Value(
             ['full-loose', 'full-strict', 'minimal-loose', 'minimal-strict'],
             help='A list of which CI loose / strict / minimal / full variants to use',
         ),
-        'ci_extras': scfg.Value(
+        'ci_versionless_wheels': kwconf.Value(
+            False,
+            isflag=True,
+            help=ub.paragraph(
+                """
+                If True, the project's binary wheels are python-version
+                independent (e.g. py3-none tags from pure ctypes bindings),
+                so CI builds a single wheel per platform instead of one per
+                CPython version. The interpreter that performs the build is
+                pinned in the [tool.cibuildwheel] section of pyproject.toml.
+                The default (False) keeps per-python-version builds, which
+                repos that link against the CPython C API require.
+                """
+            ),
+        ),
+        'ci_extras': kwconf.Value(
             None,
             help=ub.paragraph(
                 """
@@ -356,7 +400,7 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'use_vcs': scfg.Value(
+        'use_vcs': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 """
@@ -364,17 +408,31 @@ class XCookieConfig(scfg.DataConfig):
             """
             ),
         ),
-        'use_uv': scfg.Value(
+        'use_uv': kwconf.Value(
             'auto',
             help=ub.paragraph(
                 'if False use plain pip, otherwise use uv instead'
             ),
         ),
-        'use_pyproject_requirements': scfg.Value(
+        'uv_exclude_newer': kwconf.Value(
+            'auto',
+            help=ub.paragraph(
+                """
+            Supply-chain guard: passed through to ``[tool.uv] exclude-newer``
+            in the generated pyproject.toml. ``'auto'`` (default) preserves
+            an existing value if one is on disk, otherwise uses a relative
+            ``'P7D'`` window (ignore packages published in the last 7 days).
+            Set to ``False``/``None`` to disable the guard entirely. Set to
+            any other string to use it verbatim, e.g. a relative window
+            (``'30 days'`` / ``'P30D'``) or a fixed ISO date (``'2026-05-22'``).
+            """
+            ),
+        ),
+        'use_pyproject_requirements': kwconf.Value(
             False, help=ub.paragraph('experimental new style version testing')
         ),
-        'use_setup_py': scfg.Value(
-            True,
+        'use_setup_py': kwconf.Value(
+            False,
             help=ub.paragraph(
                 """
             If False, do not generate setup.py and instead emit a fully-specified
@@ -384,122 +442,22 @@ class XCookieConfig(scfg.DataConfig):
             ),
         ),
         # ---
-        'interactive': scfg.Value(True),
-        'yes': scfg.Value(False, help=ub.paragraph('Say yes to everything')),
+        'interactive': kwconf.Value(True),
+        'yes': kwconf.Value(False, help=ub.paragraph('Say yes to everything')),
     }
 
+    @property
+    def _description(self):
+        """Argparse description, separate from project metadata."""
+        description = getattr(self, '__description__', None)
+        if description is None:
+            description = self.__class__.__doc__
+        if description is not None:
+            description = ub.codeblock(description)
+        return description
+
     def __post_init__(self):
-        if self['repodir'] is None:
-            self['repodir'] = ub.Path.cwd()
-        else:
-            self['repodir'] = ub.Path(self['repodir']).absolute()
-
-        try:
-            self['repodir'] = find_git_root(self['repodir'])
-        except Exception:
-            print('assuming the root was given and we are not in a repo yet')
-
-        if self['tags']:
-            if isinstance(self['tags'], str):
-                self['tags'] = [self['tags']]
-            new = []
-            for t in self['tags']:
-                new.extend([p.strip() for p in t.split(',')])
-            self['tags'] = new
-
-        if self['os']:
-            if isinstance(self['os'], str):
-                self['os'] = [self['os']]
-            new = []
-            for t in self['os']:
-                new.extend([p.strip() for p in t.split(',')])
-            self['os'] = set(new)
-            if 'all' in self['os']:
-                self['os'].add('win')
-                self['os'].add('osx')
-                self['os'].add('linux')
-                self['os'].remove('all')
-            os_normalizer = {
-                'windows': 'win',
-                'win32': 'win',
-                'darwin': 'osx',
-                'apple': 'osx',
-            }
-            self['os'] = [os_normalizer.get(x, x) for x in self['os']]
-            self['os'] = sorted(self['os'])
-
-        if self['repo_name'] is None:
-            self['repo_name'] = self['repodir'].name
-        if self['mod_name'] is None:
-            self['mod_name'] = self['repo_name'].replace('-', '_')
-        if self['pkg_name'] is None:
-            self['pkg_name'] = self['mod_name']
-        if self['is_new'] == 'auto':
-            self['is_new'] = not (self['repodir'] / '.git').exists()
-        if self['rotate_secrets'] == 'auto':
-            self['rotate_secrets'] = self['is_new']
-        if self['refresh_docs'] == 'auto':
-            self['refresh_docs'] = self['is_new']
-        if self['author'] is None:
-            if 'erotemic' in self['tags']:
-                self['author'] = 'Jon Crall'
-            else:
-                self['author'] = ub.cmd('git config user.name')['out'].strip()
-                if self['author'] == 'joncrall':
-                    self['author'] = 'Jon Crall'
-        if self['license'] is None:
-            self['license'] = 'Apache 2'
-        if self['author_email'] is None:
-            if 'erotemic' in self['tags']:
-                self['author_email'] = 'erotemic@gmail.com'
-            else:
-                self['author_email'] = ub.cmd('git config user.email')[
-                    'out'
-                ].strip()
-        if self['version'] is None:
-            # TODO: read from __init__.py
-            # self['version'] = '{mod_dpath}/__init__.py::__version__'
-            self['version'] = '0.0.1'
-
-        if self['description'] is None:
-            self['description'] = 'The {} module'.format(self['mod_name'])
-
-        if self['supported_python_versions'] == 'auto':
-            # FIXME: need to resolve after all other info is loaded
-            from xcookie.constants import KNOWN_PYTHON_VERSIONS
-
-            min_python = str(self['min_python']).lower()
-            max_python = str(self['max_python']).lower()
-
-            def satisfies_minmax(v):
-                v = Version(v)
-                if min_python != 'none':
-                    min_v = Version(min_python)
-                    if v < min_v:
-                        return False
-                if max_python != 'none':
-                    max_v = Version(max_python)
-                    if v > max_v:
-                        return False
-                return True
-
-            python_versions = [
-                v for v in KNOWN_PYTHON_VERSIONS if satisfies_minmax(v)
-            ]
-            self['supported_python_versions'] = python_versions
-
-        if self['ci_cpython_versions'] == 'auto':
-            self['ci_cpython_versions'] = self['supported_python_versions']
-
-        if self['ci_pypy_versions'] == 'auto':
-            if 'purepy' in self['tags']:
-                self['ci_pypy_versions'] = ['3.9']
-            else:
-                self['ci_pypy_versions'] = []
-        if self['use_uv'] == 'auto':
-            # Can only use uv if the min python >= 3.8
-            min_python = self['supported_python_versions'][0]
-            self['use_uv'] = Version(min_python) >= Version('3.8')
+        object.__setattr__(self, 'resolved', resolve_xcookie_config(self))
 
     def _load_pyproject_config(self):
         pyproject_fpath = self['repodir'] / 'pyproject.toml'
@@ -529,6 +487,107 @@ class XCookieConfig(scfg.DataConfig):
             # we need from other more standard pyproject settings.
             return settings
 
+    def _infer_project_authors(self, disk_config):
+        project_block = disk_config.get('project', {})
+        authors = project_block.get('authors', [])
+        if not isinstance(authors, (list, tuple)):
+            return {}
+
+        author_names = []
+        author_emails = []
+        for entry in authors:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get('name')
+            email = entry.get('email')
+            if name:
+                author_names.append(name)
+            if email:
+                author_emails.append(email)
+
+        config = {}
+        if author_names:
+            config['author'] = (
+                author_names[0] if len(author_names) == 1 else author_names
+            )
+        if author_emails:
+            config['author_email'] = (
+                author_emails[0]
+                if len(author_emails) == 1
+                else author_emails
+            )
+        return config
+
+    def _infer_version_from_file(self, fpath):
+        try:
+            text = ub.Path(fpath).read_text()
+        except Exception:
+            return None
+
+        match = re.search(
+            r"""(?m)^__version__\s*=\s*(['"])(?P<ver>[^'"]+)\1\s*$""", text
+        )
+        if match:
+            return match.group('ver')
+        return None
+
+    def _infer_version_from_pyproject(self, disk_config):
+        project_block = disk_config.get('project', {})
+        version = project_block.get('version')
+        if version:
+            return version
+
+        tool_block = disk_config.get('tool', {})
+        setuptools_config = tool_block.get('setuptools', {})
+        setuptools_dynamic = setuptools_config.get('dynamic', {})
+        version_spec = setuptools_dynamic.get('version', {})
+        if isinstance(version_spec, dict):
+            version_file = version_spec.get('file')
+            if isinstance(version_file, str):
+                version_file = [version_file]
+            if isinstance(version_file, (list, tuple)):
+                for rel_fpath in version_file:
+                    fpath = self.repodir / rel_fpath
+                    version = self._infer_version_from_file(fpath)
+                    if version:
+                        return version
+
+            version_attr = version_spec.get('attr')
+            if isinstance(version_attr, str):
+                module_name = version_attr.rsplit('.', 1)[0]
+                candidate_rel_paths = []
+
+                xcookie_config = tool_block.get('xcookie', {})
+                rel_mod_parent_dpath = xcookie_config.get(
+                    'rel_mod_parent_dpath', '.'
+                )
+                candidate_roots = [ub.Path(rel_mod_parent_dpath)]
+
+                setuptools_packages = setuptools_config.get('packages', {})
+                if isinstance(setuptools_packages, dict):
+                    find_config = setuptools_packages.get('find', {})
+                    if isinstance(find_config, dict):
+                        for where in find_config.get('where', []) or []:
+                            candidate_roots.append(ub.Path(where))
+
+                candidate_roots.append(ub.Path('.'))
+                rel_module_dpath = ub.Path(*module_name.split('.'))
+                for root in candidate_roots:
+                    candidate_rel_paths.extend(
+                        [
+                            root / rel_module_dpath / '__init__.py',
+                            root / f'{rel_module_dpath}.py',
+                        ]
+                    )
+
+                for rel_fpath in ub.oset(candidate_rel_paths):
+                    fpath = self.repodir / rel_fpath
+                    version = self._infer_version_from_file(fpath)
+                    if version:
+                        return version
+
+        return None
+
     def _infer_xcookie_settings_from_pyproject(self, disk_config):
         """
         Helper to populate the xcookie main settings from more standard
@@ -538,6 +597,10 @@ class XCookieConfig(scfg.DataConfig):
         project_block = disk_config.get('project', {})
         config['pkg_name'] = project_block.get('name')
         config['description'] = project_block.get('description')
+        config.update(self._infer_project_authors(disk_config))
+        version = self._infer_version_from_pyproject(disk_config)
+        if version:
+            config['version'] = version
 
         setuptools_config = disk_config.get('tool', {}).get('setuptools', {})
         setuptools_packages = setuptools_config.get('packages', [])
@@ -576,7 +639,7 @@ class XCookieConfig(scfg.DataConfig):
 
         return config
 
-    def confirm(self, msg, default=True):
+    def confirm(self, msg: str, default: bool = True) -> bool:
         """
         Args:
             msg (str): display to the user
@@ -585,7 +648,9 @@ class XCookieConfig(scfg.DataConfig):
         Returns:
             bool:
         """
-        if self['interactive']:
+        if self.get('yes', False):
+            flag = default
+        elif self['interactive']:
             from rich import prompt
 
             flag = prompt.Confirm.ask(msg)
@@ -593,7 +658,12 @@ class XCookieConfig(scfg.DataConfig):
             flag = default
         return flag
 
-    def prompt(self, msg, choices, default=True):
+    def prompt(
+        self,
+        msg: str,
+        choices: list[str],
+        default: str | bool = True,
+    ) -> str | bool:
         """
         Args:
             msg (str): display to the user
@@ -602,7 +672,9 @@ class XCookieConfig(scfg.DataConfig):
         Returns:
             bool:
         """
-        if self['interactive']:
+        if self.get('yes', False):
+            answer = default
+        elif self['interactive']:
             from xcookie.rich_ext import FuzzyPrompt
 
             answer = FuzzyPrompt.ask(msg, choices=choices)
@@ -611,21 +683,54 @@ class XCookieConfig(scfg.DataConfig):
         return answer
 
     @classmethod
-    def load_from_cli_and_pyproject(cls, argv=False, **kwargs):
+    def load_from_cli_and_pyproject(
+        cls,
+        argv: int | bool | str | Sequence[str] | None = False,
+        strict: bool = True,
+        autocomplete: bool | str = 'auto',
+        **kwargs: Any,
+    ) -> XCookieConfig:
         # We load the config multiple times to get the right defaults.
         # ideally we should fix this up
-        config = XCookieConfig.cli(argv=argv, data=kwargs, strict=True)
+        if isinstance(argv, int) and not isinstance(argv, bool):
+            if argv != 0:
+                raise ValueError('integer argv values must be 0')
+            cli_argv: bool | str | Sequence[str] | None = False
+        else:
+            cli_argv = argv
+        config = cast(
+            XCookieConfig,
+            cls.cli(
+                argv=cli_argv,
+                data=kwargs,
+                strict=strict,
+                autocomplete=autocomplete,
+            ),
+        )
         # config.__post_init__()
         settings = config._load_xcookie_pyproject_settings()
         if settings:
             print(f'settings={settings}')
-            config = XCookieConfig.cli(
-                argv=argv, data=kwargs, default=ub.dict_isect(settings, config)
+            config = cast(
+                XCookieConfig,
+                cls.cli(
+                    argv=cli_argv,
+                    data=kwargs,
+                    default=ub.dict_isect(settings, config),
+                    strict=strict,
+                    autocomplete=autocomplete,
+                ),
             )
         return config
 
     @classmethod
-    def main(cls, argv=False, **kwargs):
+    def main(
+        cls,
+        argv: int | bool | str | Sequence[str] | None = False,
+        strict: bool = True,
+        autocomplete: bool | str = 'auto',
+        **kwargs: Any,
+    ) -> TemplateApplier:
         """
         Main entry point
 
@@ -648,7 +753,12 @@ class XCookieConfig(scfg.DataConfig):
             argv = 0
         """
         # We load the config multiple times to get the right defaults.
-        config = XCookieConfig.load_from_cli_and_pyproject(argv=argv, **kwargs)
+        config = XCookieConfig.load_from_cli_and_pyproject(
+            argv=argv,
+            strict=strict,
+            autocomplete=autocomplete,
+            **kwargs,
+        )
         # # config.__post_init__()
         # settings = config._load_xcookie_pyproject_settings()
         # if settings:
@@ -681,18 +791,17 @@ class TemplateApplier:
         things).
     """
 
-    def __init__(self, config):
+    def __init__(self, config: XCookieConfig | dict[str, Any]) -> None:
         if isinstance(config, dict):
             config = XCookieConfig(**config)
 
         self.config = config
-        self.repodir = ub.Path(self.config['repodir'])
-        if self.config['repo_name'] is None:
-            self.config['repo_name'] = self.repodir.name
-        self.repo_name = self.config['repo_name']
+        self.resolved = resolve_xcookie_config(self.config)
+        self.repodir = self.resolved.repodir
+        self.repo_name = self.resolved.repo_name
         self._tmpdir = tempfile.TemporaryDirectory(prefix=self.repo_name)
 
-        self.template_infos = None
+        self.template_infos: list[TemplateInfo] = []
         try:
             xcookie_dpath = ub.Path(__file__).parent.parent
         except NameError:
@@ -716,7 +825,6 @@ class TemplateApplier:
         if self.config['use_vcs']:
             if self.config['rotate_secrets']:
                 self.rotate_secrets()
-        self.print_help_tips()
 
         if self.config['use_vcs']:
             if self.config['autostage']:
@@ -737,32 +845,46 @@ class TemplateApplier:
         repo.git.add(untracked)
 
     @property
-    def has_git(self):
+    def has_git(self) -> bool:
         return (self.config['repodir'] / '.git').exists()
 
     @property
-    def rel_mod_dpath(self):
-        return (
-            ub.Path(self.config['rel_mod_parent_dpath'])
-            / self.config['mod_name']
-        )
+    def rel_mod_dpath(self) -> ub.Path:
+        return self.resolved.rel_mod_dpath
 
     @property
-    def mod_dpath(self):
-        return self.repodir / self.rel_mod_dpath
+    def mod_dpath(self) -> ub.Path:
+        return self.resolved.mod_dpath
 
     @property
-    def mod_name(self):
-        return self.config['mod_name']
+    def mod_name(self) -> str:
+        return self.resolved.mod_name
 
     @property
-    def pkg_name(self):
-        return self.config['pkg_name']
+    def pkg_name(self) -> str:
+        return self.resolved.pkg_name
 
     @property
-    def pkg_fname_prefix(self):
+    def pkg_fname_prefix(self) -> str:
         # the files have underscores replaced in the prefix
         return self.config['pkg_name'].replace('-', '_')
+
+    def _readme_fpath(self) -> ub.Path:
+        """
+        Prefer an existing README.md over README.rst, otherwise default to
+        README.rst for newly generated repos.
+        """
+        for rel in ['README.md', 'README.rst']:
+            fpath = self.repodir / rel
+            if fpath.exists():
+                return fpath
+        return self.repodir / 'README.rst'
+
+    def _readme_content_type(self) -> str:
+        readme_fpath = self._readme_fpath()
+        if readme_fpath.suffix.lower() == '.md':
+            return 'text/markdown'
+        return 'text/x-rst'
 
     def _build_template_registry(self):
         """
@@ -770,10 +892,11 @@ class TemplateApplier:
         appropriate properties.
         """
         from xcookie import rc
+        from xcookie.builders import ci_plan
 
         rel_mod_dpath = self.rel_mod_dpath
 
-        self.template_infos = [
+        raw_template_infos: list[TemplateInfo | MutableMapping[str, Any]] = [
             # {'template': 1, 'overwrite': False, 'fname': '.circleci/config.yml'},
             # {'template': 1, 'overwrite': False, 'fname': '.travis.yml'},
             {
@@ -895,6 +1018,7 @@ class TemplateApplier:
                 'template': 0,
                 'overwrite': 1,
                 'fname': 'requirements.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_requirements_txt',
             },
             {
@@ -902,6 +1026,7 @@ class TemplateApplier:
                 'overwrite': 1,
                 'fname': 'requirements/graphics.txt',
                 'tags': 'cv2',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_cv2_graphics_requirements_txt',
             },
             {
@@ -909,6 +1034,7 @@ class TemplateApplier:
                 'overwrite': 1,
                 'fname': 'requirements/headless.txt',
                 'tags': 'cv2',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_cv2_headless_requirements_txt',
             },
             {
@@ -916,30 +1042,35 @@ class TemplateApplier:
                 'overwrite': 1,
                 'fname': 'requirements/gdal.txt',
                 'tags': 'gdal',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_gdal_requirements_txt',
             },
             {
                 'template': 0,
                 'overwrite': 0,
                 'fname': 'requirements/optional.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_optional_requirements',
             },
             {
                 'template': 0,
                 'overwrite': 0,
                 'fname': 'requirements/runtime.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_runtime_requirements',
             },
             {
                 'template': 0,
                 'overwrite': 0,
                 'fname': 'requirements/tests.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_tests_requirements',
             },
             {
                 'template': 0,
                 'overwrite': 0,
                 'fname': 'requirements/docs.txt',
+                'enabled': not self.config['use_pyproject_requirements'],
                 'dynamic': 'build_docs_requirements',
             },
             {
@@ -992,6 +1123,17 @@ class TemplateApplier:
                 'perms': 'x',
                 'dynamic': 'build_run_linter',
             },
+            {
+                # Helper that re-exports requirements/locks/*.txt from uv.lock
+                # for every strict CI variant. Only meaningful when the project
+                # uses pyproject + uv (lockfile-driven CI); skipped otherwise.
+                'template': 0,
+                'overwrite': 1,
+                'fname': 'dev/refresh_locks.sh',
+                'perms': 'x',
+                'enabled': ci_plan.uses_lockfile_ci(self),
+                'dynamic': 'build_refresh_locks_sh',
+            },
             # TODO: template a clean script
             {
                 'template': 1,
@@ -1010,14 +1152,17 @@ class TemplateApplier:
                 'input_fname': rc.resource_fpath('run_tests.purepy.py.in'),
             },
         ]
+        self.template_infos = coerce_template_infos(raw_template_infos)
 
         # The user specified some files to not overwrite by default
-        skip_autogen = set(self.config['skip_autogen'] or [])
+        skip_autogen = {
+            os.fspath(p) for p in (self.config['skip_autogen'] or [])
+        }
         if skip_autogen:
             for item in self.template_infos:
-                if item['fname'] in skip_autogen:
-                    item['overwrite'] = 0
-                    item['skip'] = 1
+                if os.fspath(item.fname) in skip_autogen:
+                    item.overwrite = False
+                    item.skip = True
 
         if 0:
             # Checker and help autopopulate
@@ -1067,7 +1212,7 @@ class TemplateApplier:
                     )
                 )
             )
-            known_fpaths = {d['fname'] for d in self.template_infos}
+            known_fpaths = {os.fspath(d.fname) for d in self.template_infos}
             exist_fpaths = {d['fname'] for d in template_contents}
             unexpected_fpaths = exist_fpaths - known_fpaths
             if unexpected_fpaths:
@@ -1266,11 +1411,9 @@ class TemplateApplier:
         return self
 
     def copy_staged_files(self):
-        stats, tasks = self.gather_tasks()
-        copy_tasks = tasks['copy']
-        perm_tasks = tasks['perms']
-        mkdir_tasks = tasks['mkdir']
-        task_summary = ub.map_vals(len, tasks)
+        plan = self.gather_tasks()
+        self.render_patch_plan(plan)
+        task_summary = plan.task_summary
         if any(task_summary.values()):
             print('task_summary = {}'.format(ub.urepr(task_summary, nl=1)))
             answer = self.config.prompt(
@@ -1279,26 +1422,13 @@ class TemplateApplier:
                 default='yes',
             )
             if answer in {'all', 'yes'}:
-                dirs = {d.parent for s, d in copy_tasks}
-                for d in dirs:
-                    d.ensuredir()
-                for d in mkdir_tasks:
-                    d.ensuredir()
-                for src, dst in copy_tasks:
-                    shutil.copy2(src, dst)
-                for fname, mode in perm_tasks:
-                    os.chmod(fname, mode)
+                plan.apply_all()
             elif answer == 'some':
-                dirs = {d.parent for s, d in copy_tasks}
-                for d in dirs:
-                    d.ensuredir()
-                for d in mkdir_tasks:
-                    d.ensuredir()
-                for src, dst in copy_tasks:
-                    if self.config.confirm(f'Apply {dst}?'):
-                        shutil.copy2(src, dst)
-                for fname, mode in perm_tasks:
-                    os.chmod(fname, mode)
+                selected = []
+                for task in plan.copy:
+                    if self.config.confirm(f'Apply {task.dst}?'):
+                        selected.append(task.dst)
+                plan.apply_some(selected)
 
     def vcs_checks(self):
         # repodir = self.config['repodir']
@@ -1389,19 +1519,22 @@ class TemplateApplier:
                 else:
                     raise NotImplementedError('unknown vcs remote')
 
+    @property
+    def template_context(self) -> TemplateContext:
+        return TemplateContext.from_config(self.config)
+
     def _stage_file(self, info):
         """
         Write a single file to the staging directory based on its template
         info.
 
         Args:
-            info (dict):
-                a template dictionary that defines how to construct a file
+            info (TemplateInfo | dict):
+                a template record that defines how to construct a file
 
         Returns:
-            dict: enriched information.
-                A side effect of this function is writing the data to temporary
-                storage
+            TemplateInfo: enriched information.  A side effect of this function
+            is writing the data to temporary storage.
 
         Example:
             >>> from xcookie.main import *  # NOQA
@@ -1414,37 +1547,30 @@ class TemplateApplier:
             >>>     'interactive': False,
             >>> }
             >>> config = XCookieConfig.cli(argv=0, data=kwargs)
-            >>> #config.__post_init__()
             >>> print('config = {}'.format(ub.urepr(dict(config), nl=1)))
             >>> self = TemplateApplier(config)
             >>> self._build_template_registry()
-            >>> info = [d for d in self.template_infos if d['fname'] == 'setup.py'][0]
             >>> info = [d for d in self.template_infos if d['fname'] == '.gitlab-ci.yml'][0]
             >>> self._stage_file(info)
         """
-        # print('info = {!r}'.format(info))
-        tags = info.get('tags', None)
-        if tags:
-            tags = set(tags.split(','))
-            if not set(self.config['tags']).issuperset(tags):
-                raise SkipFile
+        info = TemplateInfo.coerce(info)
+        if not info.tag_requirements_met(self.tags):
+            raise SkipFile
 
-        path_name = info['fname']
-        path_type = info.get('path_type', 'file')
+        path_name = info.fname
+        path_type = info.path_type
 
         stage_fpath = self.staging_dpath / path_name
-        info['stage_fpath'] = stage_fpath
-        info['repo_fpath'] = self.repodir / path_name
-        info['path_type'] = path_type
+        info.stage_fpath = stage_fpath
+        info.repo_fpath = self.repodir / path_name
+        info.path_type = path_type
         if path_type == 'dir':
             stage_fpath.ensuredir()
         else:
             stage_fpath.parent.ensuredir()
-            dynamic = (
-                info.get('dynamic', '') or info.get('source', '') == 'dynamic'
-            )
+            dynamic = info.dynamic or info.source == 'dynamic'
             if dynamic:
-                dynamic_var = info.get('dynamic', '')
+                dynamic_var = info.dynamic
                 if dynamic_var == '':
                     text = self.lut(info)
                 else:
@@ -1453,13 +1579,13 @@ class TemplateApplier:
                     raise SkipFile('file was disabled')
                 try:
                     stage_fpath.write_text(text)
-                    if 'x' in info.get('perms', ''):
+                    if 'x' in info.perms:
                         stage_fpath.chmod('+x')
                 except Exception:
                     print(f'text={text}')
                     raise
             else:
-                in_fname = info.get('input_fname', path_name)
+                in_fname = info.input_fname or path_name
                 raw_fpath = self.template_dpath / in_fname
                 if not raw_fpath.exists():
                     raise IOError(
@@ -1469,30 +1595,10 @@ class TemplateApplier:
 
                 self._apply_xcookie_directives(stage_fpath)
 
-                if info['template']:
-                    xdev.sedfile(
-                        stage_fpath, 'xcookie', self.repo_name, verbose=0
-                    )
-                    xdev.sedfile(
-                        stage_fpath, '<mod_name>', self.mod_name, verbose=0
-                    )
-                    xdev.sedfile(
-                        stage_fpath,
-                        '<rel_mod_dpath>',
-                        str(self.rel_mod_dpath),
-                        verbose=0,
-                    )
-                    # FIXME: use configuration from pyproject.toml
-                    author = ub.cmd('git config --global user.name')[
-                        'out'
-                    ].strip()
-                    author_email = ub.cmd('git config --global user.email')[
-                        'out'
-                    ].strip()
-                    xdev.sedfile(stage_fpath, '<AUTHOR>', author, verbose=0)
-                    xdev.sedfile(
-                        stage_fpath, '<AUTHOR_EMAIL>', author_email, verbose=0
-                    )
+                if info.template:
+                    text = stage_fpath.read_text()
+                    text = apply_template_context(text, self.template_context)
+                    stage_fpath.write_text(text)
 
         # Probably inefficient.
         if stage_fpath.name.endswith('.py'):
@@ -1577,7 +1683,7 @@ class TemplateApplier:
                         value = tags_satisfied(directive, tags)
                         if value:
                             action = uncomment_line
-                            print(f'action={action}')
+                            # print(f'action={action}')
                             did_work = 1
                     if action is not None:
                         # print(f'directive.name={directive.name}')
@@ -1602,40 +1708,21 @@ class TemplateApplier:
             else:
                 self.staging_infos.append(info)
 
-        if 1:
-            import pandas as pd
-
-            # print('self.staging_infos = {}'.format(ub.urepr(self.staging_infos, nl=1)))
-            df = pd.DataFrame(self.staging_infos)
-            print(df)
-
-    def gather_tasks(self):
-        tasks = {
-            'copy': [],
-            'perms': [],
-            'mkdir': [],
-        }
-        stats = {
-            'missing': [],
-            'modified': [],
-            'dirty': [],
-            'clean': [],
-            'missing_dir': [],
-        }
-
-        if self.config['regen'] is not None:
-            regen_pat = xdev.Pattern.coerce(self.config['regen'])
-        else:
-            regen_pat = None
-
-        if self.config['only_generate'] is not None:
-            import kwutil
-
-            onlygen_pat = kwutil.MultiPattern.coerce(
-                self.config['only_generate']
+        if self.config.get('verbose', 0) > 2:
+            print(
+                'self.staging_infos = {}'.format(
+                    ub.urepr(
+                        [info.to_dict() for info in self.staging_infos],
+                        nl=1,
+                    )
+                )
             )
-        else:
-            onlygen_pat = None
+
+    def gather_tasks(self) -> PatchPlan:
+        plan = PatchPlan()
+
+        regen_pat = SearchPattern.coerce(self.config.get('regen'))
+        onlygen_pat = SearchPattern.coerce(self.config.get('only_generate'))
 
         diff_style = 'unified'
         for info in self.staging_infos:
@@ -1644,15 +1731,15 @@ class TemplateApplier:
             if info.get('skip', False):
                 continue
             if onlygen_pat is not None:
-                if not onlygen_pat.match(info['fname']):
+                if not onlygen_pat.matches(info['fname']):
                     continue
             if not repo_fpath.exists():
                 if stage_fpath.is_dir():
-                    tasks['mkdir'].append(repo_fpath)
-                    stats['missing_dir'].append(repo_fpath)
+                    plan.add_mkdir(repo_fpath)
+                    plan.missing_dir.append(repo_fpath)
                 else:
-                    stats['missing'].append(repo_fpath)
-                    tasks['copy'].append((stage_fpath, repo_fpath))
+                    plan.missing.append(repo_fpath)
+                    plan.add_copy(stage_fpath, repo_fpath)
                     stage_text = stage_fpath.read_text()
                     # TODO: add style when available
                     try:
@@ -1676,9 +1763,7 @@ class TemplateApplier:
                             )
                             + '...and more'
                         )
-                    print(f'<NEW FPATH={repo_fpath}>')
-                    print(difftext)
-                    print(f'<END FPATH={repo_fpath}>')
+                    plan.diff_texts[repo_fpath] = difftext
             else:
                 assert stage_fpath.exists()
                 if stage_fpath.is_dir():
@@ -1706,19 +1791,17 @@ class TemplateApplier:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:
                         if regen_pat is not None:
-                            if regen_pat.search(os.fspath(info['fname'])):
+                            if regen_pat.matches(info['fname']):
                                 want_rewrite = True
 
                     if want_rewrite:
-                        tasks['copy'].append((stage_fpath, repo_fpath))
-                        stats['dirty'].append(repo_fpath)
-                        print(f'<DIFF FOR repo_fpath={repo_fpath}>')
-                        print(difftext)
-                        print(f'<END DIFF repo_fpath={repo_fpath}>')
+                        plan.add_copy(stage_fpath, repo_fpath)
+                        plan.dirty.append(repo_fpath)
+                        plan.diff_texts[repo_fpath] = difftext
                     else:
-                        stats['modified'].append(repo_fpath)
+                        plan.modified.append(repo_fpath)
                 else:
-                    stats['clean'].append(repo_fpath)
+                    plan.clean.append(repo_fpath)
 
             if 'x' in info.get('perms', ''):
                 import stat
@@ -1727,14 +1810,18 @@ class TemplateApplier:
                     st = ub.Path(info['repo_fpath']).stat()
                     mode_want = st.st_mode | stat.S_IEXEC
                     if mode_want != st.st_mode:
-                        tasks['perms'].append((info['repo_fpath'], mode_want))
+                        plan.add_perm(info['repo_fpath'], mode_want)
                 # else:
-                #     tasks['perms'].append((info['repo_fpath'], mode_want))
+                #     plan.add_perm(info['repo_fpath'], mode_want)
 
-        print('stats = {}'.format(ub.urepr(stats, nl=2)))
-        return stats, tasks
+        return plan
+
+    def render_patch_plan(self, plan: PatchPlan) -> None:
+        render_patch_plan(plan)
 
     def build_requirements_txt(self):
+        if self.config['use_pyproject_requirements']:
+            return None
         # existing = (self.repodir / 'requirements').ls()
         candidate_all_requirements = [
             'requirements/runtime.txt',
@@ -1772,6 +1859,79 @@ class TemplateApplier:
             )
             # ub.cmd('make html', verbose=3, check=True, cwd=docs_dpath)
 
+    def _github_org_environ(self):
+        """
+        Resolve which org-specific GitHub environ-export function to use.
+
+        The GitHub upload functions read backend-specific secret-variable
+        names from dev/secrets_configuration.sh, which differ per account
+        (e.g. erotemic vs pyutils). Prefer an explicit org tag; otherwise
+        infer the account from the GitHub remote owner.
+        """
+        tags = self.config['tags']
+        if 'erotemic' in tags:
+            return 'setup_package_environs_github_erotemic'
+        if 'pyutils' in tags:
+            return 'setup_package_environs_github_pyutils'
+
+        # No explicit org tag: infer the account from the github remote owner.
+        owner_to_environ = {
+            'erotemic': 'setup_package_environs_github_erotemic',
+            'pyutils': 'setup_package_environs_github_pyutils',
+        }
+        owner = None
+        url = self.config.get('url', None)
+        if isinstance(url, str) and 'github' in url:
+            # https://github.com/<owner>/<repo>
+            parts = url.split('github.com/', 1)[-1].strip('/').split('/')
+            if parts and parts[0]:
+                owner = parts[0].lower()
+        environ = owner_to_environ.get(owner) if owner is not None else None
+        if environ is None:
+            raise Exception(
+                'Cannot determine which GitHub org secret-config to use for '
+                'the github backend. Add an org tag (e.g. "erotemic" or '
+                f'"pyutils") to tags, or extend _github_org_environ for '
+                f'owner={owner!r}.'
+            )
+        return environ
+
+    def _secret_rotation_backends(self):
+        """
+        Determine which CI backends to rotate secrets for, based on tags.
+
+        Returns a list of backend descriptors. A repo may target more than
+        one backend (e.g. both github and gitlab).
+        """
+        tags = self.config['tags']
+        backends = []
+
+        if {'github', 'erotemic', 'pyutils'} & set(tags):
+            backends.append({
+                'name': 'github',
+                'environ_export': self._github_org_environ(),
+                'upload_secret_cmd': 'upload_github_secrets',
+                'gpg_upload_cmd': 'upload_github_gpg_secrets',
+                'is_github': True,
+            })
+
+        if {'gitlab', 'kitware'} & set(tags):
+            backends.append({
+                'name': 'gitlab',
+                'environ_export': 'setup_package_environs_gitlab_kitware',
+                'upload_secret_cmd': 'upload_gitlab_repo_secrets',
+                'gpg_upload_cmd': 'upload_gitlab_gpg_secrets',
+                'is_github': False,
+            })
+
+        if not backends:
+            raise Exception(
+                'No known CI backend in tags; expected one of '
+                '{github, erotemic, pyutils, gitlab, kitware}. '
+                f'Got tags={tags!r}'
+            )
+        return backends
+
     def rotate_secrets(self):
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
         enable_gpg = self.config['enable_gpg']
@@ -1783,22 +1943,13 @@ class TemplateApplier:
         )
         use_direct_gpg = ci_gpg_transport == 'direct_ci'
 
-        if 'erotemic' in self.config['tags']:
-            environ_export = 'setup_package_environs_github_erotemic'
-            upload_secret_cmd = 'upload_github_secrets'
-            gpg_upload_cmd = 'upload_github_gpg_secrets'
-        elif 'pyutils' in self.config['tags']:
-            environ_export = 'setup_package_environs_github_pyutils'
-            upload_secret_cmd = 'upload_github_secrets'
-            gpg_upload_cmd = 'upload_github_gpg_secrets'
-        elif 'kitware' in self.config['tags']:
-            environ_export = 'setup_package_environs_gitlab_kitware'
-            upload_secret_cmd = 'upload_gitlab_repo_secrets'
-            gpg_upload_cmd = 'upload_gitlab_gpg_secrets'
-        else:
-            raise Exception
-
-        is_github = self.remote_info.get('type') == 'github'
+        # A repo can target more than one backend (e.g. kwconf mirrors to
+        # both github.com and gitlab.kitware.com). Build the list of backends
+        # to rotate secrets for, rather than picking a single one by tag
+        # priority. Each backend runs its own environ_export immediately
+        # before its uploads, because the export commands overwrite
+        # dev/secrets_configuration.sh with backend-specific VARNAME_* values.
+        backends = self._secret_rotation_backends()
 
         import cmd_queue
 
@@ -1806,75 +1957,91 @@ class TemplateApplier:
             cwd=self.repodir, backend='serial', log=False
         )
         script.submit(f'source {setup_secrets_fpath}', log=False)
-        script.sync().submit(f'{environ_export}', log=False)
-        script.sync().submit('source $(secret_loader.sh)', log=False)
+        # Secret env vars (CI_SECRET, TWINE_PASSWORD, PRIVATE_GITLAB_TOKEN,
+        # ...) must already be exported in the parent shell — they're
+        # inherited by the bash subprocess. We do not source any user-side
+        # secret_loader: that previously relied on `load_secrets` being a
+        # function in ~/.bashrc, which doesn't survive into a non-login
+        # bash. Each setup_secrets.sh upload function now validates its
+        # required env vars and fails clearly if anything is missing.
 
-        # Step 1: export GPG material to repo (encrypted_repo) or upload
-        # directly to CI provider (direct_ci).
-        if enable_gpg:
-            if use_direct_gpg:
-                script.sync().submit(gpg_upload_cmd, log=False)
-            else:
-                script.sync().submit(
-                    'export_encrypted_code_signing_keys', log=False
-                )
+        for backend in backends:
+            environ_export = backend['environ_export']
+            upload_secret_cmd = backend['upload_secret_cmd']
+            gpg_upload_cmd = backend['gpg_upload_cmd']
+            is_github = backend['is_github']
 
-        # Step 2: upload non-GPG secrets (Twine, push token, CI_SECRET).
-        # Skip entirely when trusted publishing + GitHub + (no GPG or direct
-        # GPG): OIDC covers PyPI auth and GPG material is already uploaded.
-        skip_non_gpg = (
-            use_trusted_publishing
-            and is_github
-            and (not enable_gpg or use_direct_gpg)
-        )
-
-        if skip_non_gpg:
             script.sync().submit(
-                'echo "Trusted publishing + direct GPG (or no GPG):'
-                ' no additional CI secrets to upload."',
+                f'echo "===== Rotating secrets for {backend["name"]}'
+                ' backend ====="',
                 log=False,
             )
-        elif use_trusted_publishing and is_github:
-            # encrypted_repo + trusted publishing: CI_SECRET goes to
-            # deployment environments so the GPG decrypt step can access it.
-            script.sync().submit(
-                f'{upload_secret_cmd} trusted_publishing', log=False
+            script.sync().submit(f'{environ_export}', log=False)
+
+            # Step 1: export GPG material to repo (encrypted_repo) or upload
+            # directly to CI provider (direct_ci).
+            if enable_gpg:
+                if use_direct_gpg:
+                    script.sync().submit(gpg_upload_cmd, log=False)
+                else:
+                    script.sync().submit(
+                        'export_encrypted_code_signing_keys', log=False
+                    )
+
+            # Step 2: upload non-GPG secrets (Twine, push token, CI_SECRET).
+            # Skip entirely when trusted publishing + GitHub + (no GPG or
+            # direct GPG): OIDC covers PyPI auth and GPG material is already
+            # uploaded.
+            skip_non_gpg = (
+                use_trusted_publishing
+                and is_github
+                and (not enable_gpg or use_direct_gpg)
             )
-        elif use_direct_gpg:
-            # direct_ci + non-trusted publishing: upload Twine credentials
-            # (environment-scoped); CI_SECRET is not uploaded.
-            script.sync().submit(
-                f'{upload_secret_cmd} direct_gpg', log=False
-            )
-        else:
-            # encrypted_repo + non-trusted: full legacy upload (Twine +
-            # CI_SECRET, all repo-level).
-            script.sync().submit(f'{upload_secret_cmd}', log=False)
+
+            if skip_non_gpg:
+                script.sync().submit(
+                    'echo "Trusted publishing + direct GPG (or no GPG):'
+                    ' no additional CI secrets to upload."',
+                    log=False,
+                )
+            elif use_trusted_publishing and is_github:
+                # encrypted_repo + trusted publishing: CI_SECRET goes to
+                # deployment environments so the GPG decrypt step can access
+                # it.
+                script.sync().submit(
+                    f'{upload_secret_cmd} trusted_publishing', log=False
+                )
+            elif use_direct_gpg:
+                # direct_ci + non-trusted publishing: upload Twine credentials
+                # (environment-scoped); CI_SECRET is not uploaded.
+                script.sync().submit(
+                    f'{upload_secret_cmd} direct_gpg', log=False
+                )
+            else:
+                # encrypted_repo + non-trusted: full legacy upload (Twine +
+                # CI_SECRET, all repo-level).
+                script.sync().submit(f'{upload_secret_cmd}', log=False)
+
+            # encrypted_repo transport writes GPG material into the working
+            # tree; for that mode the export only needs to happen once, but
+            # re-running it per backend is harmless and keeps the per-backend
+            # blocks self-contained.
 
         script.rprint()
         if self.config.confirm('Ready to rotate secrets?'):
-            script.run(system=True, mode='bash')
-
-    def print_help_tips(self):
-        text = ub.codeblock(
-            f"""
-            Things that xcookie might eventually do that you should do for
-            yourself for now:
-
-            * Add typing to the module
-
-                # xdev requires the non-binary mypy
-                pip install -U mypy --no-binary :all:
-
-                # Generate stubs and check them
-                xdev docstubs ./{self.rel_mod_dpath} && mypy ./{self.rel_mod_dpath}
-
-                # Then make sure you have typed = true in the [tool.xcookie]
-                # section of pyproject.toml and regenerate setup.py
-
-            """
-        )
-        print(text)
+            # Bypass `script.run()` so we can drop cmd_queue's per-command
+            # `set -x` / `{ set +x; } 2>/dev/null` wrappers (with_gaurds).
+            # Those would re-enable xtrace inside every secret-handling
+            # function body and trace the tokens / GPG material. The script
+            # provides its own progress visibility via the `_log` helper in
+            # setup_secrets.sh.
+            import subprocess
+            text = script.finalize_text(with_gaurds=False)
+            proc = subprocess.run(
+                ['bash', '-c', text], cwd=str(self.repodir)
+            )
+            if proc.returncode != 0:
+                raise SystemExit(proc.returncode)
 
     def build_readthedocs(self):
         """
@@ -2017,6 +2184,73 @@ class TemplateApplier:
         )
         return text
 
+    def build_refresh_locks_sh(self):
+        """Build ``dev/refresh_locks.sh``.
+
+        The script regenerates ``uv.lock`` from ``pyproject.toml`` and re-exports
+        the ``requirements/locks/<extras>.txt`` files referenced by the strict
+        CI variants in the active CI plan.  Generated content is deterministic:
+        one ``uv export`` invocation per unique extras combo.
+        """
+        from xcookie.builders import common_ci, ci_plan
+
+        plan = common_ci.make_ci_plan(self)
+        strict_variants = list(
+            plan.iter_active_variants(['minimal-strict', 'full-strict'])
+        )
+
+        # Deduplicate by ordered extras so the same combo isn't re-exported
+        # twice when minimal-strict and full-strict happen to collapse.
+        seen_extras: set[tuple[str, ...]] = set()
+        combos: list[tuple[str, ...]] = []
+        for variant in strict_variants:
+            key = tuple(variant.extras)
+            if key in seen_extras:
+                continue
+            seen_extras.add(key)
+            combos.append(key)
+
+        export_blocks: list[str] = []
+        for extras in combos:
+            out_path = ci_plan.lock_requirements_path(extras)
+            label = ', '.join(extras) if extras else 'runtime'
+            # Build the export command line-by-line so indentation is exact
+            # regardless of how the surrounding script is dedented.
+            lines = [
+                f'# Strict CI variant extras: {label}',
+                'uv export --frozen --no-emit-project --format requirements.txt --no-hashes \\',
+            ]
+            for extra in extras:
+                lines.append(f'    --extra {extra} \\')
+            lines.append(f'    -o {out_path}')
+            export_blocks.append('\n'.join(lines))
+
+        if not export_blocks:
+            # Defensive: should not happen because the registry entry is gated
+            # on uses_lockfile_ci, but emit something safe if it does.
+            export_blocks.append('# No strict CI variants are active.')
+
+        header = ub.codeblock(
+            """
+            #!/usr/bin/env bash
+            # Regenerate uv.lock and the pinned lock files in requirements/locks/.
+            #
+            # Run this whenever a dependency in pyproject.toml changes so the
+            # strict CI variants install the same versions you tested locally.
+            #
+            # This script is generated by xcookie; see
+            # xcookie/main.py:build_refresh_locks_sh.  Manual edits will be
+            # overwritten on the next regeneration.
+            set -euo pipefail
+
+            cd "$(dirname "$0")/.."
+
+            uv lock
+            """
+        )
+        body = '\n\n'.join(export_blocks)
+        return header + '\n\n' + body + '\n'
+
     def build_run_linter(self):
         text = ub.codeblock(
             f"""
@@ -2056,6 +2290,8 @@ class TemplateApplier:
 
     # TODO: generate better stub requirements based on common packages
     def build_optional_requirements(self):
+        if self.config['use_pyproject_requirements']:
+            return None
         text = ub.codeblock(
             """
             """
@@ -2063,6 +2299,8 @@ class TemplateApplier:
         return text
 
     def build_runtime_requirements(self):
+        if self.config['use_pyproject_requirements']:
+            return None
         text = ub.codeblock(
             """
             """
@@ -2070,6 +2308,8 @@ class TemplateApplier:
         return text
 
     def build_tests_requirements(self):
+        if self.config['use_pyproject_requirements']:
+            return None
         text = ub.codeblock(
             """
             xdoctest >= 1.1.5
@@ -2284,15 +2524,19 @@ class TemplateApplier:
             )
         elif fname == '__init__.py':
             mkinit_target = ub.Path(info['repo_fpath']).as_posix()
+            version = metadata_text(self.config['version'])
+            author = metadata_text(self.config['author'])
+            author_email = metadata_text(self.config['author_email'])
+            url = metadata_text(self.config['url'])
             return ub.codeblock(
                 f'''
                 """
                 Basic
                 """
-                __version__ = '{self.config['version']}'
-                __author__ = '{self.config['author']}'
-                __author_email__ = '{self.config['author_email']}'
-                __url__ = '{self.config['url']}'
+                __version__ = {version!r}
+                __author__ = {author!r}
+                __author_email__ = {author_email!r}
+                __url__ = {url!r}
 
                 __mkinit__ = """
                 mkinit {mkinit_target}
@@ -2302,7 +2546,8 @@ class TemplateApplier:
         else:
             raise KeyError(fname)
 
-    def _docs_quickstart():
+    @staticmethod
+    def _docs_quickstart() -> None:
         # Probably just need to copy/paste the conf.py
         r"""
 
@@ -2355,12 +2600,7 @@ class TemplateApplier:
 
 
 def main():
-    XCookieConfig.main(
-        argv={
-            'strict': True,
-            'autocomplete': True,
-        }
-    )
+    XCookieConfig.main(argv=True, strict=True, autocomplete=True)
 
 
 def _parse_remote_url(url):

@@ -1,19 +1,124 @@
+from __future__ import annotations
+
+from typing import (
+    Any,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    Sequence,
+    TypeAlias,
+    cast,
+)
+
 import ubelt as ub
 
-from xcookie.builders import common_ci
+from xcookie.builders import ci_model, common_ci
+from xcookie.builders.action_versions import ACTION_VERSIONS
+from xcookie.builders.ci_plan import CIPlan
 from xcookie.util_yaml import Yaml
-from typing import TypeAlias, MutableMapping, MutableSequence, Mapping, Sequence
-
 
 # Type alias for json / yaml data structure
 JSON_Terminal: TypeAlias = str | int | float | bool | None
-JSON_MutableSequence: TypeAlias = MutableSequence["JSON_Mutable"]
-JSON_MutableMapping: TypeAlias = MutableMapping[str, "JSON_Mutable"]
-JSON_Mutable: TypeAlias = JSON_Terminal | JSON_MutableSequence | JSON_MutableMapping
+JSON_MutableSequence: TypeAlias = MutableSequence['JSON_Mutable']
+JSON_MutableMapping: TypeAlias = MutableMapping[str, 'JSON_Mutable']
+JSON_Mutable: TypeAlias = (
+    JSON_Terminal | JSON_MutableSequence | JSON_MutableMapping
+)
 
-JSON_Sequence: TypeAlias = Sequence["JSON"]
-JSON_Mapping: TypeAlias = Mapping[str, "JSON"]
+JSON_Sequence: TypeAlias = Sequence['JSON']
+JSON_Mapping: TypeAlias = Mapping[str, 'JSON']
 JSON: TypeAlias = JSON_Terminal | JSON_Sequence | JSON_Mapping
+
+
+class GitHubActionsRenderer:
+    """Render GitHub Actions workflows from a provider-neutral CI plan."""
+
+    def __init__(self, applier, plan: CIPlan | None = None):
+        self.applier = applier
+        self.plan = plan if plan is not None else common_ci.make_ci_plan(applier)
+
+    def render_default(self) -> str:
+        """Render the default GitHub workflow.
+
+        The historical default workflow is the test workflow.  Keep that policy
+        here so module-level wrappers are thin aliases around the renderer.
+        """
+        return self.render_tests()
+
+    def render_tests(self) -> str:
+        name, jobs = _collect_test_jobs(self.applier, self.plan)
+        defaultbranch = self.applier.config['defaultbranch']
+        run_on_branches = ub.oset([defaultbranch, 'main'])
+        run_on_branches_str = ', '.join(run_on_branches)
+        on_lines = f"""
+        push:
+          # Restricting push triggers to the default branch avoids running
+          # the whole pipeline twice (push + pull_request events) for every
+          # push to a PR branch. Feature branches are covered by the
+          # pull_request trigger; release branches and tags are handled by
+          # release.yml.
+          branches: [ {run_on_branches_str} ]
+        pull_request:
+          branches: [ {run_on_branches_str} ]
+        """
+        concurrency_lines = """
+        group: ${{ github.workflow }}-${{ github.ref }}
+        # Superseded runs on the same ref are cancelled; deploy-bearing refs
+        # never trigger this workflow (release.yml owns them).
+        cancel-in-progress: true
+        """
+        return _render_workflow_text(
+            name,
+            on_lines,
+            jobs,
+            footer='',
+            concurrency_lines=concurrency_lines,
+        )
+
+    def render_release(self) -> str:
+        name, jobs, release_build_needs = _collect_release_jobs(
+            self.applier, self.plan
+        )
+
+        if self.applier.config['deploy']:
+            jobs['test_deploy'] = build_deploy(
+                self.applier, mode='test', needs=release_build_needs
+            )
+            jobs['live_deploy'] = build_deploy(
+                self.applier, mode='live', needs=release_build_needs
+            )
+            jobs['release'] = build_github_release(
+                self.applier, needs=['live_deploy']
+            )
+
+        # Only refs that can actually deploy trigger the release workflow:
+        # test_deploy fires on pushes to the default branch, and
+        # live_deploy/release fire on release branches and tags. An
+        # unfiltered `push:` would run the (expensive) sdist/wheel build
+        # jobs on every push to every branch and then deploy nothing.
+        defaultbranch = self.applier.config['defaultbranch']
+        release_branches = ub.oset([defaultbranch, 'main'])
+        release_branches_str = ', '.join(
+            list(release_branches) + ["'release*'"]
+        )
+        on_lines = f"""
+        push:
+          branches: [ {release_branches_str} ]
+          tags: [ '*' ]
+        workflow_dispatch:
+        """
+        footer = _build_github_footer(self.applier)
+        return _render_workflow_text(name, on_lines, jobs, footer=footer)
+
+
+def _action_ref(name: str) -> str:
+    """Return the pinned GitHub Action ref for an ``owner/repo`` name."""
+    return f'{name}@{ACTION_VERSIONS[name]}'
+
+
+def _version_assign_command(applier, varname: str = 'VERSION') -> str:
+    """Return a shell command that assigns the project version."""
+    return common_ci.make_project_version_assignment(applier, varname)
 
 
 class Actions:
@@ -43,8 +148,8 @@ class Actions:
     """
 
     action_versions = {
-        'checkout': 'actions/checkout@v3',
-        'setup-python': 'actions/setup-python@v5',
+        'checkout': _action_ref('actions/checkout'),
+        'setup-python': _action_ref('actions/setup-python'),
     }
 
     @classmethod
@@ -99,7 +204,7 @@ class Actions:
     @classmethod
     def checkout(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
-            {'name': 'Checkout source', 'uses': 'actions/checkout@v6.0.2'},
+            {'name': 'Checkout source', 'uses': _action_ref('actions/checkout')},
             *args,
             **kwargs,
         )
@@ -107,7 +212,7 @@ class Actions:
     @classmethod
     def setup_python(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
-            {'name': 'Setup Python', 'uses': 'actions/setup-python@v5.6.0'},
+            {'name': 'Setup Python', 'uses': _action_ref('actions/setup-python')},
             *args,
             **kwargs,
         )
@@ -120,7 +225,7 @@ class Actions:
         """
         return cls.action(
             {
-                'uses': 'codecov/codecov-action@v5.5.2',
+                'uses': _action_ref('codecov/codecov-action'),
             },
             *args,
             **kwargs,
@@ -157,7 +262,7 @@ class Actions:
     def upload_artifact(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
             {
-                'uses': 'actions/upload-artifact@v6.0.0'
+                'uses': _action_ref('actions/upload-artifact')
                 # Rollback to 3.x due to
                 # https://github.com/actions/upload-artifact/issues/478
                 # todo: migrate
@@ -172,7 +277,7 @@ class Actions:
     def download_artifact(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
             {
-                'uses': 'actions/download-artifact@v4.1.8',
+                'uses': _action_ref('actions/download-artifact'),
                 # 'uses': 'actions/download-artifact@v2.1.1',
             },
             *args,
@@ -218,7 +323,7 @@ class Actions:
         return cls.action(
             {
                 'name': name,
-                'uses': 'ilammy/msvc-dev-cmd@v1',
+                'uses': _action_ref('ilammy/msvc-dev-cmd'),
             },
             *args,
             **kwargs,
@@ -238,7 +343,7 @@ class Actions:
         return cls.action(
             {
                 'name': 'Set up QEMU',
-                'uses': 'docker/setup-qemu-action@v3.7.0',
+                'uses': _action_ref('docker/setup-qemu-action'),
             },
             *args,
             **kwargs,
@@ -258,7 +363,7 @@ class Actions:
         return cls.action(
             {
                 'name': 'Install Xcode',
-                'uses': 'maxim-lobanov/setup-xcode@v1',
+                'uses': _action_ref('maxim-lobanov/setup-xcode'),
             },
             *args,
             **kwargs,
@@ -270,7 +375,7 @@ class Actions:
         return cls.action(
             {
                 'name': 'Set up IPFS',
-                'uses': 'ibnesayeed/setup-ipfs@0.6.0',
+                'uses': _action_ref('ibnesayeed/setup-ipfs'),
                 'with': {
                     'ipfs_version': '0.14.0',
                     'run_daemon': True,
@@ -318,14 +423,14 @@ class Actions:
                 # 'uses': 'pypa/cibuildwheel@v2.16.2',
                 # 'uses': 'pypa/cibuildwheel@v2.17.0',
                 # 'uses': 'pypa/cibuildwheel@v2.21.0',
-                'uses': 'pypa/cibuildwheel@v3.3.1',
+                'uses': _action_ref('pypa/cibuildwheel'),
             },
             *args,
             **kwargs,
         )
 
 
-def _render_workflow_text(name, on_lines, jobs, footer=''):
+def _render_workflow_text(name, on_lines, jobs, footer='', concurrency_lines=None):
     workflow_kind = 'release' if name.endswith('Release') else 'tests'
     header = ub.codeblock(
         f"""
@@ -340,29 +445,110 @@ def _render_workflow_text(name, on_lines, jobs, footer=''):
     ).rstrip()
 
     on_text = ub.indent(ub.codeblock(on_lines).strip(), '  ')
+    concurrency_text = ''
+    if concurrency_lines:
+        concurrency_text = '\n\nconcurrency:\n' + ub.indent(
+            ub.codeblock(concurrency_lines).strip(), '  '
+        )
 
     walker = ub.IndexableWalker(jobs)
-    for p, v in walker:
+    for p, v in walker:  # type: ignore
         k = p[-1]
         if k == 'run' and isinstance(v, list):
             walker[p] = '\n'.join(v)
 
     body = {'jobs': jobs}
-    text = header + '\n\non:\n' + on_text + '\n\n' + Yaml.dumps(body) + '\n\n' + footer
+    text = (
+        header
+        + '\n\non:\n'
+        + on_text
+        + concurrency_text
+        + '\n\n'
+        + Yaml.dumps(body)
+        + '\n\n'
+        + footer
+    )
     return text
+
+
+def _normalize_cibuildwheel_skip_selector(selector: str) -> str:
+    selector = selector.strip()
+    if not selector:
+        return selector
+    if '{' not in selector and '}' not in selector:
+        return selector
+    if selector.count('{') != selector.count('}'):
+        raise ValueError(f'Unbalanced cibuildwheel skip selector: {selector!r}')
+    if selector.count('{') != 1 or selector.count('}') != 1:
+        raise ValueError(
+            f'Unsupported cibuildwheel skip selector: {selector!r}'
+        )
+    lpos = selector.index('{')
+    rpos = selector.index('}')
+    if rpos < lpos:
+        raise ValueError(
+            f'Unsupported cibuildwheel skip selector: {selector!r}'
+        )
+    inner = selector[lpos + 1 : rpos]
+    if not inner or '{' in inner or '}' in inner:
+        raise ValueError(
+            f'Unsupported cibuildwheel skip selector: {selector!r}'
+        )
+    options = [part.strip() for part in inner.split(',') if part.strip()]
+    if not options:
+        raise ValueError(
+            f'Unsupported cibuildwheel skip selector: {selector!r}'
+        )
+    if len(options) == 1:
+        return selector[:lpos] + options[0] + selector[rpos + 1 :]
+    return selector
+
+
+def _normalize_cibuildwheel_skip_string(skip: str) -> str:
+    if not skip:
+        return skip
+    parts = [
+        _normalize_cibuildwheel_skip_selector(part) for part in skip.split()
+    ]
+    return ' '.join(parts)
+
+
+def _matrix_needs_qemu(matrix: Mapping[str, JSON]) -> bool:
+    arches: list[JSON] = []
+
+    matrix_arches = matrix.get('arch', None)
+    if isinstance(matrix_arches, Sequence) and not isinstance(
+        matrix_arches, (str, bytes)
+    ):
+        matrix_arches = cast(Sequence[JSON], matrix_arches)
+        arches.extend(matrix_arches)
+
+    matrix_include = matrix.get('include', None)
+    if isinstance(matrix_include, Sequence) and not isinstance(
+        matrix_include, (str, bytes)
+    ):
+        include_items = cast(Sequence[Mapping[str, JSON]], matrix_include)
+        for item in include_items:
+            if 'arch' in item:
+                arches.append(item['arch'])
+
+    return any(str(arch) != 'auto' for arch in arches)
 
 
 def _build_github_footer(self):
     use_trusted_publishing = self.config.get(
         'ci_pypi_trusted_publishing', False
     )
-    ci_gpg_transport = self.config.get('ci_gpg_secret_transport', 'encrypted_repo')
+    ci_gpg_transport = self.config.get(
+        'ci_gpg_secret_transport', 'encrypted_repo'
+    )
     use_direct_gpg = ci_gpg_transport == 'direct_ci'
     enable_gpg = self.config['enable_gpg']
 
     if use_trusted_publishing:
-        from packaging.utils import canonicalize_name
         from urllib.parse import quote
+
+        from packaging.utils import canonicalize_name
 
         host = self.remote_info.get('host', 'https://github.com')
         group = self.remote_info.get('group', '<OWNER>')
@@ -471,8 +657,8 @@ def _build_github_footer(self):
             """
         )
 
-        footer = ub.indent(footer_text, "# ").rstrip()
-        footer = "###\n" + footer
+        footer = ub.indent(footer_text, '# ').rstrip()
+        footer = '###\n' + footer
         footer_lines = [line.strip() for line in footer.splitlines()]
 
         if 'erotemic' in self.tags:
@@ -556,10 +742,12 @@ def _build_github_footer(self):
     return footer
 
 
-def _collect_test_jobs(self):
+def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     jobs = Yaml.Dict({})
     if self.config.linter:
-        jobs['lint_job'] = lint_job(self)
+        jobs['lint_job'] = lint_job(self, plan=plan)
         jobs['lint_job'].yaml_set_start_comment(
             ub.codeblock(
                 """
@@ -575,10 +763,15 @@ def _collect_test_jobs(self):
 
     if 'purepy' in self.tags:
         name = 'PurePyCI'
+        workflow_plan = ci_model.make_purepy_workflow_plan(
+            self, plan=plan, provider='github'
+        )
         purepy_jobs = Yaml.Dict({})
-        if 'nosrcdist' not in self.tags:
-            purepy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
-            purepy_jobs['build_and_test_sdist'].yaml_set_start_comment(
+        if workflow_plan.sdist_job_key is not None:
+            purepy_jobs[workflow_plan.sdist_job_key] = build_and_test_sdist_job(
+                self, plan=plan
+            )
+            purepy_jobs[workflow_plan.sdist_job_key].yaml_set_start_comment(
                 ub.codeblock(
                     """
                 ##
@@ -590,14 +783,18 @@ def _collect_test_jobs(self):
                 indent=4,
             )
 
-        purepy_jobs['build_purepy_wheels'] = Yaml.Dict(
+        purepy_jobs[workflow_plan.wheel_build_job_key] = Yaml.Dict(
             build_purewheel_job(self)
         )
-        purepy_jobs['test_purepy_wheels'] = Yaml.Dict(
-            test_wheels_job(self, needs=['build_purepy_wheels'])
+        purepy_jobs[workflow_plan.artifact_test_job_key] = Yaml.Dict(
+            test_wheels_job(
+                self,
+                needs=[workflow_plan.wheel_build_job_key],
+                plan=plan,
+            )
         )
 
-        purepy_jobs['build_purepy_wheels'].yaml_set_start_comment(
+        purepy_jobs[workflow_plan.wheel_build_job_key].yaml_set_start_comment(
             ub.codeblock(
                 """
             ##
@@ -608,7 +805,7 @@ def _collect_test_jobs(self):
             ),
             indent=4,
         )
-        purepy_jobs['test_purepy_wheels'].yaml_set_start_comment(
+        purepy_jobs[workflow_plan.artifact_test_job_key].yaml_set_start_comment(
             ub.codeblock(
                 """
             ##
@@ -623,10 +820,15 @@ def _collect_test_jobs(self):
         jobs.update(purepy_jobs)
     elif 'binpy' in self.tags:
         name = 'BinPyCI'
+        workflow_plan = ci_model.make_binpy_workflow_plan(
+            self, plan=plan, provider='github'
+        )
         binpy_jobs = Yaml.Dict({})
-        if 'nosrcdist' not in self.tags:
-            binpy_jobs['build_and_test_sdist'] = build_and_test_sdist_job(self)
-            binpy_jobs['build_and_test_sdist'].yaml_set_start_comment(
+        if workflow_plan.sdist_job_key is not None:
+            binpy_jobs[workflow_plan.sdist_job_key] = build_and_test_sdist_job(
+                self, plan=plan
+            )
+            binpy_jobs[workflow_plan.sdist_job_key].yaml_set_start_comment(
                 ub.codeblock(
                     """
                 ##
@@ -638,14 +840,18 @@ def _collect_test_jobs(self):
                 indent=4,
             )
 
-        binpy_jobs['build_binpy_wheels'] = Yaml.Dict(
+        binpy_jobs[workflow_plan.wheel_build_job_key] = Yaml.Dict(
             build_binpy_wheels_job(self)
         )
-        binpy_jobs['test_binpy_wheels'] = Yaml.Dict(
-            test_wheels_job(self, needs=['build_binpy_wheels'])
+        binpy_jobs[workflow_plan.artifact_test_job_key] = Yaml.Dict(
+            test_wheels_job(
+                self,
+                needs=[workflow_plan.wheel_build_job_key],
+                plan=plan,
+            )
         )
 
-        binpy_jobs['build_binpy_wheels'].yaml_set_start_comment(
+        binpy_jobs[workflow_plan.wheel_build_job_key].yaml_set_start_comment(
             ub.codeblock(
                 """
             ##
@@ -657,7 +863,7 @@ def _collect_test_jobs(self):
             ),
             indent=4,
         )
-        binpy_jobs['test_binpy_wheels'].yaml_set_start_comment(
+        binpy_jobs[workflow_plan.artifact_test_job_key].yaml_set_start_comment(
             ub.codeblock(
                 """
             ##
@@ -676,7 +882,9 @@ def _collect_test_jobs(self):
     return name, jobs
 
 
-def _collect_release_jobs(self):
+def _collect_release_jobs(self, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     jobs = Yaml.Dict({})
     release_build_needs = []
 
@@ -698,9 +906,7 @@ def _collect_release_jobs(self):
             )
             release_build_needs.append('build_sdist')
 
-        jobs['build_purepy_wheels'] = Yaml.Dict(
-            build_purewheel_job(self)
-        )
+        jobs['build_purepy_wheels'] = Yaml.Dict(build_purewheel_job(self))
         jobs['build_purepy_wheels'].yaml_set_start_comment(
             ub.codeblock(
                 """
@@ -753,45 +959,21 @@ def _collect_release_jobs(self):
 
 def build_github_actions(self):
     # Backwards-compatible wrapper for older call sites.
-    return build_github_actions_tests(self)
+    return GitHubActionsRenderer(self).render_default()
 
 
 def build_github_actions_tests(self):
-    name, jobs = _collect_test_jobs(self)
-    defaultbranch = self.config['defaultbranch']
-    run_on_branches = ub.oset([defaultbranch, 'main'])
-    run_on_branches_str = ', '.join(run_on_branches)
-    on_lines = f"""
-    push:
-    pull_request:
-      branches: [ {run_on_branches_str} ]
-    """
-    return _render_workflow_text(name, on_lines, jobs, footer='')
+    return GitHubActionsRenderer(self).render_tests()
 
 
 def build_github_actions_release(self):
-    name, jobs, release_build_needs = _collect_release_jobs(self)
+    return GitHubActionsRenderer(self).render_release()
 
-    if self.config['deploy']:
-        jobs['test_deploy'] = build_deploy(
-            self, mode='test', needs=release_build_needs
-        )
-        jobs['live_deploy'] = build_deploy(
-            self, mode='live', needs=release_build_needs
-        )
-        jobs['release'] = build_github_release(self, needs=['live_deploy'])
 
-    on_lines = """
-    push:
-    workflow_dispatch:
-    """
-    footer = _build_github_footer(self)
-    return _render_workflow_text(name, on_lines, jobs, footer=footer)
-
-def lint_job(self):
+def lint_job(self, plan: CIPlan | None = None):
     supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
-    job = {
+    job: dict[str, Any] = {
         'runs-on': 'ubuntu-latest',
         'steps': [
             Actions.checkout(),
@@ -827,37 +1009,62 @@ def lint_job(self):
     # TODO: I think we need to install reqs similarly
     # to how we do it in github here?
     if 'notypes' not in self.tags:
-        typecheck_cmds = common_ci.make_typecheck_parts(self)
+        typecheck_cmds = common_ci.make_typecheck_parts(self, plan=plan)
         # GitHub Actions expects a single string for `run` with newlines
         run_text = '\n'.join(typecheck_cmds)
         job['steps'].append({'name': 'Typecheck', 'run': run_text})
     return Yaml.Dict(job)
 
 
-def build_and_test_sdist_job(self):
+def build_and_test_sdist_job(self, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     wheelhouse_dpath = 'wheelhouse'
 
     build_parts = common_ci.make_build_sdist_parts(self, wheelhouse_dpath)
 
+    # Respect an explicitly configured test_command in the sdist test steps;
+    # 'auto' keeps the historical hardcoded invocation. The steps define
+    # MOD_DPATH and MOD_NAME so a configured command can reference them the
+    # same way the wheel-test job does.
+    test_command = self.config['test_command']
+    if test_command == 'auto':
+        sdist_test_commands = [
+            f'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
+        ]
+    else:
+        if isinstance(test_command, str):
+            test_command = [test_command]
+        sdist_test_commands = list(test_command)
+
     if self.config['use_pyproject_requirements']:
-        pip_reqs_install_parts = [
+        # Always include the test extras selected by the shared CI plan so
+        # pytest is available in the sdist test steps below.  The plan filters
+        # against the project's actual optional-dependencies, avoiding invalid
+        # install targets such as ``pip install -e ".[]"``.
+        install_target = common_ci.format_pyproject_install_target(
+            plan.sdist_test_extras, editable=True
+        )
+        pip_reqs_install_parts: list[str] = [
             f'{self.UPDATE_PIP}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} -r pyproject.toml --extra tests',
+            f'{self.PIP_INSTALL_PREFER_BINARY} {install_target}',
         ]
     else:
         pip_reqs_install_parts = [
             f'{self.UPDATE_PIP}',
             f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/tests.txt',
             f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/runtime.txt',
-            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt'
-            if 'cv2' in self.tags
-            else None,
-            f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
-            if 'gdal' in self.tags
-            else None,
         ]
+        if 'cv2' in self.tags:
+            pip_reqs_install_parts.append(
+                f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/headless.txt'
+            )
+        if 'gdal' in self.tags:
+            pip_reqs_install_parts.append(
+                f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
+            )
 
     import kwutil
 
@@ -916,9 +1123,9 @@ def build_and_test_sdist_job(self):
                     '# Get path to installed package',
                     f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
                     'echo "MOD_DPATH = $MOD_DPATH"',
+                    f'MOD_NAME={self.mod_name}',
                     # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
-                    # TODO: change to test command
-                    f'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
+                    *sdist_test_commands,
                     'cd ..',
                 ],
             },
@@ -939,8 +1146,8 @@ def build_and_test_sdist_job(self):
                     '# Get path to installed package',
                     f'MOD_DPATH=$(python -c "import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))")',
                     'echo "MOD_DPATH = $MOD_DPATH"',
-                    # TODO: change to test command
-                    f'python -m pytest --verbose --cov={self.mod_name} $MOD_DPATH ../tests',
+                    f'MOD_NAME={self.mod_name}',
+                    *sdist_test_commands,
                     # 'python -m pytest -p pytester -p no:doctest --xdoctest --cov={self.mod_name} $MOD_DPATH ../tests',
                     # Move coverage file to a new name
                     # 'mv .coverage "../.coverage.$WORKSPACE_DNAME"',
@@ -959,6 +1166,152 @@ def build_and_test_sdist_job(self):
         ],
     }
     return Yaml.Dict(job)
+
+
+_VERSIONLESS_WHEELS_MATRIX_COMMENT = """
+The wheels are python-version independent (e.g. py3-none tags from pure
+ctypes bindings), so a single cibuildwheel build per platform covers every
+supported Python version. Which interpreter performs the build is pinned
+in the [tool.cibuildwheel] section of pyproject.toml.
+"""
+
+
+def _vcpkg_build_support(self, os_list):
+    """
+    Build the shared vcpkg pieces used by binary wheel build jobs.
+
+    Repos tagged with ``vcpkg`` (or ``opencv_link``, which implies vcpkg)
+    compile native dependencies with vcpkg inside cibuildwheel on Windows.
+
+    Returns:
+        Tuple[list, list, dict]: ``(pre_steps, post_steps, cibw_env)`` where
+        the steps bracket the cibuildwheel invocation and ``cibw_env`` is
+        merged into its ``env`` mapping. Every piece is empty when the repo
+        does not use vcpkg.
+    """
+    use_vcpkg = 'vcpkg' in self.tags or 'opencv_link' in self.tags
+    opencv_link = 'opencv_link' in self.tags
+    if 'cv2' in self.tags and 'opencv_link' not in self.tags:
+        assert not opencv_link, (
+            'cv2 is runtime-only and must not imply opencv_link'
+        )
+    if not use_vcpkg:
+        return [], [], {}
+
+    pre_steps = []
+    post_steps = []
+    pre_steps.append(
+        {
+            'name': 'Set vcpkg cache paths (Windows)',
+            'if': "runner.os == 'Windows'",
+            'shell': 'pwsh',
+            'run': ub.codeblock(
+                """
+                "VCPKG_ARCHIVES_DIR=$env:LOCALAPPDATA\\vcpkg\\archives" >> $env:GITHUB_ENV
+                "VCPKG_DOWNLOADS_DIR=C:\\vcpkg\\downloads" >> $env:GITHUB_ENV
+                New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\\vcpkg\\archives" | Out-Null
+                New-Item -ItemType Directory -Force -Path "C:\\vcpkg\\downloads" | Out-Null
+                """
+            ),
+        }
+    )
+    pre_steps.append(
+        {
+            'name': 'Restore vcpkg caches (Windows)',
+            'if': "runner.os == 'Windows'",
+            'id': 'vcpkg-cache',
+            'uses': 'actions/cache/restore@v4',
+            'with': {
+                'path': ub.codeblock(
+                    """
+                    ${{ env.VCPKG_ARCHIVES_DIR }}
+                    ${{ env.VCPKG_DOWNLOADS_DIR }}
+                    """
+                ),
+                'key': "vcpkg-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'CMakeLists.txt', 'setup.py', 'vcpkg.json', 'vcpkg-configuration.json') }}",
+                'restore-keys': ub.codeblock(
+                    """
+                    vcpkg-${{ runner.os }}-
+                    """
+                ),
+            },
+        }
+    )
+    pre_steps.append(
+        {
+            'name': 'Ensure vcpkg (Windows)',
+            'if': "runner.os == 'Windows'",
+            'shell': 'pwsh',
+            'run': ub.codeblock(
+                """
+                if (-not (Test-Path "C:\\vcpkg")) {
+                  git clone https://github.com/microsoft/vcpkg C:\\vcpkg
+                }
+                Set-Location C:\\vcpkg
+                .\\bootstrap-vcpkg.bat -disableMetrics
+                "C:\\vcpkg" | Out-File -FilePath $env:GITHUB_PATH -Append
+                """
+            ),
+        }
+    )
+    if opencv_link:
+        pre_steps.append(
+            {
+                'name': 'Install OpenCV via vcpkg (Windows)',
+                'if': "runner.os == 'Windows'",
+                'shell': 'pwsh',
+                'run': ub.codeblock(
+                    """
+                    vcpkg install opencv4:x64-windows
+                    """
+                ),
+            }
+        )
+    post_steps.append(
+        {
+            'name': 'Save vcpkg caches (Windows, even on failure)',
+            'if': "runner.os == 'Windows' && always()",
+            'uses': 'actions/cache/save@v4',
+            'with': {
+                'path': ub.codeblock(
+                    """
+                    ${{ env.VCPKG_ARCHIVES_DIR }}
+                    ${{ env.VCPKG_DOWNLOADS_DIR }}
+                    """
+                ),
+                'key': '${{ steps.vcpkg-cache.outputs.cache-primary-key }}',
+            },
+        }
+    )
+
+    cibw_env = {}
+    if any('windows' in osname for osname in os_list):
+        cibw_env['CIBW_ARCHS_WINDOWS'] = 'AMD64'
+    env_pairs = [
+        'PYTHONUTF8=1',
+        'VCPKG_ROOT=C:/vcpkg',
+        'VCPKG_TARGET_TRIPLET=x64-windows',
+        'VCPKG_DOWNLOADS=C:/vcpkg/downloads',
+        'PATH=C:/vcpkg;C:/vcpkg/installed/x64-windows/bin;{PATH}',
+    ]
+    if opencv_link:
+        env_pairs += [
+            'OpenCV_DIR=C:/vcpkg/installed/x64-windows/share/opencv4',
+            'OpenCV_ROOT=C:/vcpkg/installed/x64-windows',
+            'CMAKE_PREFIX_PATH=C:/vcpkg/installed/x64-windows',
+            'CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake;-DOpenCV_DIR=C:/vcpkg/installed/x64-windows/share/opencv4',
+        ]
+    else:
+        # Point CMake at the vcpkg toolchain so find_package resolves
+        # vcpkg-installed native deps (e.g. lz4) without repo-specific
+        # workflow customization.
+        env_pairs += [
+            'CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake',
+        ]
+    cibw_env['CIBW_ENVIRONMENT_WINDOWS'] = '\n'.join(env_pairs)
+    cibw_env['VCPKG_ROOT'] = r'C:\vcpkg'
+    cibw_env['VCPKG_TARGET_TRIPLET'] = 'x64-windows'
+    return pre_steps, post_steps, cibw_env
 
 
 def build_binpy_wheels_job(self):
@@ -984,6 +1337,7 @@ def build_binpy_wheels_job(self):
     )
     if isinstance(cibw_skip, list):
         cibw_skip = ' '.join(cibw_skip)
+    cibw_skip = _normalize_cibuildwheel_skip_string(cibw_skip)
     explicit_skips = ' ' + cibw_skip
     print(f'explicit_skips={explicit_skips}')
 
@@ -1004,19 +1358,27 @@ def build_binpy_wheels_job(self):
     else:
         included_runs = []
 
+    versionless = bool(self.config.get('ci_versionless_wheels', False))
+
     matrix = Yaml.Dict({})
-    matrix.yaml_set_start_comment(
-        ub.codeblock(
+    if versionless:
+        matrix.yaml_set_start_comment(
+            ub.codeblock(_VERSIONLESS_WHEELS_MATRIX_COMMENT),
+            indent=8,
+        )
+    else:
+        matrix.yaml_set_start_comment(
+            ub.codeblock(
+                """
+            Normally, xcookie generates explicit lists of platforms to build / test
+            on, but in this case cibuildwheel does that for us, so we need to just
+            set the environment variables for cibuildwheel. These are parsed out of
+            the standard [tool.cibuildwheel] section in pyproject.toml and set
+            explicitly here.
             """
-        Normally, xcookie generates explicit lists of platforms to build / test
-        on, but in this case cibuildwheel does that for us, so we need to just
-        set the environment variables for cibuildwheel. These are parsed out of
-        the standard [tool.cibuildwheel] section in pyproject.toml and set
-        explicitly here.
-        """
-        ),
-        indent=8,
-    )
+            ),
+            indent=8,
+        )
 
     # Seems like we dont need explicit macos-13
     # and it could produce issues:
@@ -1027,18 +1389,24 @@ def build_binpy_wheels_job(self):
 
     matrix['os'] = os_list
 
-    if 'win' in self.config['os']:
-        # Did we need to add the *-win32 here? Maybe have the user use pyproject toml cibw to set if needed?
-        # matrix['cibw_skip'] = [('*-win32' + explicit_skips).strip()]
-        matrix['cibw_skip'] = [explicit_skips.strip()]
-    else:
-        matrix['cibw_skip'] = [explicit_skips.strip()]
+    if not versionless:
+        # Versionless wheels pin their single build (and any skips) in
+        # [tool.cibuildwheel], so the skip matrix dimension only exists for
+        # per-python-version builds.
+        if 'win' in self.config['os']:
+            # Did we need to add the *-win32 here? Maybe have the user use pyproject toml cibw to set if needed?
+            # matrix['cibw_skip'] = [('*-win32' + explicit_skips).strip()]
+            matrix['cibw_skip'] = [explicit_skips.strip()]
+        else:
+            matrix['cibw_skip'] = [explicit_skips.strip()]
     matrix['arch'] = ['auto']
     if included_runs:
         matrix['include'] = included_runs
 
     conditional_actions = []
-    if 'win' in self.config['os']:
+    if 'win' in self.config['os'] and not versionless:
+        # Versionless builds skip msvc-dev-cmd: the single pinned interpreter
+        # build lets the build backend locate MSVC on its own.
         conditional_actions += [
             Actions.msvc_dev_cmd(
                 bits=64,
@@ -1075,12 +1443,10 @@ def build_binpy_wheels_job(self):
     job_steps += [Actions.checkout()]
     job_steps += conditional_actions
 
-    use_vcpkg = 'vcpkg' in self.tags or 'opencv_link' in self.tags
-    opencv_link = 'opencv_link' in self.tags
-    if 'cv2' in self.tags and 'opencv_link' not in self.tags:
-        assert not opencv_link, (
-            'cv2 is runtime-only and must not imply opencv_link'
-        )
+    vcpkg_pre_steps, vcpkg_post_steps, vcpkg_cibw_env = _vcpkg_build_support(
+        self, os_list
+    )
+    use_vcpkg = bool(vcpkg_pre_steps)
 
     USE_ABI3 = False
     if USE_ABI3:
@@ -1092,125 +1458,18 @@ def build_binpy_wheels_job(self):
         )
         abi3_action['env']['CIBW_BUILD'] = 'cp38-*'
 
-    vcpkg_pre_steps = []
-    vcpkg_post_steps = []
-    if use_vcpkg:
-        vcpkg_pre_steps.append(
-            {
-                'name': 'Set vcpkg cache paths (Windows)',
-                'if': "runner.os == 'Windows'",
-                'shell': 'pwsh',
-                'run': ub.codeblock(
-                    """
-                    "VCPKG_ARCHIVES_DIR=$env:LOCALAPPDATA\\vcpkg\\archives" >> $env:GITHUB_ENV
-                    "VCPKG_DOWNLOADS_DIR=C:\\vcpkg\\downloads" >> $env:GITHUB_ENV
-                    New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\\vcpkg\\archives" | Out-Null
-                    New-Item -ItemType Directory -Force -Path "C:\\vcpkg\\downloads" | Out-Null
-                    """
-                ),
-            }
-        )
-        vcpkg_pre_steps.append(
-            {
-                'name': 'Restore vcpkg caches (Windows)',
-                'if': "runner.os == 'Windows'",
-                'id': 'vcpkg-cache',
-                'uses': 'actions/cache/restore@v4',
-                'with': {
-                    'path': ub.codeblock(
-                        """
-                        ${{ env.VCPKG_ARCHIVES_DIR }}
-                        ${{ env.VCPKG_DOWNLOADS_DIR }}
-                        """
-                    ),
-                    'key': "vcpkg-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'CMakeLists.txt', 'setup.py', 'vcpkg.json', 'vcpkg-configuration.json') }}",
-                    'restore-keys': ub.codeblock(
-                        """
-                        vcpkg-${{ runner.os }}-
-                        """
-                    ),
-                },
-            }
-        )
-        vcpkg_pre_steps.append(
-            {
-                'name': 'Ensure vcpkg (Windows)',
-                'if': "runner.os == 'Windows'",
-                'shell': 'pwsh',
-                'run': ub.codeblock(
-                    """
-                    if (-not (Test-Path "C:\\vcpkg")) {
-                      git clone https://github.com/microsoft/vcpkg C:\\vcpkg
-                    }
-                    Set-Location C:\\vcpkg
-                    .\\bootstrap-vcpkg.bat -disableMetrics
-                    "C:\\vcpkg" | Out-File -FilePath $env:GITHUB_PATH -Append
-                    """
-                ),
-            }
-        )
-        if opencv_link:
-            vcpkg_pre_steps.append(
-                {
-                    'name': 'Install OpenCV via vcpkg (Windows)',
-                    'if': "runner.os == 'Windows'",
-                    'shell': 'pwsh',
-                    'run': ub.codeblock(
-                        """
-                        vcpkg install opencv4:x64-windows
-                        """
-                    ),
-                }
-            )
-        vcpkg_post_steps.append(
-            {
-                'name': 'Save vcpkg caches (Windows, even on failure)',
-                'if': "runner.os == 'Windows' && always()",
-                'uses': 'actions/cache/save@v4',
-                'with': {
-                    'path': ub.codeblock(
-                        """
-                        ${{ env.VCPKG_ARCHIVES_DIR }}
-                        ${{ env.VCPKG_DOWNLOADS_DIR }}
-                        """
-                    ),
-                    'key': '${{ steps.vcpkg-cache.outputs.cache-primary-key }}',
-                },
-            }
-        )
-
     cibw_action = Actions.cibuildwheel(sensible=True)
-    if use_vcpkg:
-        env = cibw_action['env']
-        if any('windows' in osname for osname in os_list):
-            env['CIBW_ARCHS_WINDOWS'] = 'AMD64'
-        cibw_env_lines = ub.codeblock(
-            """
-            VCPKG_ROOT=C:/vcpkg
-            VCPKG_TARGET_TRIPLET=x64-windows
-            VCPKG_DOWNLOADS=C:/vcpkg/downloads
-            PATH=C:/vcpkg;C:/vcpkg/installed/x64-windows/bin;{PATH}
-            """
-        )
-        if opencv_link:
-            cibw_env_lines = (
-                cibw_env_lines
-                + '\n'
-                + ub.codeblock(
-                    """
-                    OpenCV_DIR=C:/vcpkg/installed/x64-windows/share/opencv4
-                    OpenCV_ROOT=C:/vcpkg/installed/x64-windows
-                    CMAKE_PREFIX_PATH=C:/vcpkg/installed/x64-windows
-                    CMAKE_ARGS=-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake;-DOpenCV_DIR=C:/vcpkg/installed/x64-windows/share/opencv4
-                    """
-                )
-            )
-        env['CIBW_ENVIRONMENT_WINDOWS'] = cibw_env_lines
-        env['VCPKG_ROOT'] = r'C:\vcpkg'
-        env['VCPKG_TARGET_TRIPLET'] = 'x64-windows'
+    cibw_action['env'].update(vcpkg_cibw_env)
+    if versionless:
+        # The single pinned build (and any skips) lives in
+        # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
+        # runs, so the matrix / msvc related env vars are unnecessary.
+        for _key in ('CIBW_SKIP', 'CIBW_TEST_SKIP', 'VSCMD_ARG_TGT_ARCH'):
+            cibw_action['env'].pop(_key, None)
 
+    if _matrix_needs_qemu(matrix):
+        job_steps += [Actions.setup_qemu(sensible=True)]
     job_steps += [
-        Actions.setup_qemu(sensible=True),
         # abi3_action,
         *vcpkg_pre_steps,
     ]
@@ -1242,38 +1501,46 @@ def build_binpy_wheels_job(self):
             'shell': 'bash',
             'run': 'ls -la wheelhouse',
         },
-        Actions.setup_python(
-            {
-                'name': f'Set up Python {main_python_version} to combine coverage',
-                'if': "runner.os == 'Linux'",
-                'with': {'python-version': main_python_version},
-            }
-        ),
-        Actions.combine_coverage(),
-        # https://github.com/github/docs/issues/6861
-        Actions.codecov_action(
-            Yaml.coerce(
+    ]
+    if not versionless:
+        # Versionless builds run only a quick smoke test inside cibuildwheel;
+        # coverage is collected by the wheel test jobs instead, so there is
+        # nothing to combine or upload here.
+        job_steps += [
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {main_python_version} to combine coverage',
+                    'if': "runner.os == 'Linux'",
+                    'with': {'python-version': main_python_version},
+                }
+            ),
+            Actions.combine_coverage(),
+            # https://github.com/github/docs/issues/6861
+            Actions.codecov_action(
+                Yaml.coerce(
+                    """
+                name: Codecov Upload
+                env:
+                  HAVE_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
+                # Only upload coverage if we have the token
+                if: ${{ env.HAVE_PERSONAL_TOKEN == 'true' }}
+                with:
+                  file: ./coverage.xml
+                  token: ${{ secrets.CODECOV_TOKEN }}
                 """
-            name: Codecov Upload
-            env:
-              HAVE_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
-            # Only upload coverage if we have the token
-            if: ${{ env.HAVE_PERSONAL_TOKEN == 'true' }}
-            with:
-              file: ./coverage.xml
-              token: ${{ secrets.CODECOV_TOKEN }}
-            """
-            )
-        ),
-        Actions.codecov_action(
-            {
-                'name': 'Codecov Upload',
-                'with': {
-                    'file': './coverage.xml',
-                    'token': '${{ secrets.CODECOV_TOKEN }}',
-                },
-            }
-        ),
+                )
+            ),
+            Actions.codecov_action(
+                {
+                    'name': 'Codecov Upload',
+                    'with': {
+                        'file': './coverage.xml',
+                        'token': '${{ secrets.CODECOV_TOKEN }}',
+                    },
+                }
+            ),
+        ]
+    job_steps += [
         Actions.upload_artifact(
             {
                 'name': 'Upload wheels artifact',
@@ -1288,14 +1555,17 @@ def build_binpy_wheels_job(self):
     return job
 
 
-def build_purewheel_job(self):
+def build_purewheel_job(self) -> dict[str, JSON]:
     wheelhouse_dpath = 'wheelhouse'
     supported_platform_info = common_ci.get_supported_platform_info(self)
     # os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
     # pypy_versions = supported_platform_info['pypy_versions']
     job: dict[str, JSON] = {
-        'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
+        # Name the build job distinctly from the artifact-test jobs: this job
+        # never runs tests, and sharing their "{python} on {os} ..." template
+        # made a green build read as a green test run.
+        'name': 'Build wheel ${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }}',
         'runs-on': '${{ matrix.os }}',
         'strategy': {
             'fail-fast': False,
@@ -1310,9 +1580,12 @@ def build_purewheel_job(self):
         'steps': None,
     }
     build_parts = common_ci.make_build_wheel_parts(self, wheelhouse_dpath)
-    job['steps'] = [
+    job_steps = [
         Actions.checkout(),
-        Actions.setup_qemu(sensible=True),
+    ]
+    if _matrix_needs_qemu(job['strategy']['matrix']):  # type: ignore
+        job_steps.append(Actions.setup_qemu(sensible=True))
+    job_steps += [
         Actions.setup_python(
             {'with': {'python-version': '${{ matrix.python-version }}'}}
         ),
@@ -1337,8 +1610,8 @@ def build_purewheel_job(self):
             }
         ),
     ]
+    job['steps'] = job_steps
     return job
-
 
 
 def build_sdist_job(self):
@@ -1392,30 +1665,53 @@ def build_binpy_wheels_release_job(self):
     )
     if isinstance(cibw_skip, list):
         cibw_skip = ' '.join(cibw_skip)
+    cibw_skip = _normalize_cibuildwheel_skip_string(cibw_skip)
     explicit_skips = ' ' + cibw_skip
 
+    versionless = bool(self.config.get('ci_versionless_wheels', False))
+
     matrix = Yaml.Dict({})
-    matrix.yaml_set_start_comment(
-        ub.codeblock(
+    if versionless:
+        matrix.yaml_set_start_comment(
+            ub.codeblock(_VERSIONLESS_WHEELS_MATRIX_COMMENT),
+            indent=8,
+        )
+    else:
+        matrix.yaml_set_start_comment(
+            ub.codeblock(
+                """
+            Normally, xcookie generates explicit lists of platforms to build / test
+            on, but in this case cibuildwheel does that for us, so we need to just
+            set the environment variables for cibuildwheel. These are parsed out of
+            the standard [tool.cibuildwheel] section in pyproject.toml and set
+            explicitly here.
             """
-        Normally, xcookie generates explicit lists of platforms to build / test
-        on, but in this case cibuildwheel does that for us, so we need to just
-        set the environment variables for cibuildwheel. These are parsed out of
-        the standard [tool.cibuildwheel] section in pyproject.toml and set
-        explicitly here.
-        """
-        ),
-        indent=8,
-    )
+            ),
+            indent=8,
+        )
     matrix['os'] = os_list
-    matrix['cibw_skip'] = [explicit_skips.strip()]
+    if not versionless:
+        matrix['cibw_skip'] = [explicit_skips.strip()]
     matrix['arch'] = ['auto']
 
     conditional_actions = []
-    if 'win' in self.config['os']:
+    if 'win' in self.config['os'] and not versionless:
         conditional_actions += [
             Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
         ]
+
+    vcpkg_pre_steps, vcpkg_post_steps, vcpkg_cibw_env = _vcpkg_build_support(
+        self, os_list
+    )
+
+    cibw_action = Actions.cibuildwheel(sensible=True)
+    cibw_action['env'].update(vcpkg_cibw_env)
+    if versionless:
+        # The single pinned build (and any skips) lives in
+        # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
+        # runs, so the matrix / msvc related env vars are unnecessary.
+        for _key in ('CIBW_SKIP', 'CIBW_TEST_SKIP', 'VSCMD_ARG_TGT_ARCH'):
+            cibw_action['env'].pop(_key, None)
 
     job = Yaml.Dict(
         {
@@ -1432,9 +1728,12 @@ def build_binpy_wheels_release_job(self):
     job_steps = []
     job_steps += [Actions.checkout()]
     job_steps += conditional_actions
+    if _matrix_needs_qemu(matrix):
+        job_steps += [Actions.setup_qemu(sensible=True)]
+    job_steps += vcpkg_pre_steps
+    job_steps.append(cibw_action)
+    job_steps += vcpkg_post_steps
     job_steps += [
-        Actions.setup_qemu(sensible=True),
-        Actions.cibuildwheel(sensible=True),
         {
             'name': 'Show built files',
             'shell': 'bash',
@@ -1454,262 +1753,29 @@ def build_binpy_wheels_release_job(self):
     return job
 
 
-def test_wheels_job(self, needs=None):
+
+def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
     wheelhouse_dpath = 'wheelhouse'
-    supported_platform_info = common_ci.get_supported_platform_info(self)
-
-    os_list = supported_platform_info['os_list']
-
-    pyproj_config = self.config._load_pyproject_config()
-
-    cibw_windows_build_arches = (
-        pyproj_config.get('tool', {})
-        .get('cibuildwheel', {})
-        .get('windows', {})
-        .get('archs', None)
+    cases = ci_model.make_artifact_test_cases(
+        self, plan=plan, provider='github'
     )
-    if cibw_windows_build_arches is not None:
-        cibw_windows_build_arches = [
-            _.lower() for _ in cibw_windows_build_arches
-        ]
+    include = [case.github_matrix_item() for case in cases]
 
-        if 'arm64' in cibw_windows_build_arches:
-            # If we are building binaries for arm on windows, then
-            # we need to extend the os_list here to ensure we are testing
-            # on windows arm.
-            os_list = os_list + ['windows-11-arm']
-
-    install_extra_versions = supported_platform_info['install_extra_versions']
-
-    # Map the min/full loose/strict terminology to specific extra packages
-    import ubelt as ub
-
-    from xcookie.util_yaml import Yaml
-
-    special_loose_tags = []
-    if 'cv2' in self.tags:
-        # TODO: can probably have this generate appropriate ci_extras in the
-        # xcookie config?
-        special_loose_tags.append('headless')
-
-    # Parse ci_extras configuration if specified
-    ci_extras = {}
-    if self.config.get('ci_extras'):
-        ci_extras = Yaml.loads(self.config['ci_extras'])
-
-    if self.config['use_pyproject_requirements']:
-        special_strict_tags = [t for t in special_loose_tags]
-        install_extra_tags = ub.udict(
-            {
-                'minimal-loose': ['tests'] + special_loose_tags,
-                'full-loose': ['tests', 'optional'] + special_loose_tags,
-                'minimal-strict': ['tests'] + special_strict_tags,
-                'full-strict': ['tests', 'optional'] + special_strict_tags,
-            }
-        )
-    else:
-        special_strict_tags = [t + '-strict' for t in special_loose_tags]
-        install_extra_tags = ub.udict(
-            {
-                'minimal-loose': ['tests'] + special_loose_tags,
-                'full-loose': ['tests', 'optional'] + special_loose_tags,
-                'minimal-strict': ['tests-strict', 'runtime-strict']
-                + special_strict_tags,
-                'full-strict': [
-                    'tests-strict',
-                    'runtime-strict',
-                    'optional-strict',
-                ]
-                + special_strict_tags,
-            }
-        )
-
-    # Apply ci_extras to the install_extra_tags
-    # ci_extras can specify: 'loose', 'strict', 'minimal-loose', 'full-loose',
-    # 'minimal-strict', 'full-strict'
-    for variant_key, extras_list in ci_extras.items():
-        if variant_key == 'loose':
-            # Apply to all loose variants
-            for key in ['minimal-loose', 'full-loose']:
-                if key in install_extra_tags:
-                    install_extra_tags[key] += extras_list
-        elif variant_key == 'strict':
-            # Apply to all strict variants
-            for key in ['minimal-strict', 'full-strict']:
-                if key in install_extra_tags:
-                    install_extra_tags[key] += extras_list
-        elif variant_key in install_extra_tags:
-            # Apply to specific variant
-            install_extra_tags[variant_key] += extras_list
-
-    install_extras = ub.udict(
-        {k: ','.join(v) for k, v in install_extra_tags.items()}
-    )
-
-    special_strict_test_env = {}
-    special_loose_test_env = {}
-    if 'gdal' in self.tags:
-        special_loose_test_env['gdal-requirement-txt'] = 'requirements/gdal.txt'
-        # TODO: need to have better logic for gdal strict that doesn't require
-        # separate tracked files.
-        # special_strict_test_env['gdal-requirement-txt'] = 'requirements-strict/gdal.txt'
-        special_strict_test_env['gdal-requirement-txt'] = (
-            'requirements/gdal-strict.txt'
-        )
-
-    platform_basis = [{'os': osname, 'arch': 'auto'} for osname in os_list]
-
-    # Reduce the CI load, don't specify the entire product space
-    # arch = 'auto'
-    include = []
-    for platkw in platform_basis:
-        for extra in install_extras.take(['minimal-strict']):
-            for pyver in install_extra_versions['minimal-strict']:
-                item = {
-                    'python-version': pyver,
-                    'install-extras': extra,
-                    **platkw,
-                    **special_strict_test_env,
-                }
-                if self.config['use_pyproject_requirements']:
-                    item['uv-resolution'] = 'lowest-direct'
-                include.append(item)
-
-    for platkw in platform_basis:
-        for extra in install_extras.take(['full-strict']):
-            for pyver in install_extra_versions['full-strict']:
-                item = {
-                    'python-version': pyver,
-                    'install-extras': extra,
-                    **platkw,
-                    **special_strict_test_env,
-                }
-                if self.config['use_pyproject_requirements']:
-                    item['uv-resolution'] = 'lowest-direct'
-                include.append(item)
-
-    for platkw in platform_basis[1:]:
-        for extra in install_extras.take(['minimal-loose']):
-            for pyver in install_extra_versions['minimal-loose']:
-                item = {
-                    'python-version': pyver,
-                    'install-extras': extra,
-                    **platkw,
-                    **special_loose_test_env,
-                }
-                if self.config['use_pyproject_requirements']:
-                    item['uv-resolution'] = 'highest'
-                include.append(item)
-
-    for platkw in platform_basis:
-        for extra in install_extras.take(['full-loose']):
-            for pyver in install_extra_versions['full-loose']:
-                item = {
-                    'python-version': pyver,
-                    'install-extras': extra,
-                    **platkw,
-                    **special_loose_test_env,
-                }
-                if self.config['use_pyproject_requirements']:
-                    item['uv-resolution'] = 'highest'
-                include.append(item)
-
-    # TODO: implement pypy support
-    # pypy_versions = supported_platform_info['pypy_versions']
-    # for platkw in platform_basis:
-    #     for extra in install_extras.take(['full-loose']):
-    #         for pyver in pypy_versions:
-    #             include.append({
-    #                 'python-version': pyver, 'install-extras': extra,
-    #                 **platkw, **special_loose_test_env})
-
-    assert not ub.find_duplicates(map(ub.hash_data, include))
-
-    # Do postprocessing on include items, filtering out ones that aren't
-    # supported.
-    filtered_include = []
-    for item in include:
-        # Available os names:
-        # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
-        if item['python-version'] == '3.6' and item['os'] == 'ubuntu-latest':
-            # This image is no longer supported, and does not work apparently
-            item['os'] = 'ubuntu-20.04'
-            # item['os'] = 'ubuntu-18.04'
-        if item['python-version'] == '3.7' and item['os'] == 'ubuntu-latest':
-            item['os'] = 'ubuntu-22.04'
-        if item['python-version'] == '3.6' and item['os'] == 'macOS-latest':
-            item['os'] = 'macos-13'
-        if item['python-version'] == '3.7' and item['os'] == 'macOS-latest':
-            item['os'] = 'macos-13'
-
-        if item['os'] == 'windows-11-arm' and item['python-version'] in {
-            '3.6',
-            '3.7',
-            '3.8',
-            '3.9',
-            '3.10',
-        }:
-            # cibuildwheel can't target 3.8 on Window ARM64
-            # GitHub doesn't have anything below Python 3.11 on their ARM64
-            # machines, so just test the built wheels from 3.11+
-            continue
-
-        filtered_include.append(item)
-    include = filtered_include
-
-    if True:
-        # hack, todo better specific disable for rc versions
-        # if self.config.mod_name == 'xcookie':
-        #     filtered_include = []
-        #     for item in include:
-        #         flag = True
-        #         if 'rc' in item['python-version']:
-        #             if 'windows' in item['os']:
-        #                 flag = False
-        #         if flag:
-        #             filtered_include.append(item)
-        #     include = filtered_include
-        import re
-        from fnmatch import translate as glob_to_re
-
-        def compile_rules(rules):
-            return [
-                {k: re.compile(glob_to_re(str(pat))) for k, pat in rule.items()}
-                for rule in (rules or ())
-            ]
-
-        def is_blocked_compiled(item, compiled_rules):
-            for crule in compiled_rules:
-                if all(
-                    regex.fullmatch(str(item.get(k, '')))
-                    for k, regex in crule.items()
-                ):
-                    return True
-            return False
-
-        ci_blocklist = Yaml.coerce(self.config.ci_blocklist)
-        compiled = compile_rules(ci_blocklist)
-        include = [
-            it for it in include if not is_blocked_compiled(it, compiled)
-        ]
-
-    condition = "! startsWith(github.event.ref, 'refs/heads/release')"
+    # Note: this job used to be guarded by
+    # ``if: ! startsWith(github.event.ref, 'refs/heads/release')`` but the
+    # tests workflow no longer triggers on release refs at all (release.yml
+    # owns them), so the guard is unnecessary.
     job = Yaml.Dict(
         {
             'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
-            'if': condition,
             'runs-on': '${{ matrix.os }}',
             'needs': [] if needs is None else sorted(needs),
             'strategy': {
                 'fail-fast': False,
                 'matrix': Yaml.Dict(
                     {
-                        # 'os': os_list,
-                        # 'python-version': python_versions_non34,
-                        # 'install-extras': list(install_extras.take(['minimal-loose', 'full-loose'])),
-                        # 'arch': [
-                        #     'auto'
-                        # ],
                         'include': include,
                     }
                 ),
@@ -1728,26 +1794,13 @@ def test_wheels_job(self, needs=None):
         indent=8,
     )
 
-    # if 1:
-    #     # get_modname_python = "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['tool']['xcookie']['mod_name'])"
-    #     # get_modname_bash = f'python -c "{get_modname_python}"'
-
-    #     # get_wheel_fpath_python = f"import pathlib; print(str(sorted(pathlib.Path('{wheelhouse_dpath}').glob('$MOD_NAME*.whl'))[-1]).replace(chr(92), chr(47)))"
-    #     # get_wheel_fpath_bash = f'python -c "{get_wheel_fpath_python}"'
-
-    #     # get_mod_version_python = "from pkginfo import Wheel; print(Wheel('$WHEEL_FPATH').version)"
-    #     # get_mod_version_bash = f'python -c "{get_mod_version_python}"'
-
-    #     # # get_modpath_python = "import ubelt; print(ubelt.modname_to_modpath('${MOD_NAME}'))"
-    #     # get_modpath_python = f"import {self.mod_name}, os; print(os.path.dirname({self.mod_name}.__file__))"
-    #     # get_modpath_bash = f'python -c "{get_modpath_python}"'
-
     install_env = {'INSTALL_EXTRAS': '${{ matrix.install-extras }}'}
-    if self.config['use_pyproject_requirements']:
-        install_env['UV_RESOLUTION'] = '${{ matrix.uv-resolution }}'
+    if common_ci.ci_plan.uses_lockfile_ci(self):
+        install_env['USE_UV_LOCK'] = '${{ matrix.use-lockfile }}'
+        install_env['LOCK_REQUIREMENTS'] = '${{ matrix.lock-requirements }}'
 
     special_install_lines = []
-    if 'gdal' in self.tags:
+    if any(case.gdal_requirement_txt is not None for case in cases):
         install_env['GDAL_REQUIREMENT_TXT'] = (
             '${{ matrix.gdal-requirement-txt }}'
         )
@@ -1779,8 +1832,9 @@ def test_wheels_job(self, needs=None):
         action_steps += [
             Actions.setup_ipfs(),
         ]
+    if ci_model.any_test_case_needs_qemu(cases):
+        action_steps += [Actions.setup_qemu(sensible=True)]
     action_steps += [
-        Actions.setup_qemu(sensible=True),
         Actions.setup_python(
             {'with': {'python-version': '${{ matrix.python-version }}'}}
         ),
@@ -1925,8 +1979,7 @@ def test_wheels_job(self, needs=None):
     job['steps'] = action_steps
     return job
 
-
-def build_deploy(self, mode='live', needs=None):
+def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
     """
     CommandLine:
         xdoctest -m /home/joncrall/code/xcookie/xcookie/builders/github_actions.py build_deploy
@@ -1948,7 +2001,9 @@ def build_deploy(self, mode='live', needs=None):
     use_trusted_publishing = self.config.get(
         'ci_pypi_trusted_publishing', False
     )
-    ci_gpg_transport = self.config.get('ci_gpg_secret_transport', 'encrypted_repo')
+    ci_gpg_transport = self.config.get(
+        'ci_gpg_secret_transport', 'encrypted_repo'
+    )
     use_direct_gpg = ci_gpg_transport == 'direct_ci'
     live_pass_varname = self.config['ci_pypi_live_password_varname']
     test_pass_varname = self.config['ci_pypi_test_password_varname']
@@ -1962,14 +2017,20 @@ def build_deploy(self, mode='live', needs=None):
                 {
                     'TWINE_REPOSITORY_URL': 'https://upload.pypi.org/legacy/',
                     'TWINE_USERNAME': '__token__',
-                    'TWINE_PASSWORD': '${{ secrets.' + live_pass_varname + ' }}',
+                    'TWINE_PASSWORD': '${{ secrets.'
+                    + live_pass_varname
+                    + ' }}',
                 }
             )
         if enable_gpg:
             if use_direct_gpg:
-                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = (
+                    '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                )
                 env['GPG_PUBLIC_KEY_B64'] = '${{ secrets.GPG_PUBLIC_KEY_B64 }}'
-                env['GPG_OWNER_TRUST_B64'] = '${{ secrets.GPG_OWNER_TRUST_B64 }}'
+                env['GPG_OWNER_TRUST_B64'] = (
+                    '${{ secrets.GPG_OWNER_TRUST_B64 }}'
+                )
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
@@ -1982,14 +2043,20 @@ def build_deploy(self, mode='live', needs=None):
                 {
                     'TWINE_REPOSITORY_URL': 'https://test.pypi.org/legacy/',
                     'TWINE_USERNAME': '__token__',
-                    'TWINE_PASSWORD': '${{ secrets.' + test_pass_varname + ' }}',
+                    'TWINE_PASSWORD': '${{ secrets.'
+                    + test_pass_varname
+                    + ' }}',
                 }
             )
         if enable_gpg:
             if use_direct_gpg:
-                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                env['GPG_SECRET_SIGNING_SUBKEY_B64'] = (
+                    '${{ secrets.GPG_SECRET_SIGNING_SUBKEY_B64 }}'
+                )
                 env['GPG_PUBLIC_KEY_B64'] = '${{ secrets.GPG_PUBLIC_KEY_B64 }}'
-                env['GPG_OWNER_TRUST_B64'] = '${{ secrets.GPG_OWNER_TRUST_B64 }}'
+                env['GPG_OWNER_TRUST_B64'] = (
+                    '${{ secrets.GPG_OWNER_TRUST_B64 }}'
+                )
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
@@ -2006,11 +2073,11 @@ def build_deploy(self, mode='live', needs=None):
         repo_name = self.remote_info['repo_name']
         repo_suffix = f'{group}/{repo_name}'  # NOQA
         # https://github.com/orgs/community/discussions/25217
-        is_not_fork_condition = (
-            "github.event.pull_request.head.repo.full_name == '"
-            + repo_suffix
-            + "'"
-        )
+        # is_not_fork_condition = (
+        #     "github.event.pull_request.head.repo.full_name == '"
+        #     + repo_suffix
+        #     + "'"
+        # )
         # Note: disabling because this does not seem to work?
         is_not_fork_condition = None
     else:
@@ -2060,7 +2127,7 @@ def build_deploy(self, mode='live', needs=None):
                 """IMPORTED_FPR=$($GPG_EXECUTABLE --list-keys --with-colons "$GPG_KEYID" | awk -F: '/^fpr/ { print $10; exit }')""",
                 'if [[ "$IMPORTED_FPR" != "$GPG_KEYID" ]]; then echo "ERROR: imported GPG fingerprint $IMPORTED_FPR does not match pinned $GPG_KEYID"; exit 1; fi',
                 'echo "GPG fingerprint verified: $IMPORTED_FPR"',
-                'VERSION=$(python -c "import setup; print(setup.VERSION)")',
+                _version_assign_command(self),
                 f'{self.UPDATE_PIP}',
                 f'{self.SYSTEM_PIP_INSTALL} packaging twine -U',
                 f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security]',
@@ -2081,7 +2148,7 @@ def build_deploy(self, mode='live', needs=None):
                 '$GPG_EXECUTABLE --list-keys || true',
                 '$GPG_EXECUTABLE --list-keys  || echo "first invocation of gpg creates directories and returns 1"',
                 '$GPG_EXECUTABLE --list-keys',
-                'VERSION=$(python -c "import setup; print(setup.VERSION)")',
+                _version_assign_command(self),
                 f'{self.UPDATE_PIP}',
                 f'{self.SYSTEM_PIP_INSTALL} packaging twine -U',
                 f'{self.SYSTEM_PIP_INSTALL} urllib3 requests[security]',
@@ -2184,7 +2251,11 @@ def build_deploy(self, mode='live', needs=None):
     ]
 
     if run:
-        if enable_gpg and self.config['deploy_pypi'] and not use_trusted_publishing:
+        if (
+            enable_gpg
+            and self.config['deploy_pypi']
+            and not use_trusted_publishing
+        ):
             step_name = 'Sign and Publish'
         elif enable_gpg:
             step_name = 'Sign distributions'
@@ -2199,7 +2270,7 @@ def build_deploy(self, mode='live', needs=None):
         ]
 
     if self.config['deploy_pypi'] and use_trusted_publishing:
-        publish_with = {
+        publish_with: dict[str, JSON] = {
             'packages-dir': publish_dist_dpath,
             'skip-existing': True,
         }
@@ -2211,7 +2282,7 @@ def build_deploy(self, mode='live', needs=None):
                 'name': 'Prepare publish directory',
                 'shell': 'bash',
                 'run': ub.codeblock(
-                    f'''
+                    f"""
                     mkdir -p {publish_dist_dpath}
                     shopt -s nullglob
                     for FPATH in {wheelhouse_dpath}/*.whl {wheelhouse_dpath}/*.tar.gz {wheelhouse_dpath}/*.zip
@@ -2219,7 +2290,7 @@ def build_deploy(self, mode='live', needs=None):
                         cp "$FPATH" {publish_dist_dpath}/
                     done
                     ls -la {publish_dist_dpath}
-                    '''
+                    """
                 ),
             },
             {
@@ -2312,15 +2383,44 @@ def build_github_release(self, needs=None):
         f'{wheelhouse_dpath}/*.tar.gz',
     ]
 
+    release_meta_action = {
+        'name': 'Resolve Release Tag',
+        'id': 'release_meta',
+        'shell': 'bash',
+        'run': ub.codeblock(
+            f"""
+            export {_version_assign_command(self)}
+            echo "VERSION=$VERSION"
+            test -n "$VERSION" || {{ echo "failed to parse version" ; exit 1; }}
+            TAG="v$VERSION"
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+                EVENT_TAG="${{GITHUB_REF#refs/tags/}}"
+                TAG="$EVENT_TAG"
+            fi
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            """
+        ),
+    }
+
     needs_tag_condition = "(startsWith(github.event.ref, 'refs/heads/release'))"
     tag_action = {
         'name': 'Tag Release Commit',
         'if': needs_tag_condition,
+        'shell': 'bash',
         'run': ub.codeblock(
             """
-            export VERSION=$(python -c "import setup; print(setup.VERSION)")
-            git tag "v$VERSION"
-            git push origin "v$VERSION"
+            TAG="${{ steps.release_meta.outputs.tag }}"
+            REMOTE_SHA=$(git ls-remote --refs origin "refs/tags/$TAG" | awk '{print $1}')
+            if [[ -n "$REMOTE_SHA" ]]; then
+                test "$REMOTE_SHA" = "$GITHUB_SHA" || {
+                    echo "$TAG already points to $REMOTE_SHA, not $GITHUB_SHA"
+                    exit 1
+                }
+                echo "$TAG already points to this release commit"
+            else
+                git tag "$TAG" "$GITHUB_SHA"
+                git push origin "refs/tags/$TAG"
+            fi
             """
         ),
     }
@@ -2337,9 +2437,9 @@ def build_github_release(self, needs=None):
         'env': env,
         'with': {
             'body_path': '${{ github.workspace }}-CHANGELOG.txt',
-            'tag_name': '${{ github.ref }}',
-            # 'release_name': 'Release ${{ github.ref }}',
-            'name': 'Release ${{ github.ref }}',
+            'tag_name': '${{ steps.release_meta.outputs.tag }}',
+            'name': 'Release ${{ steps.release_meta.outputs.tag }}',
+            'target_commitish': '${{ github.sha }}',
             'body': 'Automatic Release',
             'generate_release_notes': True,
             'draft': True,  # Maybe keep as a draft until we determine this is ok?
@@ -2368,6 +2468,7 @@ def build_github_release(self, needs=None):
                 'run': 'ls -la wheelhouse',
             },
             write_release_notes_action,
+            release_meta_action,
             tag_action,
             release_action,
         ],

@@ -84,13 +84,30 @@ def parse_description():
         pandoc --from=markdown --to=rst --output=README.rst README.md
         python -c "import setup; print(setup.parse_description())"
     """
-    readme_fpath = join(dirname(__file__), 'README.rst')
+    readme_fpath = get_readme_fpath()
     # This breaks on pip install, so check that it exists.
     if exists(readme_fpath):
         with open(readme_fpath, 'r') as f:
             text = f.read()
         return text
     return ''
+
+
+def get_readme_fpath():
+    """
+    Prefer Markdown if it already exists, otherwise fall back to reST.
+    """
+    readme_md_fpath = join(dirname(__file__), 'README.md')
+    if exists(readme_md_fpath):
+        return readme_md_fpath
+    return join(dirname(__file__), 'README.rst')
+
+
+def readme_content_type():
+    readme_fpath = get_readme_fpath()
+    if readme_fpath.endswith('.md'):
+        return 'text/markdown'
+    return 'text/x-rst'
 
 
 def parse_requirements(fname='requirements.txt', versions=False):
@@ -274,7 +291,7 @@ if __name__ == '__main__':
         description=('The xcookie Module'),
         long_description=parse_description(),
         long_description_content_type='text/x-rst',
-        license='Apache 2',
+        license='Apache-2.0',
         packages=find_packages('.'),
         python_requires='>=3.7',
         classifiers=[

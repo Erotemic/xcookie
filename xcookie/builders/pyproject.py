@@ -1,5 +1,173 @@
+import json
+import tempfile
+
 import toml
 import ubelt as ub
+
+from xcookie.util.util_metadata import coerce_author_entries
+
+
+# Default rolling window for the ``[tool.uv] exclude-newer`` supply-chain
+# guard. ``uv`` accepts ISO 8601 durations, so ``P7D`` means "ignore packages
+# published in the last 7 days" -- this keeps the guard from going stale the
+# way a hard-coded absolute date would.
+DEFAULT_UV_EXCLUDE_NEWER = 'P7D'
+
+
+def _resolve_uv_exclude_newer(self, pyproj_config):
+    """Decide the ``[tool.uv] exclude-newer`` value to write.
+
+    The supply-chain guard tells ``uv lock`` to ignore packages published
+    too recently. Behavior:
+
+    * ``False``/``None`` → disable (do not emit the setting).
+    * ``'auto'`` → preserve any existing value on disk; otherwise use the
+      relative default :data:`DEFAULT_UV_EXCLUDE_NEWER`.
+    * any other string → use verbatim (e.g. a relative ``'30 days'`` /
+      ``'P30D'`` window, or a fixed ``'2026-05-22'`` date).
+    """
+    configured = self.config.get('uv_exclude_newer', 'auto')
+    if configured in (False, None, 'false', 'False', 'off'):
+        return None
+
+    existing = (
+        pyproj_config.get('tool', {})
+        .get('uv', {})
+        .get('exclude-newer')
+    )
+    if configured == 'auto':
+        if existing:
+            return existing
+        return DEFAULT_UV_EXCLUDE_NEWER
+    return str(configured)
+
+
+def _autodictify(value):
+    if isinstance(value, dict) and not isinstance(value, ub.AutoDict):
+        return ub.AutoDict({k: _autodictify(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return [_autodictify(v) for v in value]
+    return value
+
+
+# Common free-text license names mapped to SPDX identifiers.  PEP 639 (and
+# setuptools >= 77) require the ``project.license`` field to be a string
+# containing a valid SPDX expression rather than the older ``{text = ...}``
+# table form.
+_SPDX_LICENSE_ALIASES = {
+    'Apache 2': 'Apache-2.0',
+    'Apache 2.0': 'Apache-2.0',
+    'Apache2': 'Apache-2.0',
+    'BSD-3': 'BSD-3-Clause',
+    'BSD3': 'BSD-3-Clause',
+    'MIT': 'MIT',
+    'GPL3': 'GPL-3.0-only',
+}
+
+
+def _coerce_spdx_license(value: str) -> str:
+    """Coerce a configured license value into a valid SPDX expression."""
+    return _SPDX_LICENSE_ALIASES.get(value, value)
+
+
+def _build_xcookie_tool_config(self, pyproj_config):
+    """Build the ``[tool.xcookie]`` block without leaking inferred defaults.
+
+    ``XCookieConfig`` is resolved before builders run, so values such as
+    ``version='0.0.1'``, ``pkg_name=mod_name``, and ``os=['linux', 'osx',
+    'win']`` may be present even when the user never wrote them in
+    ``pyproject.toml``.  Persisting those values creates noisy diffs and, in
+    the case of ``version``, can produce stale metadata next to a dynamic
+    PEP 621 version declaration.
+    """
+    existing_tool = pyproj_config.get('tool', {}).get('xcookie', {}) or {}
+    existing_keys = set(existing_tool.keys())
+
+    options_to_save = [
+        'tags',
+        'mod_name',
+        'repo_name',
+        'pkg_name',
+        'rel_mod_parent_dpath',
+        'os',
+        'min_python',
+        'version',
+        'url',
+        'author',
+        'author_email',
+        'description',
+        'license',
+        'dev_status',
+        'typed',
+        'remote_host',
+        'remote_group',
+        'use_setup_py',
+        'use_pyproject_requirements',
+    ]
+    raw_config = ub.udict(ub.dict_subset(self.config, options_to_save))
+
+    # Start with the explicit on-disk settings so nested user config such as
+    # entry_points, package_data, and ci_blocklist survives regeneration.
+    config_to_save = ub.udict(existing_tool)
+
+    always_save = {
+        'tags',
+        'mod_name',
+        'repo_name',
+        'min_python',
+        'url',
+        'author',
+        'author_email',
+        'description',
+        'typed',
+        'use_setup_py',
+        'use_pyproject_requirements',
+    }
+
+    default_os = {'linux', 'osx', 'win'}
+
+    for key, value in raw_config.items():
+        if value is None:
+            continue
+
+        should_save = key in always_save or key in existing_keys
+
+        if key == 'pkg_name':
+            # ``pkg_name`` is derived from ``mod_name`` unless explicitly
+            # customized.  Avoid rewriting redundant defaults.
+            should_save = should_save or value != self.config['mod_name']
+        elif key == 'rel_mod_parent_dpath':
+            should_save = should_save or value not in {'.', ''}
+        elif key == 'os':
+            os_values = set(value) if not isinstance(value, str) else {value}
+            should_save = should_save or os_values != default_os
+        elif key == 'version':
+            # Do not introduce the resolver's placeholder version.  If a
+            # project already has a real or dynamic PEP 621 version, that is
+            # the authoritative source.  Preserve explicit tool.xcookie
+            # versions for backwards compatibility.
+            should_save = key in existing_keys and value != '0.0.1'
+        elif key == 'license':
+            should_save = should_save or value not in {
+                'Apache 2',
+                'Apache 2.0',
+                'Apache-2.0',
+            }
+        elif key == 'dev_status':
+            should_save = should_save or value != 'planning'
+        elif key in {'remote_host', 'remote_group'}:
+            # These are usually inferred from the URL and need not be persisted
+            # unless the user explicitly had them on disk already.
+            should_save = key in existing_keys
+
+        if should_save:
+            config_to_save[key] = value
+        elif key in config_to_save:
+            # If a previously explicit value has become the default, leave it
+            # alone rather than deleting user-authored config.
+            pass
+
+    return dict(config_to_save)
 
 
 def build_pyproject(self):
@@ -7,25 +175,33 @@ def build_pyproject(self):
     Returns:
         str: templated code
     """
-    # data = toml.loads((self.template_dpath / 'pyproject.toml').read_text())
-    # print('data = {}'.format(ub.urepr(data, nl=5)))
-    pyproj_config = ub.AutoDict()
+    # Start from the existing pyproject.toml when available so unrelated
+    # sections survive a regen.
+    pyproj_config = _autodictify(self.config._load_pyproject_config() or {})
     use_setup_py = self.config.get('use_setup_py', True)
     pyproject_settings = self.config._load_xcookie_pyproject_settings()
     if pyproject_settings is None:
         pyproject_settings = {}
     # {'tool': {}}
     if 'binpy' in self.config['tags']:
-        pyproj_config['build-system']['requires'] = [
-            'setuptools>=41.0.1',
-            # setuptools_scm[toml]
-            # "wheel",
-            'scikit-build>=0.11.1',
-            'numpy',
-            'ninja>=1.10.2',
-            'cmake>=3.21.2',
-            'cython>=0.29.24',
-        ]
+        build_system_requires = list(
+            pyproj_config['build-system'].get('requires') or []
+        )
+        build_system_requires.extend(
+            [
+                'setuptools>=77',
+                # setuptools_scm[toml]
+                # "wheel",
+                'scikit-build>=0.11.1',
+                'numpy',
+                'ninja>=1.10.2',
+                'cmake>=3.21.2',
+                'cython>=0.29.24',
+            ]
+        )
+        pyproj_config['build-system']['requires'] = list(
+            ub.oset(build_system_requires)
+        )
 
         supported_cp_version = []
         for pyver in self.config['supported_python_versions']:
@@ -39,12 +215,21 @@ def build_pyproject(self):
         if 'cv2' in self.config['tags']:
             test_extras += ['headless-strict']
 
+        skip_tokens = ['pp*', '*-musllinux_*']
+        if 'win' in self.config['os']:
+            for pyver in self.config['supported_python_versions']:
+                pyver_parts = tuple(int(p) for p in str(pyver).split('.')[:2])
+                if pyver_parts < (3, 11):
+                    skip_tokens.append(
+                        'cp' + str(pyver).replace('.', '') + '-win_arm64'
+                    )
+
         pyproj_config['tool']['cibuildwheel'].update(
             {
                 'build': ' '.join(wheel_build_patterns),
                 'build-frontend': 'build',
                 # 'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
-                'skip': 'pp* *-musllinux_*',
+                'skip': ' '.join(ub.oset(skip_tokens)),
                 'build-verbosity': 1,
                 # 'test-requires': ["-r requirements/tests.txt"],
                 'test-extras': test_extras,
@@ -69,12 +254,29 @@ def build_pyproject(self):
                 cmd = ' && '.join(req_commands[plat])
                 cibw[plat]['before-all'] = cmd
     else:
-        pyproj_config['build-system']['requires'] = [
-            'setuptools>=41.0.1',
-            # setuptools_scm[toml]
-            # "wheel>=0.37.1",
-        ]
-        pyproj_config['build-system']['build-backend'] = 'setuptools.build_meta'
+        build_system_requires = list(
+            pyproj_config['build-system'].get('requires') or []
+        )
+        build_system_requires.extend(
+            [
+                'setuptools>=77',
+                # setuptools_scm[toml]
+                # "wheel>=0.37.1",
+            ]
+        )
+        pyproj_config['build-system']['requires'] = list(
+            ub.oset(build_system_requires)
+        )
+        pyproj_config['build-system'].setdefault(
+            'build-backend', 'setuptools.build_meta'
+        )
+
+    if self.config.get('use_uv'):
+        exclude_newer = _resolve_uv_exclude_newer(self, pyproj_config)
+        if exclude_newer:
+            tool_uv = pyproj_config['tool'].get('uv') or {}
+            tool_uv['exclude-newer'] = exclude_newer
+            pyproj_config['tool']['uv'] = tool_uv
 
     WITH_PYTEST_INI = 1
     if WITH_PYTEST_INI:
@@ -133,70 +335,50 @@ def build_pyproject(self):
 
     WITH_XCOOKIE = 1
     if WITH_XCOOKIE:
-        options_to_save = [
-            'tags',
-            'mod_name',
-            'repo_name',
-            'pkg_name',
-            'rel_mod_parent_dpath',
-            'os',
-            'min_python',
-            'version',
-            'url',
-            'author',
-            'author_email',
-            'description',
-            'license',
-            'dev_status',
-            'typed',
-            'remote_host',
-            'remote_group',
-            'use_setup_py',
-        ]
-        config_to_save = ub.dict_subset(self.config, options_to_save)
-        pyproj_config['tool']['xcookie'].update(config_to_save)
+        pyproj_config['tool']['xcookie'] = _build_xcookie_tool_config(
+            self, pyproj_config
+        )
+
+    use_pyproject_requirements = self.config.get('use_pyproject_requirements')
 
     if not use_setup_py:
         project_block = pyproj_config['project']
         project_block['name'] = self.config['pkg_name']
         project_block['description'] = self.config['description']
         project_block['requires-python'] = f'>={self.config["min_python"]}'
-        project_block['dynamic'] = [
-            'version',
-            'dependencies',
-            'optional-dependencies',
-        ]
+        dynamic_entries = list(project_block.get('dynamic', []))
+        dynamic_entries.append('version')
+        if not use_pyproject_requirements:
+            dynamic_entries.extend(['dependencies', 'optional-dependencies'])
+        project_block['dynamic'] = list(ub.oset(dynamic_entries))
+        project_block.pop('version', None)
+        if not use_pyproject_requirements:
+            for key in ['dependencies', 'optional-dependencies']:
+                project_block.pop(key, None)
 
-        authors = self.config['author']
-        author_emails = self.config['author_email']
-        author_entries = []
-        if authors:
-            if not isinstance(authors, (list, tuple)):
-                authors = [authors]
-            if not isinstance(author_emails, (list, tuple)):
-                author_emails = [author_emails] if author_emails else []
-            for idx, name in enumerate(authors):
-                entry = {'name': name}
-                if idx < len(author_emails) and author_emails[idx]:
-                    entry['email'] = author_emails[idx]
-                elif isinstance(author_emails, str) and idx == 0:
-                    entry['email'] = author_emails
-                author_entries.append(entry)
+        author_entries = coerce_author_entries(
+            self.config['author'], self.config['author_email']
+        )
         if author_entries:
             project_block['authors'] = author_entries
 
         project_block['classifiers'] = self._project_classifiers()
         if self.config['license']:
-            project_block['license'] = {'text': self.config['license']}
-        if self.config['url']:
-            project_block['urls'] = {'Homepage': str(self.config['url'])}
-        if self.config['tags']:
-            project_block['keywords'] = sorted(
-                {tag for tag in self.config['tags'] if tag}
+            # PEP 639: ``license`` is a string SPDX expression; license files
+            # are listed separately under ``license-files``.
+            project_block['license'] = _coerce_spdx_license(
+                self.config['license']
             )
+            project_block['license-files'] = ['LICENSE']
+        if self.config['url']:
+            urls = project_block.get('urls', {})
+            urls['Homepage'] = str(self.config['url'])
+            project_block['urls'] = urls
 
         setuptools_block = pyproj_config['tool']['setuptools']
         setuptools_block['include-package-data'] = True
+        if isinstance(setuptools_block.get('packages'), list):
+            setuptools_block['packages'] = ub.AutoDict()
         setuptools_block['packages']['find']['where'] = [
             self.config['rel_mod_parent_dpath']
         ]
@@ -212,7 +394,7 @@ def build_pyproject(self):
         package_data = setuptools_block['package-data']
         package_data['*'] = ['requirements/*.txt']
         if self.config['typed']:
-            package_data[self.mod_name] = ['py.typed', '*.pyi']
+            package_data[self.mod_name] = ['py.typed']
         for key, value in pyproject_settings.get('package_data', {}).items():
             normalized_key = '*' if key == '' else key
             package_data[normalized_key] = value
@@ -221,24 +403,58 @@ def build_pyproject(self):
         setuptools_dynamic['version'] = {
             'attr': f'{self.config["mod_name"]}.__version__'
         }
+        readme_fpath = self._readme_fpath()
         setuptools_dynamic['readme'] = {
-            'file': ['README.rst'],
-            'content-type': 'text/x-rst',
+            'file': [readme_fpath.name],
+            'content-type': self._readme_content_type(),
         }
-        setuptools_dynamic['dependencies'] = {
-            'file': ['requirements/runtime.txt']
-        }
+        if not use_pyproject_requirements:
+            setuptools_dynamic['dependencies'] = {
+                'file': ['requirements/runtime.txt']
+            }
 
-        extras = ['tests', 'optional', 'docs']
-        if 'cv2' in self.tags:
-            extras.extend(['headless', 'graphics'])
-        if 'postgresql' in self.tags:
-            extras.append('postgresql')
+            extras = ['tests', 'optional', 'docs']
+            if 'cv2' in self.tags:
+                extras.extend(['headless', 'graphics'])
+            if 'postgresql' in self.tags:
+                extras.append('postgresql')
 
-        optional_dynamic = {}
-        for name in extras:
-            optional_dynamic[name] = {'file': [f'requirements/{name}.txt']}
-        setuptools_dynamic['optional-dependencies'] = optional_dynamic
+            # Auto-discover any additional requirements/<name>.txt files so
+            # they become optional extras. Mirrors the legacy setup.py
+            # builder which exposed one extra per requirements file.
+            requirements_dpath = self.repodir / 'requirements'
+            if requirements_dpath.exists():
+                discovered = sorted(
+                    f.stem for f in requirements_dpath.glob('*.txt')
+                )
+                # ``runtime`` is the install_requires source, not an extra.
+                extras = list(ub.oset(extras + [
+                    name for name in discovered if name != 'runtime'
+                ]))
+
+            optional_dynamic = {}
+            for name in extras:
+                optional_dynamic[name] = {'file': [f'requirements/{name}.txt']}
+
+            # Recreate the legacy ``all`` convenience extra so users can run
+            # ``pip install pkg[all]``. setuptools concatenates a list of
+            # requirement files for a single dynamic extra, so no aggregate
+            # file needs to be generated. Development-only extras are excluded
+            # because ``all`` is meant for end users pulling in optional runtime
+            # features. The loose/strict distinction is handled by lock-file
+            # constraints in CI, so there is intentionally no ``all-strict``.
+            DEV_EXTRAS = {'tests', 'docs', 'linting'}
+            all_extra_names = [
+                name
+                for name in extras
+                if name not in DEV_EXTRAS and name != 'all'
+            ]
+            if all_extra_names:
+                optional_dynamic['all'] = {
+                    'file': [f'requirements/{name}.txt' for name in all_extra_names]
+                }
+
+            setuptools_dynamic['optional-dependencies'] = optional_dynamic
 
         entry_points = pyproject_settings.get('entry_points', {})
         console_scripts = entry_points.get('console_scripts', [])
@@ -275,4 +491,55 @@ def build_pyproject(self):
         ...
 
     text = toml.dumps(pyproj_config)
+    try:
+        from pyproject_fmt import run as pyproject_fmt_run
+    except Exception:
+        return text
+
+    with tempfile.TemporaryDirectory() as temp_dpath:
+        temp_fpath = ub.Path(temp_dpath) / 'pyproject.toml'
+        temp_fpath.write_text(text)
+        pyproject_fmt_run(
+            [
+                '--no-generate-python-version-classifiers',
+                '--keep-full-version',
+                '--no-print-diff',
+                str(temp_fpath),
+            ]
+        )
+        text = temp_fpath.read_text()
+
+    # ``toml.dumps`` cannot emit comments, so re-inject the documentation for
+    # the supply-chain pin and normalize the package name in a single pass.
+    uv_exclude_newer_comment = [
+        '# Supply-chain guard: ignore packages published too recently.',
+        '# Accepts a relative window (e.g. "P7D" / "30 days") or a fixed'
+        ' date.',
+    ]
+    project_name = pyproj_config.get('project', {}).get('name')
+    section_name = None
+    fixed_lines = []
+    for line in text.splitlines():
+        if line.startswith('[') and line.endswith(']'):
+            section_name = line.strip()[1:-1]
+            fixed_lines.append(line)
+            continue
+        if section_name == 'tool.uv' and line.lstrip().startswith(
+            'exclude-newer = '
+        ):
+            indent = line[: len(line) - len(line.lstrip())]
+            fixed_lines.extend(
+                f'{indent}{comment}' for comment in uv_exclude_newer_comment
+            )
+        if (
+            project_name
+            and section_name == 'project'
+            and line.lstrip().startswith('name = ')
+        ):
+            indent = line[: len(line) - len(line.lstrip())]
+            line = f'{indent}name = {json.dumps(project_name)}'
+        fixed_lines.append(line)
+    # ``splitlines`` drops the trailing newline; restore it so the rewritten
+    # file keeps a POSIX-friendly final newline.
+    text = '\n'.join(fixed_lines) + '\n'
     return text

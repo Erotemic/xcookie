@@ -1,11 +1,51 @@
+from __future__ import annotations
+
 """
 Common subroutines for consistency between gitlab-ci / github actions / etc...
 """
 
+import shlex
+
 import ubelt as ub
 
+from xcookie.builders import ci_plan
 
-def make_typecheck_parts(self):
+
+def get_pyproject_optional_dependency_keys(self):
+    """
+    Return optional-dependency keys declared in ``pyproject.toml``.
+
+    Compatibility wrapper around :mod:`xcookie.builders.ci_plan`.
+    """
+    return ci_plan.get_pyproject_optional_dependency_keys(self)
+
+
+def filter_pyproject_extras(self, desired_extras):
+    """
+    Return ``desired_extras`` filtered down to extras declared by pyproject.
+
+    Compatibility wrapper around :mod:`xcookie.builders.ci_plan`.
+    """
+    return list(ci_plan.filter_pyproject_extras(self, desired_extras))
+
+
+def format_pyproject_install_target(extras, target='.', editable=False):
+    """
+    Build a pip install target, omitting brackets when extras are empty.
+
+    Compatibility wrapper around :mod:`xcookie.builders.ci_plan`.
+    """
+    return ci_plan.format_pyproject_install_target(
+        extras, target=target, editable=editable
+    )
+
+
+def make_ci_plan(self):
+    """Return the shared provider-neutral CI plan for this applier."""
+    return ci_plan.make_ci_plan(self)
+
+
+def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     """
     Return a list of shell commands to run type checkers.
 
@@ -32,7 +72,12 @@ def make_typecheck_parts(self):
     req_files_text = ' '.join(type_requirement_files)
 
     if self.config['use_pyproject_requirements']:
-        pip_install_reqs = 'pip install -r pyproject.toml'
+        if plan is None:
+            plan = make_ci_plan(self)
+        target = format_pyproject_install_target(
+            plan.typecheck_extras, editable=True
+        )
+        pip_install_reqs = f'pip install --prefer-binary {target}'
     else:
         pip_install_reqs = f'pip install -r {req_files_text}'
 
@@ -215,12 +260,13 @@ def make_install_and_test_wheel_parts(
 
     # export UV_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/cpu https://download.pytorch.org/whl/nightly/cu126"
 
-    if self.config['use_pyproject_requirements']:
+    use_lockfile_ci = ci_plan.uses_lockfile_ci(self)
+    if use_lockfile_ci:
         install_helpers = [
             'echo "Installing helpers: setuptools"',
-            f'{self.PIP_INSTALL} --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+            'python -m uv pip install --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
             'echo "Installing helpers: tomli and pkginfo"',
-            f'{self.PIP_INSTALL} --resolution=highest tomli pkginfo packaging',
+            'python -m uv pip install --resolution=highest tomli pkginfo packaging',
         ]
     else:
         install_helpers = [
@@ -245,7 +291,8 @@ def make_install_and_test_wheel_parts(
         + [
             'echo "WHEEL_FPATH=$WHEEL_FPATH"',
             'echo "INSTALL_EXTRAS=$INSTALL_EXTRAS"',
-            'echo "UV_RESOLUTION=$UV_RESOLUTION"',
+            'echo "USE_UV_LOCK=$USE_UV_LOCK"',
+            'echo "LOCK_REQUIREMENTS=$LOCK_REQUIREMENTS"',
             # 'echo "MOD_VERSION=$MOD_VERSION"',
             # This helps but doesn't solve the problem.
             # https://github.com/Erotemic/xdoctest/pull/158#discussion_r1697092781
@@ -256,10 +303,44 @@ def make_install_and_test_wheel_parts(
             # f'pip install --prefer-binary "{self.mod_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f wheeldownload --no-index',
             # TODO: flag to allow prerelease?
             # f'{self.PIP_INSTALL_PREFER_BINARY} --prerelease=allow "{self.pkg_name}[$INSTALL_EXTRAS]==$MOD_VERSION" -f {wheelhouse_dpath}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} "${{WHEEL_FPATH}}[${{INSTALL_EXTRAS}}]"',
-            'echo "Install finished."',
+            'if [[ -n "${INSTALL_EXTRAS:-}" ]]; then',
+            '    INSTALL_TARGET="${WHEEL_FPATH}[${INSTALL_EXTRAS}]"',
+            'else',
+            '    INSTALL_TARGET="${WHEEL_FPATH}"',
+            'fi',
+            'echo "INSTALL_TARGET=$INSTALL_TARGET"',
         ]
     )
+
+    if use_lockfile_ci:
+        install_wheel_commands += [
+            'LOCK_ARGS=()',
+            'if [[ "${USE_UV_LOCK:-false}" == "true" ]]; then',
+            '    if [[ -z "${LOCK_REQUIREMENTS:-}" ]]; then',
+            '        echo "USE_UV_LOCK=true but LOCK_REQUIREMENTS is empty"',
+            '        exit 1',
+            '    fi',
+            '    if [[ ! -f "$LOCK_REQUIREMENTS" ]]; then',
+            '        echo "Missing checked-in lock requirements: $LOCK_REQUIREMENTS"',
+            '        exit 1',
+            '    fi',
+            '    echo "Using checked-in lock requirements: $LOCK_REQUIREMENTS"',
+            '    cat "$LOCK_REQUIREMENTS"',
+            '    LOCK_ARGS=(--constraint "$LOCK_REQUIREMENTS")',
+            'fi',
+            # uv prefers binary wheels by default; the pip --prefer-binary
+            # flag does not exist in ``uv pip install`` and was rejected at
+            # runtime, so omit it here.
+            'python -m uv pip install --prerelease=allow "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"',
+        ]
+    else:
+        install_wheel_commands += [
+            f'{self.PIP_INSTALL_PREFER_BINARY} "${{INSTALL_TARGET}}"',
+        ]
+
+    install_wheel_commands += [
+        'echo "Install finished."',
+    ]
 
     test_wheel_commands = (
         [
@@ -444,3 +525,39 @@ def get_supported_platform_info(self):
         f'supported_platform_info = {ub.urepr(supported_platform_info, nl=1)}'
     )
     return supported_platform_info
+
+
+def _py_shell_command(code: str) -> str:
+    """Return a shell-safe ``python -c`` command."""
+    return 'python -c ' + shlex.quote(code)
+
+
+def make_project_version_getter(self) -> str:
+    """Return a shell command that prints the project version.
+
+    Historically generated deploy jobs imported ``setup.VERSION``.  That is
+    invalid for pyproject-only repositories.  When ``setup.py`` is disabled,
+    statically parse ``__version__`` from the package ``__init__`` module
+    instead of importing the project package or its runtime dependencies.
+    """
+    if self.config['use_setup_py']:
+        return 'python -c "import setup; print(setup.VERSION)"'
+
+    rel_init = (self.rel_mod_dpath / '__init__.py').as_posix()
+    py_code = (
+        'import ast, pathlib; '
+        f'tree = ast.parse(pathlib.Path({rel_init!r}).read_text()); '
+        'print(next(ast.literal_eval(n.value) for n in tree.body '
+        'if isinstance(n, ast.Assign) '
+        'and any(getattr(t, "id", None) == "__version__" '
+        'for t in n.targets)))'
+    )
+    return _py_shell_command(py_code)
+
+
+def make_project_version_assignment(
+    self, variable: str = 'VERSION', export: bool = False
+) -> str:
+    """Return a shell assignment for the current project version."""
+    prefix = 'export ' if export else ''
+    return f'{prefix}{variable}=$({make_project_version_getter(self)})'

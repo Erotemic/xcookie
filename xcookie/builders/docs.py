@@ -130,7 +130,6 @@ def build_docs_index(self):
         .. toctree::
            :maxdepth: 5
 
-           auto/{mod_name}
            auto/modules
 
 
@@ -153,11 +152,9 @@ def build_docs_conf(self):
 
     docs_builder = DocsBuilder(self.config)
 
-    author = self.config['author']
-    if isinstance(author, list):
-        author_str = ' '.join(author)
-    else:
-        author_str = author
+    from xcookie.util.util_metadata import metadata_text
+
+    author_str = metadata_text(self.config['author'])
 
     fmtkw = {
         'repo_name': self.config['repo_name'],
@@ -295,7 +292,6 @@ def build_docs_conf(self):
 
 
         # -- Project information -----------------------------------------------------
-        import sphinx_rtd_theme
         from os.path import exists
         from os.path import dirname
         from os.path import join
@@ -361,6 +357,7 @@ def build_docs_conf(self):
         ]
 
         todo_include_todos = True
+        myst_heading_anchors = 3
         napoleon_google_docstring = True
         napoleon_use_param = False
         napoleon_use_ivar = True
@@ -453,10 +450,12 @@ def build_docs_conf(self):
         # Add any paths that contain templates here, relative to this directory.
         templates_path = ['_templates']
 
-        # The suffix(es) of source filenames.
-        # You can specify multiple suffix as a list of string:
-        #
-        source_suffix = ['.rst', '.md']
+        # The suffix(es) of source filenames. Mapping form avoids Sphinx
+        # converting a legacy list at runtime.
+        source_suffix = {{
+            '.rst': 'restructuredtext',
+            '.md': 'markdown',
+        }}
 
         # The master toctree document.
         master_doc = 'index'
@@ -483,7 +482,6 @@ def build_docs_conf(self):
         # a list of builtin themes.
         #
         html_theme = 'sphinx_rtd_theme'
-        html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 
         # Theme options are theme-specific and customize the look and feel of a theme
         # further.  For a list of options available for each theme, see the
@@ -491,7 +489,6 @@ def build_docs_conf(self):
         #
         html_theme_options = {{
             'collapse_navigation': False,
-            'display_version': True,
             'navigation_depth': -1,
             # 'logo_only': True,
         }}
@@ -501,7 +498,10 @@ def build_docs_conf(self):
         # Add any paths that contain custom static files (such as style sheets) here,
         # relative to this directory. They are copied after the builtin static files,
         # so a file named "default.css" will overwrite the builtin "default.css".
-        html_static_path = ['_static']
+        # Keep empty by default to avoid warnings when generated projects do not
+        # define custom static assets. Projects that create ``docs/source/_static``
+        # can opt back in locally.
+        html_static_path = []
 
         # Custom sidebar templates, must be a dictionary that maps document names
         # to template names.
@@ -613,6 +613,9 @@ def build_docs_conf(self):
 
 def build_docs_requirements(self):
     import ubelt as ub
+
+    if self.config['use_pyproject_requirements']:
+        return None
 
     docs_requierments = ub.codeblock(
         """
