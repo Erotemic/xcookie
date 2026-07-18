@@ -165,21 +165,40 @@ def test_github_binpy_default_keeps_per_python_builds(tmp_path):
     assert 'msvc-dev-cmd' in text
 
 
-def test_github_release_tag_step_guards_empty_version(tmp_path):
-    """
-    The tag-on-success step must refuse to create a bogus "v" tag when the
-    version fails to parse.
-    """
+def test_github_release_resolves_version_tag_before_tagging(tmp_path):
+    """The release action must target the generated version tag, not the branch."""
     from xcookie.builders.github_actions import build_github_release
 
     self = _make_applier(tmp_path, tags=['github', 'binpy'], min_python='3.11')
     job = build_github_release(self)
+    meta_steps = [
+        step for step in job['steps'] if step.get('name') == 'Resolve Release Tag'
+    ]
     tag_steps = [
         step
         for step in job['steps']
         if step.get('name') == 'Tag Release Commit'
     ]
-    assert len(tag_steps) == 1
-    run_text = tag_steps[0]['run']
-    assert 'test -n "$VERSION"' in run_text
-    assert run_text.index('test -n "$VERSION"') < run_text.index('git tag')
+    release_steps = [
+        step for step in job['steps'] if step.get('name') == 'Create Release'
+    ]
+    assert len(meta_steps) == len(tag_steps) == len(release_steps) == 1
+
+    meta = meta_steps[0]
+    assert meta['id'] == 'release_meta'
+    assert 'test -n "$VERSION"' in meta['run']
+    assert 'TAG="v$VERSION"' in meta['run']
+    assert 'echo "tag=$TAG" >> "$GITHUB_OUTPUT"' in meta['run']
+
+    tag_run = tag_steps[0]['run']
+    assert 'git ls-remote --refs origin "refs/tags/$TAG"' in tag_run
+    assert 'test "$REMOTE_SHA" = "$GITHUB_SHA"' in tag_run
+    assert 'git tag "$TAG" "$GITHUB_SHA"' in tag_run
+    assert 'git push origin "refs/tags/$TAG"' in tag_run
+
+    release = release_steps[0]
+    assert release['uses'].startswith('softprops/action-gh-release@')
+    assert release['with']['tag_name'] == '${{ steps.release_meta.outputs.tag }}'
+    assert release['with']['name'] == 'Release ${{ steps.release_meta.outputs.tag }}'
+    assert release['with']['target_commitish'] == '${{ github.sha }}'
+    assert '${{ github.ref }}' not in str(release['with'])

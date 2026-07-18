@@ -12,8 +12,7 @@ from typing import (
 
 import ubelt as ub
 
-from xcookie.builders import ci_model
-from xcookie.builders import common_ci
+from xcookie.builders import ci_model, common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.builders.ci_plan import CIPlan
 from xcookie.util_yaml import Yaml
@@ -2384,17 +2383,44 @@ def build_github_release(self, needs=None):
         f'{wheelhouse_dpath}/*.tar.gz',
     ]
 
-    needs_tag_condition = "(startsWith(github.event.ref, 'refs/heads/release'))"
-    tag_action = {
-        'name': 'Tag Release Commit',
-        'if': needs_tag_condition,
+    release_meta_action = {
+        'name': 'Resolve Release Tag',
+        'id': 'release_meta',
+        'shell': 'bash',
         'run': ub.codeblock(
             f"""
             export {_version_assign_command(self)}
             echo "VERSION=$VERSION"
             test -n "$VERSION" || {{ echo "failed to parse version" ; exit 1; }}
-            git tag "v$VERSION"
-            git push origin "v$VERSION"
+            TAG="v$VERSION"
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+                EVENT_TAG="${{GITHUB_REF#refs/tags/}}"
+                TAG="$EVENT_TAG"
+            fi
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            """
+        ),
+    }
+
+    needs_tag_condition = "(startsWith(github.event.ref, 'refs/heads/release'))"
+    tag_action = {
+        'name': 'Tag Release Commit',
+        'if': needs_tag_condition,
+        'shell': 'bash',
+        'run': ub.codeblock(
+            """
+            TAG="${{ steps.release_meta.outputs.tag }}"
+            REMOTE_SHA=$(git ls-remote --refs origin "refs/tags/$TAG" | awk '{print $1}')
+            if [[ -n "$REMOTE_SHA" ]]; then
+                test "$REMOTE_SHA" = "$GITHUB_SHA" || {
+                    echo "$TAG already points to $REMOTE_SHA, not $GITHUB_SHA"
+                    exit 1
+                }
+                echo "$TAG already points to this release commit"
+            else
+                git tag "$TAG" "$GITHUB_SHA"
+                git push origin "refs/tags/$TAG"
+            fi
             """
         ),
     }
@@ -2411,9 +2437,9 @@ def build_github_release(self, needs=None):
         'env': env,
         'with': {
             'body_path': '${{ github.workspace }}-CHANGELOG.txt',
-            'tag_name': '${{ github.ref }}',
-            # 'release_name': 'Release ${{ github.ref }}',
-            'name': 'Release ${{ github.ref }}',
+            'tag_name': '${{ steps.release_meta.outputs.tag }}',
+            'name': 'Release ${{ steps.release_meta.outputs.tag }}',
+            'target_commitish': '${{ github.sha }}',
             'body': 'Automatic Release',
             'generate_release_notes': True,
             'draft': True,  # Maybe keep as a draft until we determine this is ok?
@@ -2442,6 +2468,7 @@ def build_github_release(self, needs=None):
                 'run': 'ls -la wheelhouse',
             },
             write_release_notes_action,
+            release_meta_action,
             tag_action,
             release_action,
         ],
