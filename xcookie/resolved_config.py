@@ -273,12 +273,14 @@ def _infer_supported_python_versions(
         return True
 
     return tuple(
-        version for version in KNOWN_PYTHON_VERSIONS if satisfies_minmax(version)
+        version
+        for version in KNOWN_PYTHON_VERSIONS
+        if satisfies_minmax(version)
     )
 
 
 def _infer_pypy_versions(
-    supported_python_versions: tuple[str, ...]
+    supported_python_versions: tuple[str, ...],
 ) -> tuple[str, ...]:
     """Choose a default PyPy version to test on the CI.
 

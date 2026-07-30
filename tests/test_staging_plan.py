@@ -40,7 +40,9 @@ def _info(fname, stage_fpath, repo_fpath, **kwargs):
     return TemplateInfo.coerce(data)
 
 
-def test_gather_tasks_classifies_missing_dirty_modified_and_clean(tmp_path, capsys):
+def test_gather_tasks_classifies_missing_dirty_modified_and_clean(
+    tmp_path, capsys
+):
     stage = tmp_path / 'stage'
     repo = tmp_path / 'repo'
     stage.mkdir()

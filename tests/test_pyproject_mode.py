@@ -131,7 +131,9 @@ def test_all_extra_aggregates_runtime_optional_requirements(tmp_path) -> None:
     assert pyproject_text.endswith('\n')
 
 
-def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None:
+def test_existing_pyproject_metadata_is_inferred_and_preserved(
+    tmp_path,
+) -> None:
     """
     Existing pyproject metadata should seed xcookie defaults, and unrelated
     sections should survive a regen.
@@ -214,7 +216,9 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
         'package-a>=1.0',
         'package-b>=2.0',
     ]
-    assert sorted(pyproject_data['project']['optional-dependencies']['tests']) == [
+    assert sorted(
+        pyproject_data['project']['optional-dependencies']['tests']
+    ) == [
         'coverage>=7.0',
         'pytest>=8.0',
     ]
@@ -224,11 +228,14 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
     # assertions above already verify the data is preserved.
     assert 'package-a>=1.0' in pyproject_text
     assert pyproject_data['tool']['ruff']['line-length'] == 123
-    assert pyproject_data['tool']['setuptools']['dynamic']['version']['attr'] == (
-        'demo_mod.__version__'
-    )
+    assert pyproject_data['tool']['setuptools']['dynamic']['version'][
+        'attr'
+    ] == ('demo_mod.__version__')
     assert 'dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
-    assert 'optional-dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
+    assert (
+        'optional-dependencies'
+        not in pyproject_data['tool']['setuptools']['dynamic']
+    )
     assert pyproject_data['tool']['xcookie']['author'] == 'Existing Author'
     # The version is inferred from standard project/setuptools metadata for
     # config defaults, but should not be written back into tool.xcookie unless
@@ -237,7 +244,9 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(tmp_path) -> None
     assert 'version' not in pyproject_data['tool']['xcookie']
 
 
-def test_pyproject_requirements_mode_preserves_project_dependencies(tmp_path) -> None:
+def test_pyproject_requirements_mode_preserves_project_dependencies(
+    tmp_path,
+) -> None:
     """
     When pyproject dependencies are authoritative, xcookie should not emit
     setuptools dynamic dependency files or requirements.txt scaffolding.
@@ -307,10 +316,15 @@ def test_pyproject_requirements_mode_preserves_project_dependencies(tmp_path) ->
     ]
     assert project_block['dynamic'] == ['version']
     assert 'dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
-    assert 'optional-dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
+    assert (
+        'optional-dependencies'
+        not in pyproject_data['tool']['setuptools']['dynamic']
+    )
 
 
-def test_markdown_readme_is_preserved_and_reflected_in_metadata(tmp_path) -> None:
+def test_markdown_readme_is_preserved_and_reflected_in_metadata(
+    tmp_path,
+) -> None:
     """
     If a repo already uses README.md, xcookie should leave it alone and point
     packaging metadata at Markdown instead of reStructuredText.
@@ -357,16 +371,21 @@ def test_markdown_readme_is_preserved_and_reflected_in_metadata(tmp_path) -> Non
 
     staged_fnames = {info['fname'] for info in applier.staging_infos}
     assert 'README.rst' not in staged_fnames
-    assert (repodir / 'README.md').read_text() == '# Demo Package\n\nSome markdown.\n'
+    assert (
+        repodir / 'README.md'
+    ).read_text() == '# Demo Package\n\nSome markdown.\n'
 
     pyproject_text = (applier.staging_dpath / 'pyproject.toml').read_text()
     pyproject_data = toml.loads(pyproject_text)
-    assert pyproject_data['tool']['setuptools']['dynamic']['readme']['file'] == [
-        'README.md'
-    ]
     assert pyproject_data['tool']['setuptools']['dynamic']['readme'][
-        'content-type'
-    ] == 'text/markdown'
+        'file'
+    ] == ['README.md']
+    assert (
+        pyproject_data['tool']['setuptools']['dynamic']['readme'][
+            'content-type'
+        ]
+        == 'text/markdown'
+    )
 
     setup_text = applier.build_setup()
     assert 'get_readme_fpath()' in setup_text
@@ -429,7 +448,7 @@ def test_xcookie_tags_are_not_written_as_project_keywords(tmp_path) -> None:
     # Scaffolding tags must not be turned into keywords.
     for tag in ['github', 'erotemic', 'purepy', 'gitlab', 'kitware', 'binpy']:
         assert tag not in keywords, (
-            f"xcookie tag {tag!r} leaked into project keywords"
+            f'xcookie tag {tag!r} leaked into project keywords'
         )
 
 
@@ -527,10 +546,14 @@ def test_dynamic_pyproject_extras_are_available_to_ci(tmp_path) -> None:
                     },
                     'setuptools': {
                         'dynamic': {
-                            'dependencies': {'file': ['requirements/runtime.txt']},
+                            'dependencies': {
+                                'file': ['requirements/runtime.txt']
+                            },
                             'optional-dependencies': {
                                 'tests': {'file': ['requirements/tests.txt']},
-                                'optional': {'file': ['requirements/optional.txt']},
+                                'optional': {
+                                    'file': ['requirements/optional.txt']
+                                },
                             },
                         }
                     },
@@ -558,7 +581,7 @@ def test_dynamic_pyproject_extras_are_available_to_ci(tmp_path) -> None:
     assert '-e ".[tests]"' in text
     assert 'install-extras: tests' in text
     assert 'install-extras: tests,optional' in text
-    assert 'install-extras: \'\'' not in text
+    assert "install-extras: ''" not in text
 
 
 def test_sdist_install_step_uses_tests_extra_when_available(tmp_path) -> None:
@@ -632,7 +655,9 @@ def test_test_matrix_install_extras_are_filtered_to_existing(tmp_path) -> None:
     assert 'install-extras: ,' not in text
 
 
-def test_gitlab_test_matrix_install_extras_are_filtered_to_existing(tmp_path) -> None:
+def test_gitlab_test_matrix_install_extras_are_filtered_to_existing(
+    tmp_path,
+) -> None:
     """
     GitLab CI should use the same pyproject extra filtering as GitHub Actions.
     For a project that only declares ``tests``, generated GitLab test jobs must
@@ -710,7 +735,6 @@ def test_wheel_install_command_omits_empty_extra_brackets(tmp_path) -> None:
     assert '"${WHEEL_FPATH}[]"' not in install_text
 
 
-
 def test_legacy_comma_author_metadata_generates_valid_files(tmp_path) -> None:
     """
     Legacy ``tool.xcookie`` metadata often stores multiple authors in a single
@@ -765,7 +789,9 @@ def test_legacy_comma_author_metadata_generates_valid_files(tmp_path) -> None:
     )
 
     assert config['author'] == 'Kitware Inc., Jon Crall'
-    assert config['author_email'] == 'kitware@kitware.com, jon.crall@kitware.com'
+    assert (
+        config['author_email'] == 'kitware@kitware.com, jon.crall@kitware.com'
+    )
 
     applier = TemplateApplier(config)
     applier.setup()
@@ -774,9 +800,14 @@ def test_legacy_comma_author_metadata_generates_valid_files(tmp_path) -> None:
     py_compile.compile(str(init_fpath), doraise=True)
     init_text = init_fpath.read_text()
     assert "__author__ = 'Kitware Inc., Jon Crall'" in init_text
-    assert "__author_email__ = 'kitware@kitware.com, jon.crall@kitware.com'" in init_text
+    assert (
+        "__author_email__ = 'kitware@kitware.com, jon.crall@kitware.com'"
+        in init_text
+    )
 
-    pyproject_data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
     assert pyproject_data['project']['authors'] == [
         {'name': 'Kitware Inc.', 'email': 'kitware@kitware.com'},
         {'name': 'Jon Crall', 'email': 'jon.crall@kitware.com'},
@@ -974,7 +1005,7 @@ def test_explicit_packages_list_is_converted_to_find_dict(tmp_path) -> None:
 
     packages = pyproject_data['tool']['setuptools']['packages']
     assert isinstance(packages, dict), (
-        "packages must be converted from a list to a find-dict"
+        'packages must be converted from a list to a find-dict'
     )
     assert 'find' in packages
     assert 'where' in packages['find']

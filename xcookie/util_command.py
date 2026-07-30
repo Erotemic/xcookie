@@ -7,9 +7,80 @@ runtime dependency graph for two serial administrative command sequences.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path, PureWindowsPath
+import shutil
 import subprocess
-from pathlib import Path
+import sys
 from typing import Any
+
+
+def _windows_git_bash_candidates(
+    git_executable: str | None,
+) -> list[str]:
+    """Return likely Git Bash executables for a resolved ``git.exe``."""
+    if git_executable is None:
+        return []
+
+    git_fpath = PureWindowsPath(git_executable)
+    parent = git_fpath.parent
+    if parent.name.lower() in {'cmd', 'bin'}:
+        git_root = parent.parent
+    else:
+        git_root = parent
+    return [
+        str(git_root / 'bin' / 'bash.exe'),
+        str(git_root / 'usr' / 'bin' / 'bash.exe'),
+    ]
+
+
+def _is_windows_wsl_bash_launcher(executable: str) -> bool:
+    """Check for the legacy Windows ``bash.exe`` WSL launcher."""
+    normalized = str(PureWindowsPath(executable)).lower()
+    return normalized.endswith(r'\windows\system32\bash.exe')
+
+
+def find_bash_executable() -> str | None:
+    """Find a usable Bash executable without mistaking WSL for Git Bash.
+
+    On Windows, ``shutil.which('bash')`` can resolve to the legacy WSL
+    launcher even when no WSL distribution is installed.  Prefer the Bash
+    bundled with the resolved Git installation, then consider other PATH
+    matches only after rejecting that launcher.
+    """
+    if not sys.platform.startswith('win'):
+        return shutil.which('bash')
+
+    candidates = _windows_git_bash_candidates(shutil.which('git'))
+    for envvar in ('ProgramFiles', 'ProgramFiles(x86)', 'LocalAppData'):
+        root = os.environ.get(envvar)
+        if root is None:
+            continue
+        root_fpath = PureWindowsPath(root)
+        if envvar == 'LocalAppData':
+            git_root = root_fpath / 'Programs' / 'Git'
+        else:
+            git_root = root_fpath / 'Git'
+        candidates.extend(
+            [
+                str(git_root / 'bin' / 'bash.exe'),
+                str(git_root / 'usr' / 'bin' / 'bash.exe'),
+            ]
+        )
+
+    path_bash = shutil.which('bash')
+    if path_bash is not None and not _is_windows_wsl_bash_launcher(path_bash):
+        candidates.append(path_bash)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = os.path.normcase(os.path.normpath(candidate))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 class SerialCommandQueue:
@@ -68,21 +139,20 @@ class SerialCommandQueue:
         if kwargs:
             unknown = ', '.join(sorted(kwargs))
             raise TypeError(f'Unexpected run arguments: {unknown}')
+        bash_executable = find_bash_executable()
+        if bash_executable is None:
+            raise RuntimeError(
+                'A usable Bash executable is required. On Windows, install '
+                'Git for Windows so xcookie can use Git Bash.'
+            )
         return subprocess.run(
-            ['bash', '-c', self.finalize_text()],
+            [bash_executable, '-c', self.finalize_text()],
             cwd=None if self.cwd is None else str(self.cwd),
             check=check,
             text=True,
         )
 
 
-def make_command_queue(**kwargs: Any):
-    """Use cmd_queue when present, otherwise use the lightweight local queue."""
-    try:
-        import cmd_queue
-    except ModuleNotFoundError as ex:
-        if ex.name != 'cmd_queue':
-            raise
-        return SerialCommandQueue.create(**kwargs)
-    else:
-        return cmd_queue.Queue.create(**kwargs)
+def make_command_queue(**kwargs: Any) -> SerialCommandQueue:
+    """Construct xcookie's deliberately small local serial queue."""
+    return SerialCommandQueue.create(**kwargs)

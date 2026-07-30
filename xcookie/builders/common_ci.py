@@ -380,6 +380,35 @@ def make_install_and_test_wheel_parts(
     return install_and_test_wheel_parts
 
 
+def make_windows_msvc_bash_path_commands() -> list[str]:
+    """Prioritize the selected MSVC linker inside Git Bash on Windows.
+
+    Git Bash prepends its own ``usr/bin`` directory, which contains an
+    unrelated ``link.exe``.  Rust-backed Python packages then invoke that
+    program instead of Microsoft's linker when they must build from source.
+
+    ``ilammy/msvc-dev-cmd`` already puts the selected compiler directory on
+    ``PATH``.  ``cl.exe`` has no Git-Bash name collision, so locate it after
+    Bash starts and prepend its directory.  This follows the toolchain chosen
+    by the action without coupling generated workflows to its private
+    architecture environment variables.
+    """
+    return [
+        'if [[ "${RUNNER_OS:-}" == "Windows" ]]; then',
+        '    MSVC_CL_EXE="$(command -v cl.exe || true)"',
+        '    if [[ -n "$MSVC_CL_EXE" ]]; then',
+        '        MSVC_LINK_DIR="$(dirname "$MSVC_CL_EXE")"',
+        '        export PATH="$MSVC_LINK_DIR:$PATH"',
+        '        hash -r',
+        '        echo "Prioritized MSVC linker directory: $MSVC_LINK_DIR"',
+        '        echo "Resolved link.exe: $(command -v link.exe || true)"',
+        '    else',
+        '        echo "MSVC cl.exe was not found; leaving PATH unchanged"',
+        '    fi',
+        'fi',
+    ]
+
+
 def get_supported_platform_info(self):
     """
     CommandLine:

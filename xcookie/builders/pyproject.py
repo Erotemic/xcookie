@@ -30,11 +30,7 @@ def _resolve_uv_exclude_newer(self, pyproj_config):
     if configured in (False, None, 'false', 'False', 'off'):
         return None
 
-    existing = (
-        pyproj_config.get('tool', {})
-        .get('uv', {})
-        .get('exclude-newer')
-    )
+    existing = pyproj_config.get('tool', {}).get('uv', {}).get('exclude-newer')
     if configured == 'auto':
         if existing:
             return existing
@@ -428,9 +424,12 @@ def build_pyproject(self):
                     f.stem for f in requirements_dpath.glob('*.txt')
                 )
                 # ``runtime`` is the install_requires source, not an extra.
-                extras = list(ub.oset(extras + [
-                    name for name in discovered if name != 'runtime'
-                ]))
+                extras = list(
+                    ub.oset(
+                        extras
+                        + [name for name in discovered if name != 'runtime']
+                    )
+                )
 
             optional_dynamic = {}
             for name in extras:
@@ -451,7 +450,9 @@ def build_pyproject(self):
             ]
             if all_extra_names:
                 optional_dynamic['all'] = {
-                    'file': [f'requirements/{name}.txt' for name in all_extra_names]
+                    'file': [
+                        f'requirements/{name}.txt' for name in all_extra_names
+                    ]
                 }
 
             setuptools_dynamic['optional-dependencies'] = optional_dynamic
@@ -513,8 +514,7 @@ def build_pyproject(self):
     # the supply-chain pin and normalize the package name in a single pass.
     uv_exclude_newer_comment = [
         '# Supply-chain guard: ignore packages published too recently.',
-        '# Accepts a relative window (e.g. "P7D" / "30 days") or a fixed'
-        ' date.',
+        '# Accepts a relative window (e.g. "P7D" / "30 days") or a fixed date.',
     ]
     project_name = pyproj_config.get('project', {}).get('name')
     section_name = None

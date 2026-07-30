@@ -1,7 +1,9 @@
 import toml
 
 
-def test_pyproject_regen_does_not_write_inferred_tool_xcookie_defaults(tmp_path):
+def test_pyproject_regen_does_not_write_inferred_tool_xcookie_defaults(
+    tmp_path,
+):
     """Self-regeneration should not persist resolver defaults as config."""
     from xcookie.main import TemplateApplier, XCookieConfig
 
@@ -43,7 +45,9 @@ def test_pyproject_regen_does_not_write_inferred_tool_xcookie_defaults(tmp_path)
     applier = TemplateApplier(config)
     applier.setup()
 
-    pyproject_data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
     xcookie_block = pyproject_data['tool']['xcookie']
 
     assert xcookie_block['use_setup_py'] is False
@@ -113,7 +117,9 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
     applier = TemplateApplier(config)
     applier.setup()
 
-    pyproject_data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
     xcookie_block = pyproject_data['tool']['xcookie']
 
     assert xcookie_block['pkg_name'] == 'demo-pkg'

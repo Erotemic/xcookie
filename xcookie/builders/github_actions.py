@@ -35,7 +35,9 @@ class GitHubActionsRenderer:
 
     def __init__(self, applier, plan: CIPlan | None = None):
         self.applier = applier
-        self.plan = plan if plan is not None else common_ci.make_ci_plan(applier)
+        self.plan = (
+            plan if plan is not None else common_ci.make_ci_plan(applier)
+        )
 
     def render_default(self) -> str:
         """Render the default GitHub workflow.
@@ -219,7 +221,10 @@ class Actions:
     @classmethod
     def checkout(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
-            {'name': 'Checkout source', 'uses': _action_ref('actions/checkout')},
+            {
+                'name': 'Checkout source',
+                'uses': _action_ref('actions/checkout'),
+            },
             *args,
             **kwargs,
         )
@@ -227,7 +232,10 @@ class Actions:
     @classmethod
     def setup_python(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
-            {'name': 'Setup Python', 'uses': _action_ref('actions/setup-python')},
+            {
+                'name': 'Setup Python',
+                'uses': _action_ref('actions/setup-python'),
+            },
             *args,
             **kwargs,
         )
@@ -445,7 +453,9 @@ class Actions:
         )
 
 
-def _render_workflow_text(name, on_lines, jobs, footer='', concurrency_lines=None):
+def _render_workflow_text(
+    name, on_lines, jobs, footer='', concurrency_lines=None
+):
     workflow_kind = 'release' if name.endswith('Release') else 'tests'
     header = ub.codeblock(
         f"""
@@ -1775,7 +1785,6 @@ def build_binpy_wheels_release_job(self):
     return job
 
 
-
 def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     if plan is None:
         plan = common_ci.make_ci_plan(self)
@@ -1904,6 +1913,14 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         custom_before_test_lines=custom_before_test_lines,
         custom_after_test_commands=custom_after_test_commands,
     )
+    install_wheel_commands = install_and_test_wheel_parts[
+        'install_wheel_commands'
+    ]
+    if 'win' in self.config['os']:
+        install_wheel_commands = (
+            common_ci.make_windows_msvc_bash_path_commands()
+            + install_wheel_commands
+        )
 
     if len(self.config['ci_pypy_versions']) > 0 and 'osx' in self.config['os']:
         # When using pypy on OSX we need to set a MACOSX_DEPLOYMENT_TARGET so any
@@ -1925,7 +1942,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
                 'name': 'Install wheel ${{ matrix.install-extras }}',
                 'shell': 'bash',
                 'env': install_env,
-                'run': install_and_test_wheel_parts['install_wheel_commands'],
+                'run': install_wheel_commands,
             }
         )
     )
@@ -2006,6 +2023,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         ]
     job['steps'] = action_steps
     return job
+
 
 def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
     """

@@ -66,7 +66,10 @@ def test_github_release_plan_describes_trusted_publishing(tmp_path):
     ]
     assert all(target.trusted_publishing for target in package_targets)
     assert all(target.requires_oidc for target in package_targets)
-    assert {target.environment for target in package_targets} == {'testpypi', 'pypi'}
+    assert {target.environment for target in package_targets} == {
+        'testpypi',
+        'pypi',
+    }
     release_targets = [
         target
         for target in plan.publish_targets
@@ -90,7 +93,10 @@ def test_release_plan_distribution_and_artifact_globs_track_gpg(tmp_path):
 
     assert plan.package_kind == 'binpy'
     assert plan.signing_transport == 'encrypted_repo'
-    assert plan.distribution_globs == ('wheelhouse/*.whl', 'wheelhouse/*.tar.gz')
+    assert plan.distribution_globs == (
+        'wheelhouse/*.whl',
+        'wheelhouse/*.tar.gz',
+    )
     assert 'wheelhouse/*.zip' in plan.artifact_globs
     assert 'wheelhouse/*.asc' in plan.artifact_globs
     assert 'wheelhouse/*.ots' in plan.artifact_globs
@@ -104,7 +110,9 @@ def test_gitlab_release_plan_describes_current_gpg_and_deploy_jobs(tmp_path):
         deploy=True,
         gpg_transport='encrypted_repo',
     )
-    plan = ci_model.make_release_plan(self, provider='gitlab', wheelhouse_dpath='dist')
+    plan = ci_model.make_release_plan(
+        self, provider='gitlab', wheelhouse_dpath='dist'
+    )
 
     assert plan.provider == 'gitlab'
     assert plan.package_kind == 'purepy'
@@ -176,7 +184,9 @@ def test_gitlab_gpg_and_deploy_render_current_behavior_is_pinned(tmp_path):
     assert 'twine upload' in text
 
 
-def test_gitlab_direct_gpg_render_uses_ci_variables_not_encrypted_repo(tmp_path):
+def test_gitlab_direct_gpg_render_uses_ci_variables_not_encrypted_repo(
+    tmp_path,
+):
     self = _make_applier(
         tmp_path,
         tags=['gitlab', 'purepy'],

@@ -98,7 +98,7 @@ class ArtifactTestCase:
             return []
         if self.variant.is_strict:
             return [
-                "sed 's/>=/==/' \"requirements/gdal.txt\" > \"requirements/gdal-strict.txt\"",
+                'sed \'s/>=/==/\' "requirements/gdal.txt" > "requirements/gdal-strict.txt"',
                 f'{pip_install} -r requirements/gdal-strict.txt',
             ]
         return [f'{pip_install} -r requirements/gdal.txt']
@@ -248,8 +248,7 @@ def _compile_ci_blocklist(rules: Any):
 def _is_blocked(item: Mapping[str, Any], compiled_rules: Any) -> bool:
     for crule in compiled_rules:
         if all(
-            regex.fullmatch(str(item.get(k, '')))
-            for k, regex in crule.items()
+            regex.fullmatch(str(item.get(k, ''))) for k, regex in crule.items()
         ):
             return True
     return False
@@ -286,7 +285,10 @@ def make_artifact_test_cases(
             (tuple(plan.iter_active_variants(['full-strict'])), platforms),
             # Preserve historical behavior where minimal-loose skips the first
             # platform basis entry, usually Linux, to reduce CI load.
-            (tuple(plan.iter_active_variants(['minimal-loose'])), platforms[1:]),
+            (
+                tuple(plan.iter_active_variants(['minimal-loose'])),
+                platforms[1:],
+            ),
             (tuple(plan.iter_active_variants(['full-loose'])), platforms),
         ]
     else:
@@ -349,7 +351,7 @@ def make_artifact_test_cases(
 
 
 def unique_variant_cases(
-    cases: list[ArtifactTestCase] | tuple[ArtifactTestCase, ...]
+    cases: list[ArtifactTestCase] | tuple[ArtifactTestCase, ...],
 ) -> list[ArtifactTestCase]:
     """Return the first test case for each variant key, preserving order."""
     seen: set[VariantKey] = set()
@@ -363,7 +365,7 @@ def unique_variant_cases(
 
 
 def any_test_case_needs_qemu(
-    cases: list[ArtifactTestCase] | tuple[ArtifactTestCase, ...]
+    cases: list[ArtifactTestCase] | tuple[ArtifactTestCase, ...],
 ) -> bool:
     return any(case.platform.arch != 'auto' for case in cases)
 
@@ -606,4 +608,3 @@ def make_release_plan(
         distribution_globs=make_distribution_globs(self, wheelhouse_dpath),
         artifact_globs=make_release_artifact_globs(self, wheelhouse_dpath),
     )
-

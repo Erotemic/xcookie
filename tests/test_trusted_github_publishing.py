@@ -6,7 +6,13 @@ from xcookie.main import TemplateApplier, XCookieConfig
 
 
 def _make_applier(
-    tmp_path, *, trusted, enable_gpg, tags=None, min_python=None, use_setup_py='auto'
+    tmp_path,
+    *,
+    trusted,
+    enable_gpg,
+    tags=None,
+    min_python=None,
+    use_setup_py='auto',
 ):
     if tags is None:
         tags = ['github', 'erotemic', 'purepy']

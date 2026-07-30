@@ -45,7 +45,9 @@ def test_github_purepy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert 'build_and_test_sdist:' in text
     assert 'matrix:' in text
     assert 'install-extras:' in text
-    assert 'minimal-strict' not in text  # GitHub matrix stores extras, not variant keys
+    assert (
+        'minimal-strict' not in text
+    )  # GitHub matrix stores extras, not variant keys
     # The tests workflow no longer runs on deploy-bearing refs at all;
     # release.yml owns them, so no job needs a release-ref guard.
     assert 'refs/heads/release' not in text
@@ -54,12 +56,17 @@ def test_github_purepy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert '3.15' in text
     assert 'allow-prereleases:' in text
     assert 'check-latest:' in text
+    assert 'Prioritized MSVC linker directory:' in text
+    assert 'command -v cl.exe' in text
+    assert 'VSCMD_ARG_HOST_ARCH' not in text
+    assert 'VSCMD_ARG_TGT_ARCH' not in text
+    assert text.index('Prioritized MSVC linker directory:') < text.index(
+        'Installing helpers: update pip'
+    )
 
 
 def test_github_binpy_uses_shared_workflow_plan_and_test_cases(tmp_path):
-    self = _make_applier(
-        tmp_path, tags=['github', 'binpy'], min_python='3.10'
-    )
+    self = _make_applier(tmp_path, tags=['github', 'binpy'], min_python='3.10')
     text = self.build_github_actions_tests()
     assert 'build_binpy_wheels:' in text
     assert 'test_binpy_wheels:' in text
@@ -144,9 +151,7 @@ def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
 
 
 def test_gitlab_binpy_render_uses_artifact_test_cases(tmp_path):
-    self = _make_applier(
-        tmp_path, tags=['gitlab', 'binpy'], min_python='3.9'
-    )
+    self = _make_applier(tmp_path, tags=['gitlab', 'binpy'], min_python='3.9')
     text = self.build_gitlab_ci()
     assert 'build/cp' in text
     assert 'test/full-loose/cp' in text
@@ -160,7 +165,6 @@ def test_gitlab_binpy_render_uses_artifact_test_cases(tmp_path):
     assert 'CIBW_BUILD:' in text
 
 
-
 def test_gitlab_legacy_setup_py_render_keeps_synthetic_strict_extras(tmp_path):
     self = _make_applier(
         tmp_path,
@@ -171,7 +175,10 @@ def test_gitlab_legacy_setup_py_render_keeps_synthetic_strict_extras(tmp_path):
     text = self.build_gitlab_ci()
     assert 'export INSTALL_EXTRAS="tests-strict,runtime-strict"' in text
 
-def test_gitlab_purepy_gdal_cases_select_strict_and_loose_requirement_files(tmp_path):
+
+def test_gitlab_purepy_gdal_cases_select_strict_and_loose_requirement_files(
+    tmp_path,
+):
     self = _make_applier(tmp_path, tags=['gitlab', 'purepy', 'gdal'])
     text = self.build_gitlab_ci()
     assert 'requirements/gdal.txt' in text
@@ -238,7 +245,9 @@ def test_github_release_resolves_version_tag_before_tagging(tmp_path):
     self = _make_applier(tmp_path, tags=['github', 'binpy'], min_python='3.11')
     job = build_github_release(self)
     meta_steps = [
-        step for step in job['steps'] if step.get('name') == 'Resolve Release Tag'
+        step
+        for step in job['steps']
+        if step.get('name') == 'Resolve Release Tag'
     ]
     tag_steps = [
         step
@@ -264,7 +273,12 @@ def test_github_release_resolves_version_tag_before_tagging(tmp_path):
 
     release = release_steps[0]
     assert release['uses'].startswith('softprops/action-gh-release@')
-    assert release['with']['tag_name'] == '${{ steps.release_meta.outputs.tag }}'
-    assert release['with']['name'] == 'Release ${{ steps.release_meta.outputs.tag }}'
+    assert (
+        release['with']['tag_name'] == '${{ steps.release_meta.outputs.tag }}'
+    )
+    assert (
+        release['with']['name']
+        == 'Release ${{ steps.release_meta.outputs.tag }}'
+    )
     assert release['with']['target_commitish'] == '${{ github.sha }}'
     assert '${{ github.ref }}' not in str(release['with'])

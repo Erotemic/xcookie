@@ -27,14 +27,28 @@ class TemplateInfo(MutableMapping[str, Any]):
     repo_fpath: ub.Path | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
-    _field_names = frozenset({
-        'fname', 'template', 'overwrite', 'enabled', 'input_fname', 'dynamic',
-        'source', 'tags', 'perms', 'path_type', 'skip', 'stage_fpath',
-        'repo_fpath',
-    })
+    _field_names = frozenset(
+        {
+            'fname',
+            'template',
+            'overwrite',
+            'enabled',
+            'input_fname',
+            'dynamic',
+            'source',
+            'tags',
+            'perms',
+            'path_type',
+            'skip',
+            'stage_fpath',
+            'repo_fpath',
+        }
+    )
 
     @classmethod
-    def coerce(cls, data: TemplateInfo | MutableMapping[str, Any]) -> TemplateInfo:
+    def coerce(
+        cls, data: TemplateInfo | MutableMapping[str, Any]
+    ) -> TemplateInfo:
         if isinstance(data, cls):
             return data
         known = {}
@@ -99,7 +113,9 @@ class TemplateInfo(MutableMapping[str, Any]):
         data.update(self.extra)
         return data
 
-    def tag_requirements_met(self, active_tags: set[str] | frozenset[str]) -> bool:
+    def tag_requirements_met(
+        self, active_tags: set[str] | frozenset[str]
+    ) -> bool:
         return not self.tags or set(active_tags).issuperset(self.tags)
 
 
@@ -118,7 +134,9 @@ class TemplateContext:
     def from_config(cls, config: Any) -> TemplateContext:
         from xcookie.util.util_metadata import metadata_text
 
-        rel_mod_dpath = ub.Path(config['rel_mod_parent_dpath']) / config['mod_name']
+        rel_mod_dpath = (
+            ub.Path(config['rel_mod_parent_dpath']) / config['mod_name']
+        )
         rel_mod_dpath_text = os.fspath(rel_mod_dpath)
         return cls(
             repo_name=str(config['repo_name']),

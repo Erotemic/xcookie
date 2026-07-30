@@ -43,9 +43,10 @@ def test_exported_locks_avoid_heavy_data_stack():
         assert resolved_names.isdisjoint(forbidden), lock_name
 
 
-def test_package_does_not_import_external_xdev():
+def test_package_does_not_import_squashed_dependencies():
     package_dpath = Path(__file__).parents[1] / 'xcookie'
-    offenders: list[Path] = []
+    forbidden_roots = {'xdev', 'cmd_queue'}
+    offenders: list[tuple[Path, str]] = []
     for source_fpath in package_dpath.rglob('*.py'):
         tree = ast.parse(source_fpath.read_text(), filename=str(source_fpath))
         for node in ast.walk(tree):
@@ -55,6 +56,10 @@ def test_package_does_not_import_external_xdev():
                 names = [node.module or '']
             else:
                 continue
-            if any(name == 'xdev' or name.startswith('xdev.') for name in names):
-                offenders.append(source_fpath.relative_to(package_dpath.parent))
+            for name in names:
+                root = name.split('.', 1)[0]
+                if root in forbidden_roots:
+                    offenders.append(
+                        (source_fpath.relative_to(package_dpath.parent), name)
+                    )
     assert not offenders

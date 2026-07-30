@@ -254,7 +254,9 @@ class XCookieConfig(kwconf.Config):
             None,
             help='A YAML coercible dictionary of environment variables to use in test stages. (TOTO',
         ),
-        'version': kwconf.Value(None, help='repo metadata: url for the project'),
+        'version': kwconf.Value(
+            None, help='repo metadata: url for the project'
+        ),
         'url': kwconf.Value(
             None, type=str, help='repo metadata: url for the project'
         ),
@@ -266,7 +268,7 @@ class XCookieConfig(kwconf.Config):
             None,
             type=str,
             help='repo metadata: author for the project. '
-                 'A string or a list of strings.',
+            'A string or a list of strings.',
         ),
         'author_email': kwconf.Value(
             None,
@@ -513,9 +515,7 @@ class XCookieConfig(kwconf.Config):
             )
         if author_emails:
             config['author_email'] = (
-                author_emails[0]
-                if len(author_emails) == 1
-                else author_emails
+                author_emails[0] if len(author_emails) == 1 else author_emails
             )
         return config
 
@@ -1882,22 +1882,26 @@ class TemplateApplier:
         backends = []
 
         if {'github', 'erotemic', 'pyutils'} & set(tags):
-            backends.append({
-                'name': 'github',
-                'environ_export': self._github_org_environ(),
-                'upload_secret_cmd': 'upload_github_secrets',
-                'gpg_upload_cmd': 'upload_github_gpg_secrets',
-                'is_github': True,
-            })
+            backends.append(
+                {
+                    'name': 'github',
+                    'environ_export': self._github_org_environ(),
+                    'upload_secret_cmd': 'upload_github_secrets',
+                    'gpg_upload_cmd': 'upload_github_gpg_secrets',
+                    'is_github': True,
+                }
+            )
 
         if {'gitlab', 'kitware'} & set(tags):
-            backends.append({
-                'name': 'gitlab',
-                'environ_export': 'setup_package_environs_gitlab_kitware',
-                'upload_secret_cmd': 'upload_gitlab_repo_secrets',
-                'gpg_upload_cmd': 'upload_gitlab_gpg_secrets',
-                'is_github': False,
-            })
+            backends.append(
+                {
+                    'name': 'gitlab',
+                    'environ_export': 'setup_package_environs_gitlab_kitware',
+                    'upload_secret_cmd': 'upload_gitlab_repo_secrets',
+                    'gpg_upload_cmd': 'upload_gitlab_gpg_secrets',
+                    'is_github': False,
+                }
+            )
 
         if not backends:
             raise Exception(
@@ -2009,10 +2013,9 @@ class TemplateApplier:
             # provides its own progress visibility via the `_log` helper in
             # setup_secrets.sh.
             import subprocess
+
             text = script.finalize_text(with_gaurds=False)
-            proc = subprocess.run(
-                ['bash', '-c', text], cwd=str(self.repodir)
-            )
+            proc = subprocess.run(['bash', '-c', text], cwd=str(self.repodir))
             if proc.returncode != 0:
                 raise SystemExit(proc.returncode)
 

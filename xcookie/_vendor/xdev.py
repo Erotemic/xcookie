@@ -83,9 +83,7 @@ def difftext(
         if context_lines < 0:
             raise ValueError('context_lines must be nonnegative or None')
 
-        marked = [
-            bool(line) and line[0] in '+-?' for line in all_diff_lines
-        ]
+        marked = [bool(line) and line[0] in '+-?' for line in all_diff_lines]
         retained = marked[:]
         for offset in range(1, context_lines + 1):
             retained[:-offset] = map(

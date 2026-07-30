@@ -97,8 +97,6 @@ class CIPlan:
                     yield variant
 
 
-
-
 def uses_pyproject_dependency_mode(self: Any) -> bool:
     """Return True when CI should avoid legacy setup.py synthesized extras.
 
@@ -116,7 +114,9 @@ def uses_pyproject_dependency_mode(self: Any) -> bool:
 
 def uses_lockfile_ci(self: Any) -> bool:
     """Return True when CI should use checked-in lock constraints."""
-    return bool(uses_pyproject_dependency_mode(self) and self.config.get('use_uv'))
+    return bool(
+        uses_pyproject_dependency_mode(self) and self.config.get('use_uv')
+    )
 
 
 LOCK_REQUIREMENTS_DPATH = 'requirements/locks'
@@ -133,6 +133,7 @@ def lock_requirements_name(extras: Iterable[str]) -> str:
 def lock_requirements_path(extras: Iterable[str]) -> str:
     """Return the checked-in lock requirements path for an extras set."""
     return f'{LOCK_REQUIREMENTS_DPATH}/{lock_requirements_name(extras)}.txt'
+
 
 def _unique(items: Iterable[str]) -> tuple[str, ...]:
     """Return unique non-empty strings while preserving order."""
@@ -269,7 +270,8 @@ _CI_EXTRAS_TARGETS: dict[str, tuple[VariantKey, ...]] = {
 
 
 def _apply_ci_extras(
-    variant_extras: dict[VariantKey, list[str]], ci_extras: Mapping[str, list[str]]
+    variant_extras: dict[VariantKey, list[str]],
+    ci_extras: Mapping[str, list[str]],
 ) -> None:
     """Apply user extras in-place to variant-specific desired extras."""
     for variant_key, extras_list in ci_extras.items():
@@ -320,9 +322,7 @@ def make_ci_plan(self: Any) -> CIPlan:
         typecheck_extras = filter_pyproject_extras(
             self, desired_typecheck_extras
         )
-        sdist_test_extras = filter_pyproject_extras(
-            self, desired_sdist_extras
-        )
+        sdist_test_extras = filter_pyproject_extras(self, desired_sdist_extras)
     else:
         typecheck_extras = tuple()
         sdist_test_extras = tuple()

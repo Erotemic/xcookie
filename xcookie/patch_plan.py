@@ -130,7 +130,9 @@ class PatchPlan:
     missing_dir: list[Path] = field(default_factory=list)
     diff_texts: dict[Path, str] = field(default_factory=dict)
 
-    def add_copy(self, src: os.PathLike[str], dst: os.PathLike[str]) -> CopyTask:
+    def add_copy(
+        self, src: os.PathLike[str], dst: os.PathLike[str]
+    ) -> CopyTask:
         """Register a file-copy task and return it."""
         task = CopyTask(Path(src), Path(dst))
         self.copy.append(task)

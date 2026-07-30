@@ -21,7 +21,9 @@ def test_publish_template_uses_pyproject_build_not_setup_py() -> None:
 def test_generated_publish_script_matches_template_when_regenerated() -> None:
     script_fpath = Path('publish.sh')
     if not script_fpath.exists():
-        pytest.skip('source-tree publish.sh is not available in installed-package tests')
+        pytest.skip(
+            'source-tree publish.sh is not available in installed-package tests'
+        )
     template_text = _publish_template_text()
     script_text = script_fpath.read_text()
     assert script_text == template_text

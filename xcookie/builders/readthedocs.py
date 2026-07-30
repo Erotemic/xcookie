@@ -56,7 +56,11 @@ def build_readthedocs(self):
     data = default_data.copy()
 
     if self.config['use_pyproject_requirements']:
-        data['python']['install'][0] = {'method': 'pip', 'path': '.', 'extra_requirements': ['docs']}
+        data['python']['install'][0] = {
+            'method': 'pip',
+            'path': '.',
+            'extra_requirements': ['docs'],
+        }
     else:
         if 'cv2' in self.tags:
             data['python']['install'].insert(
