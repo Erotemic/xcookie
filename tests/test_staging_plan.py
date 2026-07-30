@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import stat
+from typing import cast
 
-from xcookie.main import TemplateApplier
+from xcookie.main import TemplateApplier, XCookieConfig
 from xcookie.patch_plan import PatchPlan
 from xcookie.template_registry import TemplateInfo
 
@@ -14,10 +15,16 @@ class MinimalConfig(dict):
 
 def _make_applier(staging_infos, *, regen=None, only_generate=None):
     applier = TemplateApplier.__new__(TemplateApplier)
-    applier.config = MinimalConfig(
-        regen=regen,
-        only_generate=only_generate,
-        verbose=0,
+    # This fixture intentionally bypasses TemplateApplier.__init__ and only
+    # supplies the mapping keys consumed by gather_tasks(). Keep the production
+    # attribute type precise and make the test-double boundary explicit here.
+    applier.config = cast(
+        XCookieConfig,
+        MinimalConfig(
+            regen=regen,
+            only_generate=only_generate,
+            verbose=0,
+        ),
     )
     applier.staging_infos = staging_infos
     return applier
