@@ -71,7 +71,6 @@ ExampleUsage:
 
 from __future__ import annotations
 
-import difflib
 import os
 import re
 import shutil
@@ -85,6 +84,7 @@ import toml
 import ubelt as ub
 from packaging.version import parse as Version
 
+from xcookie._vendor.xdev import difftext
 from xcookie.patch_plan import PatchPlan, SearchPattern, render_patch_plan
 from xcookie.resolved_config import resolve_xcookie_config
 from xcookie.staging import apply_template_context
@@ -95,32 +95,6 @@ from xcookie.template_registry import (
 )
 from xcookie.util.util_metadata import metadata_text
 from xcookie.util_command import make_command_queue
-
-
-def _difftext(
-    old_text: str,
-    new_text: str,
-    *,
-    context_lines: int = 3,
-    fromfile: object = 'before',
-    tofile: object = 'after',
-    **kwargs: Any,
-) -> str:
-    """Render a unified diff without requiring xdev/NumPy."""
-    kwargs.pop('colored', None)
-    kwargs.pop('style', None)
-    if kwargs:
-        unknown = ', '.join(sorted(kwargs))
-        raise TypeError(f'Unexpected diff arguments: {unknown}')
-    lines = difflib.unified_diff(
-        old_text.splitlines(),
-        new_text.splitlines(),
-        fromfile=str(fromfile),
-        tofile=str(tofile),
-        n=context_lines,
-        lineterm='',
-    )
-    return '\n'.join(lines)
 
 
 class SkipFile(Exception):
@@ -1749,7 +1723,6 @@ class TemplateApplier:
         regen_pat = SearchPattern.coerce(self.config.get('regen'))
         onlygen_pat = SearchPattern.coerce(self.config.get('only_generate'))
 
-        diff_style = 'unified'
         for info in self.staging_infos:
             stage_fpath = info['stage_fpath']
             repo_fpath = info['repo_fpath']
@@ -1766,29 +1739,14 @@ class TemplateApplier:
                     plan.missing.append(repo_fpath)
                     plan.add_copy(stage_fpath, repo_fpath)
                     stage_text = stage_fpath.read_text()
-                    # TODO: add style when available
-                    try:
-                        difftext = (
-                            _difftext(
-                                '',
-                                stage_text[:1000],
-                                colored=1,
-                                context_lines=2,
-                                style=diff_style,
-                            )
-                            + '...and more'
-                        )
-                    except Exception:
-                        difftext = (
-                            _difftext(
-                                '',
-                                stage_text[:1000],
-                                colored=1,
-                                context_lines=2,
-                            )
-                            + '...and more'
-                        )
-                    plan.diff_texts[repo_fpath] = difftext
+                    diff_text = difftext(
+                        '',
+                        stage_text[:1000],
+                        colored=True,
+                        context_lines=2,
+                    )
+                    diff_text += '...and more'
+                    plan.diff_texts[repo_fpath] = diff_text
             else:
                 assert stage_fpath.exists()
                 if stage_fpath.is_dir():
@@ -1796,23 +1754,15 @@ class TemplateApplier:
                 repo_text = repo_fpath.read_text()
                 stage_text = stage_fpath.read_text()
                 if stage_text.strip() == repo_text.strip():
-                    difftext = None
+                    diff_text = None
                 else:
-                    try:
-                        difftext = _difftext(
-                            repo_text, stage_text, colored=1, context_lines=1
-                        )
-                    except Exception:
-                        difftext = _difftext(
-                            repo_text,
-                            stage_text,
-                            colored=1,
-                            context_lines=1,
-                            style=diff_style,
-                            fromfile=repo_fpath,
-                            tofile=repo_fpath,
-                        )
-                if difftext:
+                    diff_text = difftext(
+                        repo_text,
+                        stage_text,
+                        colored=True,
+                        context_lines=1,
+                    )
+                if diff_text:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:
                         if regen_pat is not None:
@@ -1822,7 +1772,7 @@ class TemplateApplier:
                     if want_rewrite:
                         plan.add_copy(stage_fpath, repo_fpath)
                         plan.dirty.append(repo_fpath)
-                        plan.diff_texts[repo_fpath] = difftext
+                        plan.diff_texts[repo_fpath] = diff_text
                     else:
                         plan.modified.append(repo_fpath)
                 else:

@@ -96,3 +96,5 @@ _skbuild
 pip-wheel-metadata/
 
 wheelhouse
+*.tar.gz
+git-of-theseus

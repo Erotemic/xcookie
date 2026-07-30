@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 from packaging.requirements import Requirement
@@ -40,3 +41,20 @@ def test_exported_locks_avoid_heavy_data_stack():
                 # Continuation/comment lines are not requirement entries.
                 continue
         assert resolved_names.isdisjoint(forbidden), lock_name
+
+
+def test_package_does_not_import_external_xdev():
+    package_dpath = Path(__file__).parents[1] / 'xcookie'
+    offenders: list[Path] = []
+    for source_fpath in package_dpath.rglob('*.py'):
+        tree = ast.parse(source_fpath.read_text(), filename=str(source_fpath))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or '']
+            else:
+                continue
+            if any(name == 'xdev' or name.startswith('xdev.') for name in names):
+                offenders.append(source_fpath.relative_to(package_dpath.parent))
+    assert not offenders
