@@ -72,14 +72,19 @@ class ArtifactTestCase:
         return f'{self.gitlab_cpver}-{self.platform.gitlab_swenv_key}'
 
     def github_matrix_item(self) -> dict[str, str]:
+        from xcookie.constants import is_prerelease_python_version
+
         github_os = self.platform.github_os
         if github_os is None:
             raise ValueError('github matrix item requires github_os')
+        is_prerelease = is_prerelease_python_version(self.python_version)
         item = {
             'python-version': self.python_version,
             'install-extras': self.install_extras,
             'os': github_os,
             'arch': self.platform.arch,
+            'allow-prereleases': 'true' if is_prerelease else 'false',
+            'check-latest': 'true' if is_prerelease else 'false',
         }
         item['use-lockfile'] = 'true' if self.use_lockfile else 'false'
         if self.lock_requirements is not None:

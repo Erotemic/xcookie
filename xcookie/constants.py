@@ -13,11 +13,11 @@ KNOWN_PYTHON_VERSIONS: List[str] = [
     '3.12',
     '3.13',
     '3.14',
+    '3.15',
 ]
 
 DEV_PYTHON_VERSIONS: List[str] = [
-    # '3.13',
-    # '3.14',
+    '3.15',
 ]
 
 # The major.minor PyPy versions that have been released and that GitHub Actions
@@ -35,8 +35,7 @@ KNOWN_PYPY_VERSIONS: List[str] = [
 
 
 KNOWN_CPYTHON_DOCKER_IMAGES: Dict[str, str] = {
-    # TODO allow rc?
-    # 'cp315': 'python:3.15-dev',
+    'cp315': 'python:3.15-rc',
     'cp314': 'python:3.14',
     'cp313': 'python:3.13',
     'cp312': 'python:3.12',
@@ -55,7 +54,12 @@ KNOWN_CPYTHON_DOCKER_IMAGES: Dict[str, str] = {
 # TODO: make a table of details about each version
 # https://devguide.python.org/versions/
 KNOWN_PYTHON_VERSION_INFO: List[dict] = [
-    # {'version': '3.15', 'end_of_life': '---', 'github_action_version': '3.14.0-rc.1', 'is_prerelease': True},
+    {
+        'version': '3.15',
+        'end_of_life': '2031-10',
+        'github_action_version': '3.15',
+        'is_prerelease': True,
+    },
     {
         'version': '3.14',
         'end_of_life': '2030-10',
@@ -74,3 +78,13 @@ KNOWN_PYTHON_VERSION_INFO: List[dict] = [
     {'version': '3.4', 'end_of_life': '2019-03-18'},
     {'version': '2.7', 'end_of_life': '2020-01-01'},
 ]
+
+
+def is_prerelease_python_version(version: str) -> bool:
+    """Return whether a configured CPython line is still a prerelease."""
+    version_parts = str(version).split('.')
+    version_key = '.'.join(version_parts[:2])
+    for info in KNOWN_PYTHON_VERSION_INFO:
+        if info['version'] == version_key:
+            return bool(info.get('is_prerelease', False))
+    return False

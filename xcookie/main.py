@@ -71,6 +71,7 @@ ExampleUsage:
 
 from __future__ import annotations
 
+import difflib
 import os
 import re
 import shutil
@@ -82,7 +83,6 @@ from typing import Any, cast
 import kwconf
 import toml
 import ubelt as ub
-import xdev
 from packaging.version import parse as Version
 
 from xcookie.patch_plan import PatchPlan, SearchPattern, render_patch_plan
@@ -94,6 +94,33 @@ from xcookie.template_registry import (
     coerce_template_infos,
 )
 from xcookie.util.util_metadata import metadata_text
+from xcookie.util_command import make_command_queue
+
+
+def _difftext(
+    old_text: str,
+    new_text: str,
+    *,
+    context_lines: int = 3,
+    fromfile: object = 'before',
+    tofile: object = 'after',
+    **kwargs: Any,
+) -> str:
+    """Render a unified diff without requiring xdev/NumPy."""
+    kwargs.pop('colored', None)
+    kwargs.pop('style', None)
+    if kwargs:
+        unknown = ', '.join(sorted(kwargs))
+        raise TypeError(f'Unexpected diff arguments: {unknown}')
+    lines = difflib.unified_diff(
+        old_text.splitlines(),
+        new_text.splitlines(),
+        fromfile=str(fromfile),
+        tofile=str(tofile),
+        n=context_lines,
+        lineterm='',
+    )
+    return '\n'.join(lines)
 
 
 class SkipFile(Exception):
@@ -1458,9 +1485,7 @@ class TemplateApplier:
                 """
             )
             print(create_new_repo_info)
-            import cmd_queue
-
-            queue = cmd_queue.Queue.create(cwd=self.repodir)
+            queue = make_command_queue(cwd=self.repodir)
             git_dpath = self.repodir / '.git'
             if not git_dpath.exists():
                 queue.submit('git init')
@@ -1744,7 +1769,7 @@ class TemplateApplier:
                     # TODO: add style when available
                     try:
                         difftext = (
-                            xdev.difftext(
+                            _difftext(
                                 '',
                                 stage_text[:1000],
                                 colored=1,
@@ -1755,7 +1780,7 @@ class TemplateApplier:
                         )
                     except Exception:
                         difftext = (
-                            xdev.difftext(
+                            _difftext(
                                 '',
                                 stage_text[:1000],
                                 colored=1,
@@ -1774,11 +1799,11 @@ class TemplateApplier:
                     difftext = None
                 else:
                     try:
-                        difftext = xdev.difftext(
+                        difftext = _difftext(
                             repo_text, stage_text, colored=1, context_lines=1
                         )
                     except Exception:
-                        difftext = xdev.difftext(
+                        difftext = _difftext(
                             repo_text,
                             stage_text,
                             colored=1,
@@ -1951,9 +1976,7 @@ class TemplateApplier:
         # dev/secrets_configuration.sh with backend-specific VARNAME_* values.
         backends = self._secret_rotation_backends()
 
-        import cmd_queue
-
-        script = cmd_queue.Queue.create(
+        script = make_command_queue(
             cwd=self.repodir, backend='serial', log=False
         )
         script.submit(f'source {setup_secrets_fpath}', log=False)

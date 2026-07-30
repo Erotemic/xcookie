@@ -140,6 +140,14 @@ def test_pypy_auto_locks_to_supported_range(tmp_path):
         assert pyver in resolved.supported_python_versions
 
 
+def test_supported_python_auto_includes_315_prerelease(tmp_path):
+    resolved = _resolve_pypy(
+        tmp_path, tags='github,purepy', min_python='3.14'
+    )
+    assert resolved.supported_python_versions == ('3.14', '3.15')
+    assert resolved.ci_cpython_versions == ('3.14', '3.15')
+
+
 def test_pypy_auto_disabled_without_purepy(tmp_path):
     resolved = _resolve_pypy(tmp_path, tags='github,binpy', min_python='3.8')
     assert resolved.ci_pypy_versions == ()

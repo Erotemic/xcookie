@@ -1,8 +1,15 @@
+from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
 def _make_applier(
-    tmp_path, *, tags, use_pyproject_requirements=False, min_python=None, use_setup_py=False
+    tmp_path,
+    *,
+    tags,
+    use_pyproject_requirements=False,
+    min_python=None,
+    max_python=None,
+    use_setup_py=False,
 ):
     kwargs = dict(
         repodir=tmp_path,
@@ -16,6 +23,8 @@ def _make_applier(
     )
     if min_python is not None:
         kwargs['min_python'] = min_python
+    if max_python is not None:
+        kwargs['max_python'] = max_python
     cfg = XCookieConfig(**kwargs)
     cfg['enable_gpg'] = False
     cfg['deploy'] = False
@@ -42,6 +51,9 @@ def test_github_purepy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert 'refs/heads/release' not in text
     assert 'concurrency:' in text
     assert 'cancel-in-progress: true' in text
+    assert '3.15' in text
+    assert 'allow-prereleases:' in text
+    assert 'check-latest:' in text
 
 
 def test_github_binpy_uses_shared_workflow_plan_and_test_cases(tmp_path):
@@ -60,6 +72,60 @@ def test_github_binpy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert 'refs/heads/release' not in text
     assert 'concurrency:' in text
     assert 'cancel-in-progress: true' in text
+    assert 'CIBW_ENABLE: cpython-prerelease' in text
+    cibw_version = ACTION_VERSIONS['pypa/cibuildwheel']
+    assert f'pypa/cibuildwheel@{cibw_version}' in text
+
+
+def _assert_all_setup_python_steps_allow_prereleases(text):
+    lines = text.splitlines()
+    setup_blocks = []
+    for index, line in enumerate(lines):
+        if 'uses: actions/setup-python@' not in line:
+            continue
+        uses_indent = len(line) - len(line.lstrip())
+        block = [line]
+        for candidate in lines[index + 1 :]:
+            stripped = candidate.strip()
+            indent = len(candidate) - len(candidate.lstrip())
+            if stripped and indent < uses_indent:
+                break
+            block.append(candidate)
+        setup_blocks.append('\n'.join(block))
+
+    assert setup_blocks
+    for block in setup_blocks:
+        assert 'allow-prereleases:' in block
+        assert 'check-latest:' in block
+        assert 'allow-prereleases: false' not in block
+        assert 'check-latest: false' not in block
+
+
+def test_github_only_prerelease_python_uses_it_as_main(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        min_python='3.15',
+        max_python='3.15',
+    )
+    tests_text = self.build_github_actions_tests()
+    assert 'Set up Python max' not in tests_text
+    assert '3.15' in tests_text
+    _assert_all_setup_python_steps_allow_prereleases(tests_text)
+
+    release_text = self.build_github_actions_release()
+    _assert_all_setup_python_steps_allow_prereleases(release_text)
+
+
+def test_gitlab_315_uses_prerelease_docker_image(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['gitlab', 'purepy'],
+        min_python='3.15',
+        max_python='3.15',
+    )
+    text = self.build_gitlab_ci()
+    assert 'python:3.15-rc' in text
 
 
 def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):

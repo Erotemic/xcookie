@@ -457,13 +457,15 @@ def get_supported_platform_info(self):
     # agnostic jobs.
     main_python_version = self.config['main_python']
     if main_python_version == 'max':
-        # import kwutil
+        main_python_version = None
         for pyver in supported_py_versions[::-1]:
             info = INFO_LUT[pyver]
             if info.get('is_prerelease'):
                 continue
             main_python_version = pyver
             break
+        if main_python_version is None:
+            main_python_version = supported_py_versions[-1]
     elif main_python_version == 'min':
         main_python_version = supported_py_versions[0]
     else:
@@ -476,8 +478,11 @@ def get_supported_platform_info(self):
     # be a prerelease version.
     cpython_versions_non34_ = []
     cpython_versions_non34_non_prerelease_ = []
+    prerelease_python_versions = []
     for pyver in cpython_versions_non34:
         info = INFO_LUT[pyver]
+        if info.get('is_prerelease'):
+            prerelease_python_versions.append(pyver)
         if 'github_action_version' in info:
             pyver = info['github_action_version']
         cpython_versions_non34_.append(pyver)
@@ -498,7 +503,10 @@ def get_supported_platform_info(self):
         elif v == 'min':
             v = [cpython_versions_non34_[0]]
         elif v == 'max':
-            v = [cpython_versions_non34_non_prerelease_[-1]]
+            max_candidates = cpython_versions_non34_non_prerelease_
+            if not max_candidates:
+                max_candidates = cpython_versions_non34_
+            v = [max_candidates[-1]]
             # v = [cpython_versions_non34_[-1]]
         elif v == 'main':
             v = [main_python_version]
@@ -515,6 +523,7 @@ def get_supported_platform_info(self):
         'os_list': os_list,
         'cpython_versions': cpython_versions_non34,
         'pypy_versions': pypy_versions,
+        'prerelease_python_versions': prerelease_python_versions,
         # 'min_python_version': supported_py_versions[0],
         # 'max_python_version': supported_py_versions[-1],
         'main_python_version': main_python_version,

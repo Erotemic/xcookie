@@ -121,6 +121,21 @@ def _version_assign_command(applier, varname: str = 'VERSION') -> str:
     return common_ci.make_project_version_assignment(applier, varname)
 
 
+def _setup_python_inputs(
+    configured_version: str, *, rendered_version: str | None = None
+) -> dict[str, str]:
+    """Build setup-python inputs, including prerelease resolution flags."""
+    from xcookie.constants import is_prerelease_python_version
+
+    inputs = {
+        'python-version': rendered_version or configured_version,
+    }
+    if is_prerelease_python_version(configured_version):
+        inputs['allow-prereleases'] = 'true'
+        inputs['check-latest'] = 'true'
+    return inputs
+
+
 class Actions:
     """
     Help build Github Action JSON objects
@@ -980,9 +995,7 @@ def lint_job(self, plan: CIPlan | None = None):
             Actions.setup_python(
                 {
                     'name': f'Set up Python {main_python_version} for linting',
-                    'with': {
-                        'python-version': main_python_version,
-                    },
+                    'with': _setup_python_inputs(main_python_version),
                 }
             ),
             {
@@ -1081,7 +1094,7 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
             Actions.setup_python(
                 {
                     'name': f'Set up Python {main_python_version}',
-                    'with': {'python-version': main_python_version},
+                    'with': _setup_python_inputs(main_python_version),
                 }
             ),
             {
@@ -1460,6 +1473,8 @@ def build_binpy_wheels_job(self):
 
     cibw_action = Actions.cibuildwheel(sensible=True)
     cibw_action['env'].update(vcpkg_cibw_env)
+    if supported_platform_info['prerelease_python_versions']:
+        cibw_action['env']['CIBW_ENABLE'] = 'cpython-prerelease'
     if versionless:
         # The single pinned build (and any skips) lives in
         # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
@@ -1511,7 +1526,7 @@ def build_binpy_wheels_job(self):
                 {
                     'name': f'Set up Python {main_python_version} to combine coverage',
                     'if': "runner.os == 'Linux'",
-                    'with': {'python-version': main_python_version},
+                    'with': _setup_python_inputs(main_python_version),
                 }
             ),
             Actions.combine_coverage(),
@@ -1587,7 +1602,12 @@ def build_purewheel_job(self) -> dict[str, JSON]:
         job_steps.append(Actions.setup_qemu(sensible=True))
     job_steps += [
         Actions.setup_python(
-            {'with': {'python-version': '${{ matrix.python-version }}'}}
+            {
+                'with': _setup_python_inputs(
+                    main_python_version,
+                    rendered_version='${{ matrix.python-version }}',
+                )
+            }
         ),
         {
             'name': 'Build pure wheel',
@@ -1628,7 +1648,7 @@ def build_sdist_job(self):
             Actions.setup_python(
                 {
                     'name': f'Set up Python {main_python_version}',
-                    'with': {'python-version': main_python_version},
+                    'with': _setup_python_inputs(main_python_version),
                 }
             ),
             {
@@ -1706,6 +1726,8 @@ def build_binpy_wheels_release_job(self):
 
     cibw_action = Actions.cibuildwheel(sensible=True)
     cibw_action['env'].update(vcpkg_cibw_env)
+    if supported_platform_info['prerelease_python_versions']:
+        cibw_action['env']['CIBW_ENABLE'] = 'cpython-prerelease'
     if versionless:
         # The single pinned build (and any skips) lives in
         # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
@@ -1836,7 +1858,13 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         action_steps += [Actions.setup_qemu(sensible=True)]
     action_steps += [
         Actions.setup_python(
-            {'with': {'python-version': '${{ matrix.python-version }}'}}
+            {
+                'with': {
+                    'python-version': '${{ matrix.python-version }}',
+                    'allow-prereleases': '${{ matrix.allow-prereleases }}',
+                    'check-latest': '${{ matrix.check-latest }}',
+                }
+            }
         ),
         Actions.download_artifact(
             {

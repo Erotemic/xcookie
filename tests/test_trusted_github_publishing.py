@@ -1,6 +1,7 @@
 import sys
 import types
 
+from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
@@ -145,7 +146,8 @@ def test_release_workflow_binpy_uses_cibuildwheel(tmp_path):
     ).build_github_actions_release()
 
     assert 'build_binpy_wheels:' in text
-    assert 'pypa/cibuildwheel@v3.3.1' in text
+    cibw_version = ACTION_VERSIONS['pypa/cibuildwheel']
+    assert f'pypa/cibuildwheel@{cibw_version}' in text
     assert 'test_binpy_wheels:' not in text
     assert 'pypa/gh-action-pypi-publish@release/v1' in text
 
