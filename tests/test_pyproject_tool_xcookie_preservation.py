@@ -92,6 +92,9 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
                         'dev_status': 'beta',
                         'remote_host': 'github.com',
                         'remote_group': 'example',
+                        'typecheck_extra_paths': [
+                            'tests/typecheck_consumer.py'
+                        ],
                         'entry_points': {
                             'console_scripts': [
                                 'demo=demo_mod.__main__:main',
@@ -130,6 +133,9 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
     assert xcookie_block['dev_status'] == 'beta'
     assert xcookie_block['remote_host'] == 'github.com'
     assert xcookie_block['remote_group'] == 'example'
+    assert xcookie_block['typecheck_extra_paths'] == [
+        'tests/typecheck_consumer.py'
+    ]
     assert xcookie_block['entry_points']['console_scripts'] == [
         'demo=demo_mod.__main__:main',
     ]

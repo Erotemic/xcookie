@@ -81,6 +81,17 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     else:
         pip_install_reqs = f'pip install -r {req_files_text}'
 
+    targets = [f'./{self.rel_mod_dpath}']
+    extra_targets = self.config.get('typecheck_extra_paths', []) or []
+    if isinstance(extra_targets, str):
+        extra_targets = [extra_targets]
+    for target in extra_targets:
+        target = str(target)
+        if not target.startswith(('/', './', '../')):
+            target = './' + target
+        targets.append(target)
+    target_text = ' '.join(shlex.quote(target) for target in targets)
+
     commands = []
 
     if 'mypy' in checkers:
@@ -89,8 +100,8 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
             pip_install_reqs,
             # TODO; this likely needs to be replaced with some explicit
             # registration of what typing requirements are for the library
-            # f'mypy --install-types --non-interactive ./{self.rel_mod_dpath}',
-            f'mypy ./{self.rel_mod_dpath}',
+            # f'mypy --install-types --non-interactive {target_text}',
+            f'mypy {target_text}',
         ]
 
     if 'ty' in checkers:
@@ -99,7 +110,7 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
         commands += [
             'python -m pip install ty',
             pip_install_reqs,
-            f'ty check ./{self.rel_mod_dpath}',
+            f'ty check {target_text}',
         ]
 
     return commands

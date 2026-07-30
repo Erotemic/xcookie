@@ -95,6 +95,7 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'license',
         'dev_status',
         'typed',
+        'typecheck_extra_paths',
         'remote_host',
         'remote_group',
         'use_setup_py',
@@ -103,7 +104,8 @@ def _build_xcookie_tool_config(self, pyproj_config):
     raw_config = ub.udict(ub.dict_subset(self.config, options_to_save))
 
     # Start with the explicit on-disk settings so nested user config such as
-    # entry_points, package_data, ci_blocklist, and ci_allow_failure
+    # entry_points, package_data, ci_blocklist, ci_allow_failure, and
+    # typecheck_extra_paths
     # survive regeneration.
     config_to_save = ub.udict(existing_tool)
 
@@ -152,6 +154,8 @@ def _build_xcookie_tool_config(self, pyproj_config):
             }
         elif key == 'dev_status':
             should_save = should_save or value != 'planning'
+        elif key == 'typecheck_extra_paths':
+            should_save = should_save or bool(value)
         elif key in {'remote_host', 'remote_group'}:
             # These are usually inferred from the URL and need not be persisted
             # unless the user explicitly had them on disk already.

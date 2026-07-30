@@ -11,6 +11,7 @@ def _make_applier(
     max_python=None,
     use_setup_py=False,
     ci_allow_failure=None,
+    typecheck_extra_paths=None,
 ):
     kwargs = dict(
         repodir=tmp_path,
@@ -35,6 +36,8 @@ def _make_applier(
     cfg['use_setup_py'] = use_setup_py
     if ci_allow_failure is not None:
         cfg['ci_allow_failure'] = ci_allow_failure
+    if typecheck_extra_paths is not None:
+        cfg['typecheck_extra_paths'] = typecheck_extra_paths
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -328,3 +331,16 @@ def test_github_allow_failure_rules_normalize_experimental_steps(tmp_path):
     stable_text = stable_self.build_github_actions_tests()
     assert continue_expr not in stable_text
     assert 'Report experimental failure' not in stable_text
+
+
+def test_github_typecheck_extra_paths_are_rendered(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy', 'mypy'],
+        typecheck_extra_paths=['tests/typecheck_consumer.py'],
+    )
+    self.config['linter'] = True
+    text = self.build_github_actions_tests()
+    expected_targets = './demo_pkg ./tests/typecheck_consumer.py'
+    assert f'mypy {expected_targets}' in text
+    assert f'ty check {expected_targets}' in text

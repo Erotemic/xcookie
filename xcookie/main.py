@@ -246,6 +246,17 @@ class XCookieConfig(kwconf.Config):
             """
             ),
         ),
+        'typecheck_extra_paths': kwconf.Value(
+            [],
+            help=ub.paragraph(
+                """
+            Additional repository-relative files or directories to pass to each
+            configured type checker after the main importable module. This is
+            useful for consumer-facing assert_type contracts that should be
+            checked without type-checking the entire test suite.
+            """
+            ),
+        ),
         'ci_versions_minimal_strict': kwconf.Value('min', help='todo: sus out'),
         'ci_versions_full_strict': kwconf.Value('main'),
         'ci_versions_minimal_loose': kwconf.Value('main'),
