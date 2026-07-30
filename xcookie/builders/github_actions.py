@@ -1793,6 +1793,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         self, plan=plan, provider='github'
     )
     include = [case.github_matrix_item() for case in cases]
+    has_allow_failure = any(case.allow_failure for case in cases)
 
     # Note: this job used to be guarded by
     # ``if: ! startsWith(github.event.ref, 'refs/heads/release')`` but the
@@ -1802,7 +1803,6 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         {
             'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
             'runs-on': '${{ matrix.os }}',
-            'continue-on-error': '${{ matrix.experimental || false }}',
             'needs': [] if needs is None else sorted(needs),
             'strategy': {
                 'fail-fast': False,
@@ -1850,6 +1850,21 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     else:
         custom_before_test_lines = []
 
+    setup_python_config = {
+        'with': {
+            'python-version': '${{ matrix.python-version }}',
+            'allow-prereleases': '${{ matrix.allow-prereleases }}',
+            'check-latest': '${{ matrix.check-latest }}',
+        }
+    }
+    if has_allow_failure:
+        setup_python_config.update(
+            {
+                'id': 'setup_python',
+                'continue-on-error': '${{ matrix.experimental || false }}',
+            }
+        )
+
     action_steps = []
     action_steps += [
         Actions.checkout(),
@@ -1867,15 +1882,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     if ci_model.any_test_case_needs_qemu(cases):
         action_steps += [Actions.setup_qemu(sensible=True)]
     action_steps += [
-        Actions.setup_python(
-            {
-                'with': {
-                    'python-version': '${{ matrix.python-version }}',
-                    'allow-prereleases': '${{ matrix.allow-prereleases }}',
-                    'check-latest': '${{ matrix.check-latest }}',
-                }
-            }
-        ),
+        Actions.setup_python(setup_python_config),
         Actions.download_artifact(
             {
                 'name': 'Download wheels',
@@ -1937,16 +1944,24 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
             )
         )
 
-    action_steps.append(
-        Actions.action(
-            {
-                'name': 'Install wheel ${{ matrix.install-extras }}',
-                'shell': 'bash',
-                'env': install_env,
-                'run': install_wheel_commands,
-            }
-        )
-    )
+    if has_allow_failure:
+        install_wheel_action = {
+            'name': 'Install wheel ${{ matrix.install-extras }}',
+            'id': 'install_wheel',
+            'if': "steps.setup_python.outcome == 'success'",
+            'continue-on-error': '${{ matrix.experimental || false }}',
+            'shell': 'bash',
+            'env': install_env,
+            'run': install_wheel_commands,
+        }
+    else:
+        install_wheel_action = {
+            'name': 'Install wheel ${{ matrix.install-extras }}',
+            'shell': 'bash',
+            'env': install_env,
+            'run': install_wheel_commands,
+        }
+    action_steps.append(Actions.action(install_wheel_action))
 
     smoke_enabled = 'win_smoke' in self.tags or 'windows_smoke' in self.tags
     if smoke_enabled:
@@ -1979,16 +1994,26 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
             PY
             """
         )
-        action_steps.append(
-            Actions.action(
-                {
-                    'name': 'Smoke test wheel on Windows',
-                    'if': "runner.os == 'Windows'",
-                    'shell': 'bash',
-                    'run': smoke_run,
-                }
-            )
-        )
+        if has_allow_failure:
+            smoke_test_action = {
+                'name': 'Smoke test wheel on Windows',
+                'id': 'smoke_test_wheel',
+                'if': (
+                    "runner.os == 'Windows' && "
+                    "steps.install_wheel.outcome == 'success'"
+                ),
+                'continue-on-error': '${{ matrix.experimental || false }}',
+                'shell': 'bash',
+                'run': smoke_run,
+            }
+        else:
+            smoke_test_action = {
+                'name': 'Smoke test wheel on Windows',
+                'if': "runner.os == 'Windows'",
+                'shell': 'bash',
+                'run': smoke_run,
+            }
+        action_steps.append(Actions.action(smoke_test_action))
 
     import kwutil
 
@@ -1999,29 +2024,77 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     if user_test_env:
         test_env.update(user_test_env)
 
-    action_steps.append(
-        Actions.action(
-            {
-                'name': 'Test wheel ${{ matrix.install-extras }}',
-                'shell': 'bash',
-                'env': test_env,
-                'run': install_and_test_wheel_parts['test_wheel_commands'],
-            }
-        )
-    )
+    if has_allow_failure:
+        test_wheel_action = {
+            'name': 'Test wheel ${{ matrix.install-extras }}',
+            'id': 'test_wheel',
+            'if': "steps.install_wheel.outcome == 'success'",
+            'continue-on-error': '${{ matrix.experimental || false }}',
+            'shell': 'bash',
+            'env': test_env,
+            'run': install_and_test_wheel_parts['test_wheel_commands'],
+        }
+    else:
+        test_wheel_action = {
+            'name': 'Test wheel ${{ matrix.install-extras }}',
+            'shell': 'bash',
+            'env': test_env,
+            'run': install_and_test_wheel_parts['test_wheel_commands'],
+        }
+    action_steps.append(Actions.action(test_wheel_action))
     if WITH_COVERAGE:
-        action_steps += [
-            Actions.combine_coverage(),
-            Actions.codecov_action(
-                {
-                    'name': 'Codecov Upload',
-                    'with': {
-                        'file': './coverage.xml',
-                        'token': '${{ secrets.CODECOV_TOKEN }}',
-                    },
-                }
-            ),
+        combine_coverage_step = dict(Actions.combine_coverage())
+        codecov_config = {
+            'name': 'Codecov Upload',
+            'with': {
+                'file': './coverage.xml',
+                'token': '${{ secrets.CODECOV_TOKEN }}',
+            },
+        }
+        if has_allow_failure:
+            combine_coverage_step['if'] = (
+                "runner.os == 'Linux' && "
+                "steps.test_wheel.outcome == 'success'"
+            )
+            codecov_config['if'] = (
+                "steps.test_wheel.outcome == 'success'"
+            )
+        codecov_step = Actions.codecov_action(codecov_config)
+        action_steps += [combine_coverage_step, codecov_step]
+
+    if has_allow_failure:
+        experimental_failure_checks = [
+            "steps.setup_python.outcome == 'failure'",
+            "steps.install_wheel.outcome == 'failure'",
+            "steps.test_wheel.outcome == 'failure'",
         ]
+        if smoke_enabled:
+            experimental_failure_checks.append(
+                "steps.smoke_test_wheel.outcome == 'failure'"
+            )
+        experimental_failure_expr = 'matrix.experimental && ('
+        experimental_failure_expr += ' || '.join(
+            experimental_failure_checks
+        )
+        experimental_failure_expr += ')'
+
+        action_steps.append(
+            Actions.action(
+                {
+                    'name': 'Report experimental failure',
+                    'if': experimental_failure_expr,
+                    'shell': 'bash',
+                    'run': ub.codeblock(
+                        """
+                        message="Experimental matrix entry failed; see logs above."
+                        echo "::warning title=Experimental CI failure::$message"
+                        echo "### Experimental CI failure" >> "$GITHUB_STEP_SUMMARY"
+                        echo "$message" >> "$GITHUB_STEP_SUMMARY"
+                        """
+                    ),
+                }
+            )
+        )
     job['steps'] = action_steps
     return job
 

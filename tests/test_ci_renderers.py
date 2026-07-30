@@ -307,13 +307,24 @@ def test_github_auto_setup_py_preserves_legacy_test_extras(tmp_path):
     assert 'requirements/locks/tests.txt' not in text
 
 
-def test_github_allow_failure_rules_render_continue_on_error(tmp_path):
+def test_github_allow_failure_rules_normalize_experimental_steps(tmp_path):
     self = _make_applier(
         tmp_path,
         tags=['github', 'purepy'],
         ci_allow_failure=[{'python-version': '3.15'}],
     )
     text = self.build_github_actions_tests()
-    assert 'continue-on-error: ${{ matrix.experimental || false }}' in text
+    continue_expr = 'continue-on-error: ${{ matrix.experimental || false }}'
+    assert text.count(continue_expr) == 3
+    assert 'id: setup_python' in text
+    assert 'id: install_wheel' in text
+    assert 'id: test_wheel' in text
+    assert 'Report experimental failure' in text
+    assert 'Experimental CI failure' in text
     assert "python-version: '3.15'" in text
     assert 'experimental: true' in text
+
+    stable_self = _make_applier(tmp_path, tags=['github', 'purepy'])
+    stable_text = stable_self.build_github_actions_tests()
+    assert continue_expr not in stable_text
+    assert 'Report experimental failure' not in stable_text

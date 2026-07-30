@@ -241,7 +241,8 @@ class XCookieConfig(kwconf.Config):
             List[Dict] of filters that mark generated GitHub Actions matrix
             jobs as experimental. Keys can be os, python-version, or any other
             generated matrix field, and values are glob strings. Matching jobs
-            still run, but their failure does not fail the workflow.
+            still run, but compatibility failures are reported as warnings and
+            do not fail the job or workflow.
             """
             ),
         ),
