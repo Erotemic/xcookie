@@ -191,3 +191,30 @@ def test_gitlab_binpy_workflow_plan_has_template_job_keys(tmp_path):
         workflow_plan.artifact_test_job_key == 'test/{variant_key}/{swenv_key}'
     )
     assert workflow_plan.artifact_test_cases
+
+
+def test_auto_setup_py_mode_preserves_existing_legacy_ci_contract(tmp_path):
+    (tmp_path / '.git').mkdir()
+    (tmp_path / 'setup.py').write_text('from setuptools import setup\n')
+    (tmp_path / 'pyproject.toml').write_text(
+        '[build-system]\nrequires = ["setuptools"]\n'
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_setup_py='auto',
+        use_pyproject_requirements=False,
+    )
+    assert self.config['use_setup_py'] is True
+    plan = ci_plan.make_ci_plan(self)
+    variants = plan.active_variants_by_key()
+    assert variants['minimal-loose'].extras == ('tests',)
+    assert variants['minimal-strict'].extras == (
+        'tests-strict',
+        'runtime-strict',
+    )
+    cases = ci_model.make_artifact_test_cases(
+        self, plan=plan, provider='github'
+    )
+    assert all(case.use_lockfile is False for case in cases)
+    assert all(case.lock_requirements is None for case in cases)

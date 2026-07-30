@@ -282,3 +282,23 @@ def test_github_release_resolves_version_tag_before_tagging(tmp_path):
     )
     assert release['with']['target_commitish'] == '${{ github.sha }}'
     assert '${{ github.ref }}' not in str(release['with'])
+
+
+def test_github_auto_setup_py_preserves_legacy_test_extras(tmp_path):
+    (tmp_path / '.git').mkdir()
+    (tmp_path / 'setup.py').write_text('from setuptools import setup\n')
+    (tmp_path / 'pyproject.toml').write_text(
+        '[build-system]\nrequires = ["setuptools"]\n'
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_setup_py='auto',
+        use_pyproject_requirements=False,
+    )
+    text = self.build_github_actions_tests()
+    assert self.config['use_setup_py'] is True
+    assert "install-extras: tests" in text
+    assert "install-extras: tests-strict,runtime-strict" in text
+    assert 'requirements/locks/runtime.txt' not in text
+    assert 'requirements/locks/tests.txt' not in text

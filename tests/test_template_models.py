@@ -175,3 +175,63 @@ def test_pypy_explicit_versions_pass_through(tmp_path):
         ci_pypy_versions=['3.10', '3.11'],
     )
     assert resolved.ci_pypy_versions == ('3.10', '3.11')
+
+
+def _base_resolved_config(tmp_path, **overrides):
+    config = {
+        'repodir': tmp_path,
+        'repo_name': None,
+        'mod_name': None,
+        'pkg_name': None,
+        'rel_mod_parent_dpath': 'src',
+        'tags': 'github,purepy',
+        'os': 'linux',
+        'is_new': 'auto',
+        'rotate_secrets': False,
+        'refresh_docs': False,
+        'author': 'Example Author',
+        'author_email': 'author@example.com',
+        'license': None,
+        'version': None,
+        'description': None,
+        'supported_python_versions': ['3.11'],
+        'ci_cpython_versions': 'auto',
+        'ci_pypy_versions': 'auto',
+        'use_uv': True,
+        'use_setup_py': 'auto',
+        'min_python': '3.11',
+        'max_python': None,
+    }
+    config.update(overrides)
+    return config
+
+
+def test_use_setup_py_auto_preserves_existing_legacy_repo(tmp_path):
+    (tmp_path / '.git').mkdir()
+    (tmp_path / 'setup.py').write_text('from setuptools import setup\n')
+    (tmp_path / 'pyproject.toml').write_text(
+        '[build-system]\nrequires = ["setuptools"]\n'
+    )
+    resolved = ResolvedXCookieConfig.from_config(
+        _base_resolved_config(tmp_path)
+    )
+    assert resolved.use_setup_py is True
+
+
+def test_use_setup_py_auto_prefers_pep621_project_table(tmp_path):
+    (tmp_path / '.git').mkdir()
+    (tmp_path / 'setup.py').write_text('from setuptools import setup\n')
+    (tmp_path / 'pyproject.toml').write_text(
+        '[project]\nname = "demo-pkg"\nversion = "0.0.0"\n'
+    )
+    resolved = ResolvedXCookieConfig.from_config(
+        _base_resolved_config(tmp_path)
+    )
+    assert resolved.use_setup_py is False
+
+
+def test_use_setup_py_auto_new_repo_defaults_to_pep621(tmp_path):
+    resolved = ResolvedXCookieConfig.from_config(
+        _base_resolved_config(tmp_path)
+    )
+    assert resolved.use_setup_py is False

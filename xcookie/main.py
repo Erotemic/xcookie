@@ -435,12 +435,15 @@ class XCookieConfig(kwconf.Config):
             False, help=ub.paragraph('experimental new style version testing')
         ),
         'use_setup_py': kwconf.Value(
-            False,
+            'auto',
             help=ub.paragraph(
                 """
             If False, do not generate setup.py and instead emit a fully-specified
             PEP621-compatible pyproject.toml. When True, the legacy setup.py
-            will be generated alongside a minimal pyproject.toml.
+            will be generated alongside a minimal pyproject.toml. The default
+            "auto" preserves setup.py metadata in existing legacy repositories
+            but uses PEP621 for new repositories and repositories that already
+            define a [project] table.
             """
             ),
         ),
@@ -2006,18 +2009,10 @@ class TemplateApplier:
 
         script.rprint()
         if self.config.confirm('Ready to rotate secrets?'):
-            # Bypass `script.run()` so we can drop cmd_queue's per-command
-            # `set -x` / `{ set +x; } 2>/dev/null` wrappers (with_gaurds).
-            # Those would re-enable xtrace inside every secret-handling
-            # function body and trace the tokens / GPG material. The script
-            # provides its own progress visibility via the `_log` helper in
-            # setup_secrets.sh.
-            import subprocess
-
-            text = script.finalize_text(with_gaurds=False)
-            proc = subprocess.run(['bash', '-c', text], cwd=str(self.repodir))
-            if proc.returncode != 0:
-                raise SystemExit(proc.returncode)
+            # The vendored serial queue does not add xtrace guards, so secret
+            # values remain untraced while its platform-aware Bash resolver is
+            # used consistently (including Git Bash on Windows).
+            script.run()
 
     def build_readthedocs(self):
         """
