@@ -1802,6 +1802,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         {
             'name': '${{ matrix.python-version }} on ${{ matrix.os }}, arch=${{ matrix.arch }} with ${{ matrix.install-extras }}',
             'runs-on': '${{ matrix.os }}',
+            'continue-on-error': '${{ matrix.experimental || false }}',
             'needs': [] if needs is None else sorted(needs),
             'strategy': {
                 'fail-fast': False,

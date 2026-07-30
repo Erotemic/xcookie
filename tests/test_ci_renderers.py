@@ -10,6 +10,7 @@ def _make_applier(
     min_python=None,
     max_python=None,
     use_setup_py=False,
+    ci_allow_failure=None,
 ):
     kwargs = dict(
         repodir=tmp_path,
@@ -32,6 +33,8 @@ def _make_applier(
     cfg['ci_cpython_versions'] = cfg['ci_cpython_versions'][-2:]
     cfg['use_pyproject_requirements'] = use_pyproject_requirements
     cfg['use_setup_py'] = use_setup_py
+    if ci_allow_failure is not None:
+        cfg['ci_allow_failure'] = ci_allow_failure
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -302,3 +305,15 @@ def test_github_auto_setup_py_preserves_legacy_test_extras(tmp_path):
     assert "install-extras: tests-strict,runtime-strict" in text
     assert 'requirements/locks/runtime.txt' not in text
     assert 'requirements/locks/tests.txt' not in text
+
+
+def test_github_allow_failure_rules_render_continue_on_error(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        ci_allow_failure=[{'python-version': '3.15'}],
+    )
+    text = self.build_github_actions_tests()
+    assert 'continue-on-error: ${{ matrix.experimental || false }}' in text
+    assert "python-version: '3.15'" in text
+    assert 'experimental: true' in text

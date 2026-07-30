@@ -8,7 +8,7 @@ and leaves provider-specific syntax to the provider renderers.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fnmatch import translate as glob_to_re
 import re
 from typing import Any, Literal, Mapping
@@ -50,9 +50,12 @@ class ArtifactTestCase:
     use_lockfile: bool = False
     lock_requirements: str | None = None
     gdal_requirement_txt: str | None = None
+    allow_failure: bool = False
 
     @property
-    def key(self) -> tuple[str, str, str, str, str, str | None, str | None]:
+    def key(
+        self,
+    ) -> tuple[str, str, str, str, str, str | None, str | None, bool]:
         return (
             self.variant.key,
             self.python_version,
@@ -61,6 +64,7 @@ class ArtifactTestCase:
             self.install_extras,
             self.lock_requirements if self.use_lockfile else None,
             self.gdal_requirement_txt,
+            self.allow_failure,
         )
 
     @property
@@ -71,14 +75,14 @@ class ArtifactTestCase:
     def gitlab_swenv_key(self) -> str:
         return f'{self.gitlab_cpver}-{self.platform.gitlab_swenv_key}'
 
-    def github_matrix_item(self) -> dict[str, str]:
+    def github_matrix_item(self) -> dict[str, str | bool]:
         from xcookie.constants import is_prerelease_python_version
 
         github_os = self.platform.github_os
         if github_os is None:
             raise ValueError('github matrix item requires github_os')
         is_prerelease = is_prerelease_python_version(self.python_version)
-        item = {
+        item: dict[str, str | bool] = {
             'python-version': self.python_version,
             'install-extras': self.install_extras,
             'os': github_os,
@@ -86,6 +90,8 @@ class ArtifactTestCase:
             'allow-prereleases': 'true' if is_prerelease else 'false',
             'check-latest': 'true' if is_prerelease else 'false',
         }
+        if self.allow_failure:
+            item['experimental'] = True
         item['use-lockfile'] = 'true' if self.use_lockfile else 'false'
         if self.lock_requirements is not None:
             item['lock-requirements'] = self.lock_requirements
@@ -238,14 +244,16 @@ def _variant_gdal_requirement(self: Any, variant: TestVariant) -> str | None:
     return 'requirements/gdal.txt'
 
 
-def _compile_ci_blocklist(rules: Any):
+def _compile_ci_rules(rules: Any):
     return [
         {k: re.compile(glob_to_re(str(pat))) for k, pat in rule.items()}
         for rule in (rules or ())
     ]
 
 
-def _is_blocked(item: Mapping[str, Any], compiled_rules: Any) -> bool:
+def _matches_any_rule(
+    item: Mapping[str, Any], compiled_rules: Any
+) -> bool:
     for crule in compiled_rules:
         if all(
             regex.fullmatch(str(item.get(k, ''))) for k, regex in crule.items()
@@ -340,11 +348,24 @@ def make_artifact_test_cases(
 
     if provider == 'github':
         ci_blocklist = Yaml.coerce(self.config.ci_blocklist)
-        compiled = _compile_ci_blocklist(ci_blocklist)
+        compiled_blocklist = _compile_ci_rules(ci_blocklist)
         cases = [
             case
             for case in cases
-            if not _is_blocked(case.github_matrix_item(), compiled)
+            if not _matches_any_rule(
+                case.github_matrix_item(), compiled_blocklist
+            )
+        ]
+
+        ci_allow_failure = Yaml.coerce(self.config.ci_allow_failure)
+        compiled_allow_failure = _compile_ci_rules(ci_allow_failure)
+        cases = [
+            replace(case, allow_failure=True)
+            if _matches_any_rule(
+                case.github_matrix_item(), compiled_allow_failure
+            )
+            else case
+            for case in cases
         ]
 
     return cases

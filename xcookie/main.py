@@ -234,6 +234,17 @@ class XCookieConfig(kwconf.Config):
             """
             ),
         ),
+        'ci_allow_failure': kwconf.Value(
+            [],
+            help=ub.paragraph(
+                """
+            List[Dict] of filters that mark generated GitHub Actions matrix
+            jobs as experimental. Keys can be os, python-version, or any other
+            generated matrix field, and values are glob strings. Matching jobs
+            still run, but their failure does not fail the workflow.
+            """
+            ),
+        ),
         'ci_versions_minimal_strict': kwconf.Value('min', help='todo: sus out'),
         'ci_versions_full_strict': kwconf.Value('main'),
         'ci_versions_minimal_loose': kwconf.Value('main'),

@@ -9,6 +9,7 @@ def _make_applier(
     use_pyproject_requirements=False,
     min_python=None,
     use_setup_py=False,
+    ci_allow_failure=None,
 ):
     if tags is None:
         tags = ['github', 'purepy']
@@ -34,6 +35,8 @@ def _make_applier(
     cfg['deploy'] = False
     cfg['use_pyproject_requirements'] = use_pyproject_requirements
     cfg['use_setup_py'] = use_setup_py
+    if ci_allow_failure is not None:
+        cfg['ci_allow_failure'] = ci_allow_failure
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -218,3 +221,24 @@ def test_auto_setup_py_mode_preserves_existing_legacy_ci_contract(tmp_path):
     )
     assert all(case.use_lockfile is False for case in cases)
     assert all(case.lock_requirements is None for case in cases)
+
+
+def test_github_allow_failure_rules_mark_matching_cases_experimental(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        ci_allow_failure=[{'python-version': '3.15'}],
+    )
+    cases = ci_model.make_artifact_test_cases(self, provider='github')
+    prerelease_cases = [
+        case for case in cases if case.python_version == '3.15'
+    ]
+    stable_cases = [case for case in cases if case.python_version != '3.15']
+    assert prerelease_cases
+    assert stable_cases
+    assert all(case.allow_failure for case in prerelease_cases)
+    assert all(not case.allow_failure for case in stable_cases)
+    assert all(
+        case.github_matrix_item()['experimental'] is True
+        for case in prerelease_cases
+    )

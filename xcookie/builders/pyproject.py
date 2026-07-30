@@ -103,7 +103,8 @@ def _build_xcookie_tool_config(self, pyproj_config):
     raw_config = ub.udict(ub.dict_subset(self.config, options_to_save))
 
     # Start with the explicit on-disk settings so nested user config such as
-    # entry_points, package_data, and ci_blocklist survives regeneration.
+    # entry_points, package_data, ci_blocklist, and ci_allow_failure
+    # survive regeneration.
     config_to_save = ub.udict(existing_tool)
 
     always_save = {
