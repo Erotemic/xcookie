@@ -1,11 +1,17 @@
-import sys
-import types
+import xcookie.main as main_mod
 
+from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
 def _make_applier(
-    tmp_path, *, trusted, enable_gpg, tags=None, min_python=None, use_setup_py='auto'
+    tmp_path,
+    *,
+    trusted,
+    enable_gpg,
+    tags=None,
+    min_python=None,
+    use_setup_py='auto',
 ):
     if tags is None:
         tags = ['github', 'erotemic', 'purepy']
@@ -58,35 +64,11 @@ class _FakeQueue:
         self.run_kwargs = kwargs
         return None
 
-    def finalize_text(self, **kwargs):
-        # TemplateApplier.rotate_secrets now bypasses Queue.run() so it can
-        # call cmd_queue's finalize_text(with_gaurds=False) and run the
-        # resulting bash with xtrace guards disabled.  Keep this test double
-        # side-effect-free while preserving the old "ran" signal and the
-        # submitted commands for orchestration assertions below.
-        self.ran = True
-        self.run_kwargs = kwargs
-        return 'true\n'
 
-
-def _patch_rotate_secret_shell(monkeypatch):
-    """Avoid invoking platform bash from rotate_secrets unit tests.
-
-    These tests verify the cmd_queue orchestration decisions.  The actual
-    subprocess execution is covered by production code and should not depend on
-    whether the test platform has a usable bash executable, especially on
-    Windows where GitHub-hosted runners may resolve ``bash`` to WSL.
-    """
-    calls = []
-
-    def fake_run(cmd, cwd=None, **kwargs):
-        calls.append({'cmd': cmd, 'cwd': cwd, 'kwargs': kwargs})
-        return types.SimpleNamespace(returncode=0)
-
-    import subprocess
-
-    monkeypatch.setattr(subprocess, 'run', fake_run)
-    return calls
+def _patch_command_queue(monkeypatch):
+    """Replace xcookie's vendored queue without invoking a real shell."""
+    _FakeQueue.created.clear()
+    monkeypatch.setattr(main_mod, 'make_command_queue', _FakeQueue.create)
 
 
 def test_template_registry_contains_tests_and_release_workflows(tmp_path):
@@ -145,7 +127,8 @@ def test_release_workflow_binpy_uses_cibuildwheel(tmp_path):
     ).build_github_actions_release()
 
     assert 'build_binpy_wheels:' in text
-    assert 'pypa/cibuildwheel@v3.3.1' in text
+    cibw_version = ACTION_VERSIONS['pypa/cibuildwheel']
+    assert f'pypa/cibuildwheel@{cibw_version}' in text
     assert 'test_binpy_wheels:' not in text
     assert 'pypa/gh-action-pypi-publish@release/v1' in text
 
@@ -191,12 +174,9 @@ def test_release_workflow_legacy_footer_keeps_twine_act_secrets(tmp_path):
 def test_rotate_secrets_trusted_without_gpg_skips_secret_upload(
     monkeypatch, tmp_path
 ):
-    _FakeQueue.created.clear()
-    fake_cmd_queue = types.SimpleNamespace(Queue=_FakeQueue)
-    monkeypatch.setitem(sys.modules, 'cmd_queue', fake_cmd_queue)
+    _patch_command_queue(monkeypatch)
 
     self = _make_applier(tmp_path, trusted=True, enable_gpg=False)
-    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     queue = _FakeQueue.created[-1]
@@ -221,13 +201,10 @@ def test_rotate_secrets_trusted_with_gpg_keeps_gpg_export_and_secret_upload(
     export the encrypted code-signing keys and upload the CI_SECRET-bearing
     repo secrets, even when trusted publishing is enabled.
     """
-    _FakeQueue.created.clear()
-    fake_cmd_queue = types.SimpleNamespace(Queue=_FakeQueue)
-    monkeypatch.setitem(sys.modules, 'cmd_queue', fake_cmd_queue)
+    _patch_command_queue(monkeypatch)
 
     self = _make_applier(tmp_path, trusted=True, enable_gpg=True)
     self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
-    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     queue = _FakeQueue.created[-1]
@@ -401,13 +378,9 @@ def test_default_transport_gitlab_matches_explicit_direct_ci(tmp_path):
 def test_rotate_secrets_direct_gpg_calls_gpg_upload_not_encrypt(
     monkeypatch, tmp_path
 ):
-    _FakeQueue.created.clear()
-    monkeypatch.setitem(
-        sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue)
-    )
+    _patch_command_queue(monkeypatch)
 
     self = _make_direct_gpg_applier(tmp_path, trusted=False)
-    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -423,13 +396,9 @@ def test_rotate_secrets_direct_gpg_calls_gpg_upload_not_encrypt(
 def test_rotate_secrets_direct_gpg_trusted_skips_non_gpg_upload(
     monkeypatch, tmp_path
 ):
-    _FakeQueue.created.clear()
-    monkeypatch.setitem(
-        sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue)
-    )
+    _patch_command_queue(monkeypatch)
 
     self = _make_direct_gpg_applier(tmp_path, trusted=True)
-    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -445,15 +414,11 @@ def test_rotate_secrets_direct_gpg_gitlab_excludes_ci_secret(
 ):
     """GitLab direct_ci rotate: gpg secrets uploaded, repo secrets called with
     direct_gpg mode (excluding CI_SECRET), and CI_SECRET not in any command."""
-    _FakeQueue.created.clear()
-    monkeypatch.setitem(
-        sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue)
-    )
+    _patch_command_queue(monkeypatch)
 
     self = _make_direct_gpg_applier(
         tmp_path, trusted=False, tags=['gitlab', 'kitware', 'purepy']
     )
-    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
@@ -473,14 +438,10 @@ def test_rotate_secrets_encrypted_repo_behavior_unchanged(
     ``upload_github_secrets``) without falling through to the new
     ``upload_github_gpg_secrets`` path.
     """
-    _FakeQueue.created.clear()
-    monkeypatch.setitem(
-        sys.modules, 'cmd_queue', types.SimpleNamespace(Queue=_FakeQueue)
-    )
+    _patch_command_queue(monkeypatch)
 
     self = _make_applier(tmp_path, trusted=False, enable_gpg=True)
     self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
-    _patch_rotate_secret_shell(monkeypatch)
     self.rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)

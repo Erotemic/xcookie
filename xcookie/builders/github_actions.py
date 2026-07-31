@@ -35,7 +35,9 @@ class GitHubActionsRenderer:
 
     def __init__(self, applier, plan: CIPlan | None = None):
         self.applier = applier
-        self.plan = plan if plan is not None else common_ci.make_ci_plan(applier)
+        self.plan = (
+            plan if plan is not None else common_ci.make_ci_plan(applier)
+        )
 
     def render_default(self) -> str:
         """Render the default GitHub workflow.
@@ -121,6 +123,21 @@ def _version_assign_command(applier, varname: str = 'VERSION') -> str:
     return common_ci.make_project_version_assignment(applier, varname)
 
 
+def _setup_python_inputs(
+    configured_version: str, *, rendered_version: str | None = None
+) -> dict[str, str]:
+    """Build setup-python inputs, including prerelease resolution flags."""
+    from xcookie.constants import is_prerelease_python_version
+
+    inputs = {
+        'python-version': rendered_version or configured_version,
+    }
+    if is_prerelease_python_version(configured_version):
+        inputs['allow-prereleases'] = 'true'
+        inputs['check-latest'] = 'true'
+    return inputs
+
+
 class Actions:
     """
     Help build Github Action JSON objects
@@ -204,7 +221,10 @@ class Actions:
     @classmethod
     def checkout(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
-            {'name': 'Checkout source', 'uses': _action_ref('actions/checkout')},
+            {
+                'name': 'Checkout source',
+                'uses': _action_ref('actions/checkout'),
+            },
             *args,
             **kwargs,
         )
@@ -212,7 +232,10 @@ class Actions:
     @classmethod
     def setup_python(cls, *args, **kwargs) -> JSON_Mapping:
         return cls.action(
-            {'name': 'Setup Python', 'uses': _action_ref('actions/setup-python')},
+            {
+                'name': 'Setup Python',
+                'uses': _action_ref('actions/setup-python'),
+            },
             *args,
             **kwargs,
         )
@@ -430,7 +453,9 @@ class Actions:
         )
 
 
-def _render_workflow_text(name, on_lines, jobs, footer='', concurrency_lines=None):
+def _render_workflow_text(
+    name, on_lines, jobs, footer='', concurrency_lines=None
+):
     workflow_kind = 'release' if name.endswith('Release') else 'tests'
     header = ub.codeblock(
         f"""
@@ -980,9 +1005,7 @@ def lint_job(self, plan: CIPlan | None = None):
             Actions.setup_python(
                 {
                     'name': f'Set up Python {main_python_version} for linting',
-                    'with': {
-                        'python-version': main_python_version,
-                    },
+                    'with': _setup_python_inputs(main_python_version),
                 }
             ),
             {
@@ -1081,7 +1104,7 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
             Actions.setup_python(
                 {
                     'name': f'Set up Python {main_python_version}',
-                    'with': {'python-version': main_python_version},
+                    'with': _setup_python_inputs(main_python_version),
                 }
             ),
             {
@@ -1460,6 +1483,8 @@ def build_binpy_wheels_job(self):
 
     cibw_action = Actions.cibuildwheel(sensible=True)
     cibw_action['env'].update(vcpkg_cibw_env)
+    if supported_platform_info['prerelease_python_versions']:
+        cibw_action['env']['CIBW_ENABLE'] = 'cpython-prerelease'
     if versionless:
         # The single pinned build (and any skips) lives in
         # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
@@ -1511,7 +1536,7 @@ def build_binpy_wheels_job(self):
                 {
                     'name': f'Set up Python {main_python_version} to combine coverage',
                     'if': "runner.os == 'Linux'",
-                    'with': {'python-version': main_python_version},
+                    'with': _setup_python_inputs(main_python_version),
                 }
             ),
             Actions.combine_coverage(),
@@ -1587,7 +1612,12 @@ def build_purewheel_job(self) -> dict[str, JSON]:
         job_steps.append(Actions.setup_qemu(sensible=True))
     job_steps += [
         Actions.setup_python(
-            {'with': {'python-version': '${{ matrix.python-version }}'}}
+            {
+                'with': _setup_python_inputs(
+                    main_python_version,
+                    rendered_version='${{ matrix.python-version }}',
+                )
+            }
         ),
         {
             'name': 'Build pure wheel',
@@ -1628,7 +1658,7 @@ def build_sdist_job(self):
             Actions.setup_python(
                 {
                     'name': f'Set up Python {main_python_version}',
-                    'with': {'python-version': main_python_version},
+                    'with': _setup_python_inputs(main_python_version),
                 }
             ),
             {
@@ -1706,6 +1736,8 @@ def build_binpy_wheels_release_job(self):
 
     cibw_action = Actions.cibuildwheel(sensible=True)
     cibw_action['env'].update(vcpkg_cibw_env)
+    if supported_platform_info['prerelease_python_versions']:
+        cibw_action['env']['CIBW_ENABLE'] = 'cpython-prerelease'
     if versionless:
         # The single pinned build (and any skips) lives in
         # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
@@ -1753,7 +1785,6 @@ def build_binpy_wheels_release_job(self):
     return job
 
 
-
 def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     if plan is None:
         plan = common_ci.make_ci_plan(self)
@@ -1762,6 +1793,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         self, plan=plan, provider='github'
     )
     include = [case.github_matrix_item() for case in cases]
+    has_allow_failure = any(case.allow_failure for case in cases)
 
     # Note: this job used to be guarded by
     # ``if: ! startsWith(github.event.ref, 'refs/heads/release')`` but the
@@ -1818,6 +1850,21 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     else:
         custom_before_test_lines = []
 
+    setup_python_config = {
+        'with': {
+            'python-version': '${{ matrix.python-version }}',
+            'allow-prereleases': '${{ matrix.allow-prereleases }}',
+            'check-latest': '${{ matrix.check-latest }}',
+        }
+    }
+    if has_allow_failure:
+        setup_python_config.update(
+            {
+                'id': 'setup_python',
+                'continue-on-error': '${{ matrix.experimental || false }}',
+            }
+        )
+
     action_steps = []
     action_steps += [
         Actions.checkout(),
@@ -1835,9 +1882,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     if ci_model.any_test_case_needs_qemu(cases):
         action_steps += [Actions.setup_qemu(sensible=True)]
     action_steps += [
-        Actions.setup_python(
-            {'with': {'python-version': '${{ matrix.python-version }}'}}
-        ),
+        Actions.setup_python(setup_python_config),
         Actions.download_artifact(
             {
                 'name': 'Download wheels',
@@ -1876,6 +1921,14 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         custom_before_test_lines=custom_before_test_lines,
         custom_after_test_commands=custom_after_test_commands,
     )
+    install_wheel_commands = install_and_test_wheel_parts[
+        'install_wheel_commands'
+    ]
+    if 'win' in self.config['os']:
+        install_wheel_commands = (
+            common_ci.make_windows_msvc_bash_path_commands()
+            + install_wheel_commands
+        )
 
     if len(self.config['ci_pypy_versions']) > 0 and 'osx' in self.config['os']:
         # When using pypy on OSX we need to set a MACOSX_DEPLOYMENT_TARGET so any
@@ -1891,16 +1944,24 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
             )
         )
 
-    action_steps.append(
-        Actions.action(
-            {
-                'name': 'Install wheel ${{ matrix.install-extras }}',
-                'shell': 'bash',
-                'env': install_env,
-                'run': install_and_test_wheel_parts['install_wheel_commands'],
-            }
-        )
-    )
+    if has_allow_failure:
+        install_wheel_action = {
+            'name': 'Install wheel ${{ matrix.install-extras }}',
+            'id': 'install_wheel',
+            'if': "steps.setup_python.outcome == 'success'",
+            'continue-on-error': '${{ matrix.experimental || false }}',
+            'shell': 'bash',
+            'env': install_env,
+            'run': install_wheel_commands,
+        }
+    else:
+        install_wheel_action = {
+            'name': 'Install wheel ${{ matrix.install-extras }}',
+            'shell': 'bash',
+            'env': install_env,
+            'run': install_wheel_commands,
+        }
+    action_steps.append(Actions.action(install_wheel_action))
 
     smoke_enabled = 'win_smoke' in self.tags or 'windows_smoke' in self.tags
     if smoke_enabled:
@@ -1933,16 +1994,26 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
             PY
             """
         )
-        action_steps.append(
-            Actions.action(
-                {
-                    'name': 'Smoke test wheel on Windows',
-                    'if': "runner.os == 'Windows'",
-                    'shell': 'bash',
-                    'run': smoke_run,
-                }
-            )
-        )
+        if has_allow_failure:
+            smoke_test_action = {
+                'name': 'Smoke test wheel on Windows',
+                'id': 'smoke_test_wheel',
+                'if': (
+                    "runner.os == 'Windows' && "
+                    "steps.install_wheel.outcome == 'success'"
+                ),
+                'continue-on-error': '${{ matrix.experimental || false }}',
+                'shell': 'bash',
+                'run': smoke_run,
+            }
+        else:
+            smoke_test_action = {
+                'name': 'Smoke test wheel on Windows',
+                'if': "runner.os == 'Windows'",
+                'shell': 'bash',
+                'run': smoke_run,
+            }
+        action_steps.append(Actions.action(smoke_test_action))
 
     import kwutil
 
@@ -1953,31 +2024,80 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     if user_test_env:
         test_env.update(user_test_env)
 
-    action_steps.append(
-        Actions.action(
-            {
-                'name': 'Test wheel ${{ matrix.install-extras }}',
-                'shell': 'bash',
-                'env': test_env,
-                'run': install_and_test_wheel_parts['test_wheel_commands'],
-            }
-        )
-    )
+    if has_allow_failure:
+        test_wheel_action = {
+            'name': 'Test wheel ${{ matrix.install-extras }}',
+            'id': 'test_wheel',
+            'if': "steps.install_wheel.outcome == 'success'",
+            'continue-on-error': '${{ matrix.experimental || false }}',
+            'shell': 'bash',
+            'env': test_env,
+            'run': install_and_test_wheel_parts['test_wheel_commands'],
+        }
+    else:
+        test_wheel_action = {
+            'name': 'Test wheel ${{ matrix.install-extras }}',
+            'shell': 'bash',
+            'env': test_env,
+            'run': install_and_test_wheel_parts['test_wheel_commands'],
+        }
+    action_steps.append(Actions.action(test_wheel_action))
     if WITH_COVERAGE:
-        action_steps += [
-            Actions.combine_coverage(),
-            Actions.codecov_action(
-                {
-                    'name': 'Codecov Upload',
-                    'with': {
-                        'file': './coverage.xml',
-                        'token': '${{ secrets.CODECOV_TOKEN }}',
-                    },
-                }
-            ),
+        combine_coverage_step = dict(Actions.combine_coverage())
+        codecov_config = {
+            'name': 'Codecov Upload',
+            'with': {
+                'file': './coverage.xml',
+                'token': '${{ secrets.CODECOV_TOKEN }}',
+            },
+        }
+        if has_allow_failure:
+            combine_coverage_step['if'] = (
+                "runner.os == 'Linux' && "
+                "steps.test_wheel.outcome == 'success'"
+            )
+            codecov_config['if'] = (
+                "steps.test_wheel.outcome == 'success'"
+            )
+        codecov_step = Actions.codecov_action(codecov_config)
+        action_steps += [combine_coverage_step, codecov_step]
+
+    if has_allow_failure:
+        experimental_failure_checks = [
+            "steps.setup_python.outcome == 'failure'",
+            "steps.install_wheel.outcome == 'failure'",
+            "steps.test_wheel.outcome == 'failure'",
         ]
+        if smoke_enabled:
+            experimental_failure_checks.append(
+                "steps.smoke_test_wheel.outcome == 'failure'"
+            )
+        experimental_failure_expr = 'matrix.experimental && ('
+        experimental_failure_expr += ' || '.join(
+            experimental_failure_checks
+        )
+        experimental_failure_expr += ')'
+
+        action_steps.append(
+            Actions.action(
+                {
+                    'name': 'Report experimental failure',
+                    'if': experimental_failure_expr,
+                    'shell': 'bash',
+                    'run': ub.codeblock(
+                        """
+                        message="Experimental matrix entry failed; see logs above."
+                        echo "::warning title=Experimental CI failure::$message"
+                        echo "### Experimental CI failure" >> "$GITHUB_STEP_SUMMARY"
+                        echo "$message" >> "$GITHUB_STEP_SUMMARY"
+                        """
+                    ),
+                }
+            )
+        )
     job['steps'] = action_steps
     return job
+
 
 def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
     """

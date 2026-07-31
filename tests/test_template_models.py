@@ -4,11 +4,13 @@ from xcookie.staging import apply_template_context
 
 
 def test_template_info_normalizes_tags():
-    info = TemplateInfo.coerce({
-        'fname': 'demo.txt',
-        'tags': 'github,purepy',
-        'overwrite': 1,
-    })
+    info = TemplateInfo.coerce(
+        {
+            'fname': 'demo.txt',
+            'tags': 'github,purepy',
+            'overwrite': 1,
+        }
+    )
     assert info.fname == 'demo.txt'
     assert info.tags == frozenset({'github', 'purepy'})
     assert info.tag_requirements_met({'github', 'purepy', 'erotemic'})
@@ -16,15 +18,16 @@ def test_template_info_normalizes_tags():
     assert info['overwrite'] is True
 
 
-
 def test_template_info_bool_strings_are_coerced():
-    info = TemplateInfo.coerce({
-        'fname': 'demo.txt',
-        'overwrite': 'false',
-        'enabled': '0',
-        'skip': 'none',
-        'template': 'yes',
-    })
+    info = TemplateInfo.coerce(
+        {
+            'fname': 'demo.txt',
+            'overwrite': 'false',
+            'enabled': '0',
+            'skip': 'none',
+            'template': 'yes',
+        }
+    )
     assert info.overwrite is False
     assert info.enabled is False
     assert info.skip is False
@@ -42,10 +45,12 @@ def test_template_info_rejects_ambiguous_bool_strings():
 
 
 def test_template_info_auto_bool_sentinel_is_truthy_for_legacy_config():
-    info = TemplateInfo.coerce({
-        'fname': 'setup.py',
-        'enabled': 'auto',
-    })
+    info = TemplateInfo.coerce(
+        {
+            'fname': 'setup.py',
+            'enabled': 'auto',
+        }
+    )
     assert info.enabled is True
 
 
@@ -62,7 +67,10 @@ def test_template_context_uses_posix_module_path(tmp_path):
         'xcookie <mod_name> <rel_mod_dpath> <AUTHOR> <AUTHOR_EMAIL>',
         context,
     )
-    assert text == 'demo_pkg demo_mod src/demo_mod Example Author author@example.com'
+    assert (
+        text
+        == 'demo_pkg demo_mod src/demo_mod Example Author author@example.com'
+    )
 
 
 def test_resolved_config_apply_to_config(tmp_path):
@@ -104,8 +112,9 @@ def test_resolved_config_apply_to_config(tmp_path):
     assert config['ci_pypy_versions'] == ['3.11']
 
 
-def _resolve_pypy(tmp_path, *, tags, min_python, max_python=None,
-                  ci_pypy_versions='auto'):
+def _resolve_pypy(
+    tmp_path, *, tags, min_python, max_python=None, ci_pypy_versions='auto'
+):
     config = {
         'repodir': tmp_path,
         'repo_name': None,
@@ -140,6 +149,12 @@ def test_pypy_auto_locks_to_supported_range(tmp_path):
         assert pyver in resolved.supported_python_versions
 
 
+def test_supported_python_auto_includes_315_prerelease(tmp_path):
+    resolved = _resolve_pypy(tmp_path, tags='github,purepy', min_python='3.14')
+    assert resolved.supported_python_versions == ('3.14', '3.15')
+    assert resolved.ci_cpython_versions == ('3.14', '3.15')
+
+
 def test_pypy_auto_disabled_without_purepy(tmp_path):
     resolved = _resolve_pypy(tmp_path, tags='github,binpy', min_python='3.8')
     assert resolved.ci_pypy_versions == ()
@@ -154,7 +169,69 @@ def test_pypy_auto_empty_when_no_compatible_release(tmp_path):
 
 def test_pypy_explicit_versions_pass_through(tmp_path):
     resolved = _resolve_pypy(
-        tmp_path, tags='github,purepy', min_python='3.9',
+        tmp_path,
+        tags='github,purepy',
+        min_python='3.9',
         ci_pypy_versions=['3.10', '3.11'],
     )
     assert resolved.ci_pypy_versions == ('3.10', '3.11')
+
+
+def _base_resolved_config(tmp_path, **overrides):
+    config = {
+        'repodir': tmp_path,
+        'repo_name': None,
+        'mod_name': None,
+        'pkg_name': None,
+        'rel_mod_parent_dpath': 'src',
+        'tags': 'github,purepy',
+        'os': 'linux',
+        'is_new': 'auto',
+        'rotate_secrets': False,
+        'refresh_docs': False,
+        'author': 'Example Author',
+        'author_email': 'author@example.com',
+        'license': None,
+        'version': None,
+        'description': None,
+        'supported_python_versions': ['3.11'],
+        'ci_cpython_versions': 'auto',
+        'ci_pypy_versions': 'auto',
+        'use_uv': True,
+        'use_setup_py': 'auto',
+        'min_python': '3.11',
+        'max_python': None,
+    }
+    config.update(overrides)
+    return config
+
+
+def test_use_setup_py_auto_preserves_existing_legacy_repo(tmp_path):
+    (tmp_path / '.git').mkdir()
+    (tmp_path / 'setup.py').write_text('from setuptools import setup\n')
+    (tmp_path / 'pyproject.toml').write_text(
+        '[build-system]\nrequires = ["setuptools"]\n'
+    )
+    resolved = ResolvedXCookieConfig.from_config(
+        _base_resolved_config(tmp_path)
+    )
+    assert resolved.use_setup_py is True
+
+
+def test_use_setup_py_auto_prefers_pep621_project_table(tmp_path):
+    (tmp_path / '.git').mkdir()
+    (tmp_path / 'setup.py').write_text('from setuptools import setup\n')
+    (tmp_path / 'pyproject.toml').write_text(
+        '[project]\nname = "demo-pkg"\nversion = "0.0.0"\n'
+    )
+    resolved = ResolvedXCookieConfig.from_config(
+        _base_resolved_config(tmp_path)
+    )
+    assert resolved.use_setup_py is False
+
+
+def test_use_setup_py_auto_new_repo_defaults_to_pep621(tmp_path):
+    resolved = ResolvedXCookieConfig.from_config(
+        _base_resolved_config(tmp_path)
+    )
+    assert resolved.use_setup_py is False

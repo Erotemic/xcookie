@@ -18,6 +18,6 @@ ACTION_VERSIONS = {
     'ibnesayeed/setup-ipfs': '0.6.0',
     'ilammy/msvc-dev-cmd': 'v1.13.0',
     'maxim-lobanov/setup-xcode': 'v1.6.0',
-    'pypa/cibuildwheel': 'v3.3.1',
+    'pypa/cibuildwheel': 'v4.1.1',
     'softprops/action-gh-release': 'v2.5.0',
 }

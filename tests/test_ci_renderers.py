@@ -1,8 +1,17 @@
+from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
 
 
 def _make_applier(
-    tmp_path, *, tags, use_pyproject_requirements=False, min_python=None, use_setup_py=False
+    tmp_path,
+    *,
+    tags,
+    use_pyproject_requirements=False,
+    min_python=None,
+    max_python=None,
+    use_setup_py=False,
+    ci_allow_failure=None,
+    typecheck_extra_paths=None,
 ):
     kwargs = dict(
         repodir=tmp_path,
@@ -16,6 +25,8 @@ def _make_applier(
     )
     if min_python is not None:
         kwargs['min_python'] = min_python
+    if max_python is not None:
+        kwargs['max_python'] = max_python
     cfg = XCookieConfig(**kwargs)
     cfg['enable_gpg'] = False
     cfg['deploy'] = False
@@ -23,6 +34,10 @@ def _make_applier(
     cfg['ci_cpython_versions'] = cfg['ci_cpython_versions'][-2:]
     cfg['use_pyproject_requirements'] = use_pyproject_requirements
     cfg['use_setup_py'] = use_setup_py
+    if ci_allow_failure is not None:
+        cfg['ci_allow_failure'] = ci_allow_failure
+    if typecheck_extra_paths is not None:
+        cfg['typecheck_extra_paths'] = typecheck_extra_paths
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -36,18 +51,28 @@ def test_github_purepy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert 'build_and_test_sdist:' in text
     assert 'matrix:' in text
     assert 'install-extras:' in text
-    assert 'minimal-strict' not in text  # GitHub matrix stores extras, not variant keys
+    assert (
+        'minimal-strict' not in text
+    )  # GitHub matrix stores extras, not variant keys
     # The tests workflow no longer runs on deploy-bearing refs at all;
     # release.yml owns them, so no job needs a release-ref guard.
     assert 'refs/heads/release' not in text
     assert 'concurrency:' in text
     assert 'cancel-in-progress: true' in text
+    assert '3.15' in text
+    assert 'allow-prereleases:' in text
+    assert 'check-latest:' in text
+    assert 'Prioritized MSVC linker directory:' in text
+    assert 'command -v cl.exe' in text
+    assert 'VSCMD_ARG_HOST_ARCH' not in text
+    assert 'VSCMD_ARG_TGT_ARCH' not in text
+    assert text.index('Prioritized MSVC linker directory:') < text.index(
+        'Installing helpers: update pip'
+    )
 
 
 def test_github_binpy_uses_shared_workflow_plan_and_test_cases(tmp_path):
-    self = _make_applier(
-        tmp_path, tags=['github', 'binpy'], min_python='3.10'
-    )
+    self = _make_applier(tmp_path, tags=['github', 'binpy'], min_python='3.10')
     text = self.build_github_actions_tests()
     assert 'build_binpy_wheels:' in text
     assert 'test_binpy_wheels:' in text
@@ -60,6 +85,60 @@ def test_github_binpy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert 'refs/heads/release' not in text
     assert 'concurrency:' in text
     assert 'cancel-in-progress: true' in text
+    assert 'CIBW_ENABLE: cpython-prerelease' in text
+    cibw_version = ACTION_VERSIONS['pypa/cibuildwheel']
+    assert f'pypa/cibuildwheel@{cibw_version}' in text
+
+
+def _assert_all_setup_python_steps_allow_prereleases(text):
+    lines = text.splitlines()
+    setup_blocks = []
+    for index, line in enumerate(lines):
+        if 'uses: actions/setup-python@' not in line:
+            continue
+        uses_indent = len(line) - len(line.lstrip())
+        block = [line]
+        for candidate in lines[index + 1 :]:
+            stripped = candidate.strip()
+            indent = len(candidate) - len(candidate.lstrip())
+            if stripped and indent < uses_indent:
+                break
+            block.append(candidate)
+        setup_blocks.append('\n'.join(block))
+
+    assert setup_blocks
+    for block in setup_blocks:
+        assert 'allow-prereleases:' in block
+        assert 'check-latest:' in block
+        assert 'allow-prereleases: false' not in block
+        assert 'check-latest: false' not in block
+
+
+def test_github_only_prerelease_python_uses_it_as_main(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        min_python='3.15',
+        max_python='3.15',
+    )
+    tests_text = self.build_github_actions_tests()
+    assert 'Set up Python max' not in tests_text
+    assert '3.15' in tests_text
+    _assert_all_setup_python_steps_allow_prereleases(tests_text)
+
+    release_text = self.build_github_actions_release()
+    _assert_all_setup_python_steps_allow_prereleases(release_text)
+
+
+def test_gitlab_315_uses_prerelease_docker_image(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['gitlab', 'purepy'],
+        min_python='3.15',
+        max_python='3.15',
+    )
+    text = self.build_gitlab_ci()
+    assert 'python:3.15-rc' in text
 
 
 def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
@@ -78,9 +157,7 @@ def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
 
 
 def test_gitlab_binpy_render_uses_artifact_test_cases(tmp_path):
-    self = _make_applier(
-        tmp_path, tags=['gitlab', 'binpy'], min_python='3.9'
-    )
+    self = _make_applier(tmp_path, tags=['gitlab', 'binpy'], min_python='3.9')
     text = self.build_gitlab_ci()
     assert 'build/cp' in text
     assert 'test/full-loose/cp' in text
@@ -94,7 +171,6 @@ def test_gitlab_binpy_render_uses_artifact_test_cases(tmp_path):
     assert 'CIBW_BUILD:' in text
 
 
-
 def test_gitlab_legacy_setup_py_render_keeps_synthetic_strict_extras(tmp_path):
     self = _make_applier(
         tmp_path,
@@ -105,7 +181,10 @@ def test_gitlab_legacy_setup_py_render_keeps_synthetic_strict_extras(tmp_path):
     text = self.build_gitlab_ci()
     assert 'export INSTALL_EXTRAS="tests-strict,runtime-strict"' in text
 
-def test_gitlab_purepy_gdal_cases_select_strict_and_loose_requirement_files(tmp_path):
+
+def test_gitlab_purepy_gdal_cases_select_strict_and_loose_requirement_files(
+    tmp_path,
+):
     self = _make_applier(tmp_path, tags=['gitlab', 'purepy', 'gdal'])
     text = self.build_gitlab_ci()
     assert 'requirements/gdal.txt' in text
@@ -172,7 +251,9 @@ def test_github_release_resolves_version_tag_before_tagging(tmp_path):
     self = _make_applier(tmp_path, tags=['github', 'binpy'], min_python='3.11')
     job = build_github_release(self)
     meta_steps = [
-        step for step in job['steps'] if step.get('name') == 'Resolve Release Tag'
+        step
+        for step in job['steps']
+        if step.get('name') == 'Resolve Release Tag'
     ]
     tag_steps = [
         step
@@ -198,7 +279,68 @@ def test_github_release_resolves_version_tag_before_tagging(tmp_path):
 
     release = release_steps[0]
     assert release['uses'].startswith('softprops/action-gh-release@')
-    assert release['with']['tag_name'] == '${{ steps.release_meta.outputs.tag }}'
-    assert release['with']['name'] == 'Release ${{ steps.release_meta.outputs.tag }}'
+    assert (
+        release['with']['tag_name'] == '${{ steps.release_meta.outputs.tag }}'
+    )
+    assert (
+        release['with']['name']
+        == 'Release ${{ steps.release_meta.outputs.tag }}'
+    )
     assert release['with']['target_commitish'] == '${{ github.sha }}'
     assert '${{ github.ref }}' not in str(release['with'])
+
+
+def test_github_auto_setup_py_preserves_legacy_test_extras(tmp_path):
+    (tmp_path / '.git').mkdir()
+    (tmp_path / 'setup.py').write_text('from setuptools import setup\n')
+    (tmp_path / 'pyproject.toml').write_text(
+        '[build-system]\nrequires = ["setuptools"]\n'
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_setup_py='auto',
+        use_pyproject_requirements=False,
+    )
+    text = self.build_github_actions_tests()
+    assert self.config['use_setup_py'] is True
+    assert "install-extras: tests" in text
+    assert "install-extras: tests-strict,runtime-strict" in text
+    assert 'requirements/locks/runtime.txt' not in text
+    assert 'requirements/locks/tests.txt' not in text
+
+
+def test_github_allow_failure_rules_normalize_experimental_steps(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        ci_allow_failure=[{'python-version': '3.15'}],
+    )
+    text = self.build_github_actions_tests()
+    continue_expr = 'continue-on-error: ${{ matrix.experimental || false }}'
+    assert text.count(continue_expr) == 3
+    assert 'id: setup_python' in text
+    assert 'id: install_wheel' in text
+    assert 'id: test_wheel' in text
+    assert 'Report experimental failure' in text
+    assert 'Experimental CI failure' in text
+    assert "python-version: '3.15'" in text
+    assert 'experimental: true' in text
+
+    stable_self = _make_applier(tmp_path, tags=['github', 'purepy'])
+    stable_text = stable_self.build_github_actions_tests()
+    assert continue_expr not in stable_text
+    assert 'Report experimental failure' not in stable_text
+
+
+def test_github_typecheck_extra_paths_are_rendered(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy', 'mypy'],
+        typecheck_extra_paths=['tests/typecheck_consumer.py'],
+    )
+    self.config['linter'] = True
+    text = self.build_github_actions_tests()
+    expected_targets = './demo_pkg ./tests/typecheck_consumer.py'
+    assert f'mypy {expected_targets}' in text
+    assert f'ty check {expected_targets}' in text

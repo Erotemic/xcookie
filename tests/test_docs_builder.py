@@ -45,7 +45,9 @@ def test_generated_conf_uses_modern_sphinx_defaults(tmp_path, monkeypatch):
     from xcookie.builders.docs import build_docs_conf
     from xcookie.util import util_code_format
 
-    monkeypatch.setattr(util_code_format, 'format_code', lambda text, *a, **kw: text)
+    monkeypatch.setattr(
+        util_code_format, 'format_code', lambda text, *a, **kw: text
+    )
 
     text = build_docs_conf(_fake_builder_self(tmp_path))
 

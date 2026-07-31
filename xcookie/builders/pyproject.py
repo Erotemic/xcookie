@@ -30,11 +30,7 @@ def _resolve_uv_exclude_newer(self, pyproj_config):
     if configured in (False, None, 'false', 'False', 'off'):
         return None
 
-    existing = (
-        pyproj_config.get('tool', {})
-        .get('uv', {})
-        .get('exclude-newer')
-    )
+    existing = pyproj_config.get('tool', {}).get('uv', {}).get('exclude-newer')
     if configured == 'auto':
         if existing:
             return existing
@@ -99,6 +95,7 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'license',
         'dev_status',
         'typed',
+        'typecheck_extra_paths',
         'remote_host',
         'remote_group',
         'use_setup_py',
@@ -107,7 +104,9 @@ def _build_xcookie_tool_config(self, pyproj_config):
     raw_config = ub.udict(ub.dict_subset(self.config, options_to_save))
 
     # Start with the explicit on-disk settings so nested user config such as
-    # entry_points, package_data, and ci_blocklist survives regeneration.
+    # entry_points, package_data, ci_blocklist, ci_allow_failure, and
+    # typecheck_extra_paths
+    # survive regeneration.
     config_to_save = ub.udict(existing_tool)
 
     always_save = {
@@ -155,6 +154,8 @@ def _build_xcookie_tool_config(self, pyproj_config):
             }
         elif key == 'dev_status':
             should_save = should_save or value != 'planning'
+        elif key == 'typecheck_extra_paths':
+            should_save = should_save or bool(value)
         elif key in {'remote_host', 'remote_group'}:
             # These are usually inferred from the URL and need not be persisted
             # unless the user explicitly had them on disk already.
@@ -428,9 +429,12 @@ def build_pyproject(self):
                     f.stem for f in requirements_dpath.glob('*.txt')
                 )
                 # ``runtime`` is the install_requires source, not an extra.
-                extras = list(ub.oset(extras + [
-                    name for name in discovered if name != 'runtime'
-                ]))
+                extras = list(
+                    ub.oset(
+                        extras
+                        + [name for name in discovered if name != 'runtime']
+                    )
+                )
 
             optional_dynamic = {}
             for name in extras:
@@ -451,7 +455,9 @@ def build_pyproject(self):
             ]
             if all_extra_names:
                 optional_dynamic['all'] = {
-                    'file': [f'requirements/{name}.txt' for name in all_extra_names]
+                    'file': [
+                        f'requirements/{name}.txt' for name in all_extra_names
+                    ]
                 }
 
             setuptools_dynamic['optional-dependencies'] = optional_dynamic
@@ -513,8 +519,7 @@ def build_pyproject(self):
     # the supply-chain pin and normalize the package name in a single pass.
     uv_exclude_newer_comment = [
         '# Supply-chain guard: ignore packages published too recently.',
-        '# Accepts a relative window (e.g. "P7D" / "30 days") or a fixed'
-        ' date.',
+        '# Accepts a relative window (e.g. "P7D" / "30 days") or a fixed date.',
     ]
     project_name = pyproj_config.get('project', {}).get('name')
     section_name = None

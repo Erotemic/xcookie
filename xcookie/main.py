@@ -82,9 +82,9 @@ from typing import Any, cast
 import kwconf
 import toml
 import ubelt as ub
-import xdev
 from packaging.version import parse as Version
 
+from xcookie._vendor.xdev import difftext
 from xcookie.patch_plan import PatchPlan, SearchPattern, render_patch_plan
 from xcookie.resolved_config import resolve_xcookie_config
 from xcookie.staging import apply_template_context
@@ -94,6 +94,7 @@ from xcookie.template_registry import (
     coerce_template_infos,
 )
 from xcookie.util.util_metadata import metadata_text
+from xcookie.util_command import make_command_queue
 
 
 class SkipFile(Exception):
@@ -233,6 +234,29 @@ class XCookieConfig(kwconf.Config):
             """
             ),
         ),
+        'ci_allow_failure': kwconf.Value(
+            [],
+            help=ub.paragraph(
+                """
+            List[Dict] of filters that mark generated GitHub Actions matrix
+            jobs as experimental. Keys can be os, python-version, or any other
+            generated matrix field, and values are glob strings. Matching jobs
+            still run, but compatibility failures are reported as warnings and
+            do not fail the job or workflow.
+            """
+            ),
+        ),
+        'typecheck_extra_paths': kwconf.Value(
+            [],
+            help=ub.paragraph(
+                """
+            Additional repository-relative files or directories to pass to each
+            configured type checker after the main importable module. This is
+            useful for consumer-facing assert_type contracts that should be
+            checked without type-checking the entire test suite.
+            """
+            ),
+        ),
         'ci_versions_minimal_strict': kwconf.Value('min', help='todo: sus out'),
         'ci_versions_full_strict': kwconf.Value('main'),
         'ci_versions_minimal_loose': kwconf.Value('main'),
@@ -253,7 +277,9 @@ class XCookieConfig(kwconf.Config):
             None,
             help='A YAML coercible dictionary of environment variables to use in test stages. (TOTO',
         ),
-        'version': kwconf.Value(None, help='repo metadata: url for the project'),
+        'version': kwconf.Value(
+            None, help='repo metadata: url for the project'
+        ),
         'url': kwconf.Value(
             None, type=str, help='repo metadata: url for the project'
         ),
@@ -265,7 +291,7 @@ class XCookieConfig(kwconf.Config):
             None,
             type=str,
             help='repo metadata: author for the project. '
-                 'A string or a list of strings.',
+            'A string or a list of strings.',
         ),
         'author_email': kwconf.Value(
             None,
@@ -432,12 +458,15 @@ class XCookieConfig(kwconf.Config):
             False, help=ub.paragraph('experimental new style version testing')
         ),
         'use_setup_py': kwconf.Value(
-            False,
+            'auto',
             help=ub.paragraph(
                 """
             If False, do not generate setup.py and instead emit a fully-specified
             PEP621-compatible pyproject.toml. When True, the legacy setup.py
-            will be generated alongside a minimal pyproject.toml.
+            will be generated alongside a minimal pyproject.toml. The default
+            "auto" preserves setup.py metadata in existing legacy repositories
+            but uses PEP621 for new repositories and repositories that already
+            define a [project] table.
             """
             ),
         ),
@@ -512,9 +541,7 @@ class XCookieConfig(kwconf.Config):
             )
         if author_emails:
             config['author_email'] = (
-                author_emails[0]
-                if len(author_emails) == 1
-                else author_emails
+                author_emails[0] if len(author_emails) == 1 else author_emails
             )
         return config
 
@@ -1458,9 +1485,7 @@ class TemplateApplier:
                 """
             )
             print(create_new_repo_info)
-            import cmd_queue
-
-            queue = cmd_queue.Queue.create(cwd=self.repodir)
+            queue = make_command_queue(cwd=self.repodir)
             git_dpath = self.repodir / '.git'
             if not git_dpath.exists():
                 queue.submit('git init')
@@ -1724,7 +1749,6 @@ class TemplateApplier:
         regen_pat = SearchPattern.coerce(self.config.get('regen'))
         onlygen_pat = SearchPattern.coerce(self.config.get('only_generate'))
 
-        diff_style = 'unified'
         for info in self.staging_infos:
             stage_fpath = info['stage_fpath']
             repo_fpath = info['repo_fpath']
@@ -1741,29 +1765,14 @@ class TemplateApplier:
                     plan.missing.append(repo_fpath)
                     plan.add_copy(stage_fpath, repo_fpath)
                     stage_text = stage_fpath.read_text()
-                    # TODO: add style when available
-                    try:
-                        difftext = (
-                            xdev.difftext(
-                                '',
-                                stage_text[:1000],
-                                colored=1,
-                                context_lines=2,
-                                style=diff_style,
-                            )
-                            + '...and more'
-                        )
-                    except Exception:
-                        difftext = (
-                            xdev.difftext(
-                                '',
-                                stage_text[:1000],
-                                colored=1,
-                                context_lines=2,
-                            )
-                            + '...and more'
-                        )
-                    plan.diff_texts[repo_fpath] = difftext
+                    diff_text = difftext(
+                        '',
+                        stage_text[:1000],
+                        colored=True,
+                        context_lines=2,
+                    )
+                    diff_text += '...and more'
+                    plan.diff_texts[repo_fpath] = diff_text
             else:
                 assert stage_fpath.exists()
                 if stage_fpath.is_dir():
@@ -1771,23 +1780,15 @@ class TemplateApplier:
                 repo_text = repo_fpath.read_text()
                 stage_text = stage_fpath.read_text()
                 if stage_text.strip() == repo_text.strip():
-                    difftext = None
+                    diff_text = None
                 else:
-                    try:
-                        difftext = xdev.difftext(
-                            repo_text, stage_text, colored=1, context_lines=1
-                        )
-                    except Exception:
-                        difftext = xdev.difftext(
-                            repo_text,
-                            stage_text,
-                            colored=1,
-                            context_lines=1,
-                            style=diff_style,
-                            fromfile=repo_fpath,
-                            tofile=repo_fpath,
-                        )
-                if difftext:
+                    diff_text = difftext(
+                        repo_text,
+                        stage_text,
+                        colored=True,
+                        context_lines=1,
+                    )
+                if diff_text:
                     want_rewrite = info['overwrite']
                     if not want_rewrite:
                         if regen_pat is not None:
@@ -1797,7 +1798,7 @@ class TemplateApplier:
                     if want_rewrite:
                         plan.add_copy(stage_fpath, repo_fpath)
                         plan.dirty.append(repo_fpath)
-                        plan.diff_texts[repo_fpath] = difftext
+                        plan.diff_texts[repo_fpath] = diff_text
                     else:
                         plan.modified.append(repo_fpath)
                 else:
@@ -1907,22 +1908,26 @@ class TemplateApplier:
         backends = []
 
         if {'github', 'erotemic', 'pyutils'} & set(tags):
-            backends.append({
-                'name': 'github',
-                'environ_export': self._github_org_environ(),
-                'upload_secret_cmd': 'upload_github_secrets',
-                'gpg_upload_cmd': 'upload_github_gpg_secrets',
-                'is_github': True,
-            })
+            backends.append(
+                {
+                    'name': 'github',
+                    'environ_export': self._github_org_environ(),
+                    'upload_secret_cmd': 'upload_github_secrets',
+                    'gpg_upload_cmd': 'upload_github_gpg_secrets',
+                    'is_github': True,
+                }
+            )
 
         if {'gitlab', 'kitware'} & set(tags):
-            backends.append({
-                'name': 'gitlab',
-                'environ_export': 'setup_package_environs_gitlab_kitware',
-                'upload_secret_cmd': 'upload_gitlab_repo_secrets',
-                'gpg_upload_cmd': 'upload_gitlab_gpg_secrets',
-                'is_github': False,
-            })
+            backends.append(
+                {
+                    'name': 'gitlab',
+                    'environ_export': 'setup_package_environs_gitlab_kitware',
+                    'upload_secret_cmd': 'upload_gitlab_repo_secrets',
+                    'gpg_upload_cmd': 'upload_gitlab_gpg_secrets',
+                    'is_github': False,
+                }
+            )
 
         if not backends:
             raise Exception(
@@ -1951,9 +1956,7 @@ class TemplateApplier:
         # dev/secrets_configuration.sh with backend-specific VARNAME_* values.
         backends = self._secret_rotation_backends()
 
-        import cmd_queue
-
-        script = cmd_queue.Queue.create(
+        script = make_command_queue(
             cwd=self.repodir, backend='serial', log=False
         )
         script.submit(f'source {setup_secrets_fpath}', log=False)
@@ -2029,19 +2032,10 @@ class TemplateApplier:
 
         script.rprint()
         if self.config.confirm('Ready to rotate secrets?'):
-            # Bypass `script.run()` so we can drop cmd_queue's per-command
-            # `set -x` / `{ set +x; } 2>/dev/null` wrappers (with_gaurds).
-            # Those would re-enable xtrace inside every secret-handling
-            # function body and trace the tokens / GPG material. The script
-            # provides its own progress visibility via the `_log` helper in
-            # setup_secrets.sh.
-            import subprocess
-            text = script.finalize_text(with_gaurds=False)
-            proc = subprocess.run(
-                ['bash', '-c', text], cwd=str(self.repodir)
-            )
-            if proc.returncode != 0:
-                raise SystemExit(proc.returncode)
+            # The vendored serial queue does not add xtrace guards, so secret
+            # values remain untraced while its platform-aware Bash resolver is
+            # used consistently (including Git Bash on Windows).
+            script.run()
 
     def build_readthedocs(self):
         """

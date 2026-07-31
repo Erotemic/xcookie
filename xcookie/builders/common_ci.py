@@ -81,6 +81,17 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     else:
         pip_install_reqs = f'pip install -r {req_files_text}'
 
+    targets = [f'./{self.rel_mod_dpath}']
+    extra_targets = self.config.get('typecheck_extra_paths', []) or []
+    if isinstance(extra_targets, str):
+        extra_targets = [extra_targets]
+    for target in extra_targets:
+        target = str(target)
+        if not target.startswith(('/', './', '../')):
+            target = './' + target
+        targets.append(target)
+    target_text = ' '.join(shlex.quote(target) for target in targets)
+
     commands = []
 
     if 'mypy' in checkers:
@@ -89,8 +100,8 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
             pip_install_reqs,
             # TODO; this likely needs to be replaced with some explicit
             # registration of what typing requirements are for the library
-            # f'mypy --install-types --non-interactive ./{self.rel_mod_dpath}',
-            f'mypy ./{self.rel_mod_dpath}',
+            # f'mypy --install-types --non-interactive {target_text}',
+            f'mypy {target_text}',
         ]
 
     if 'ty' in checkers:
@@ -99,7 +110,7 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
         commands += [
             'python -m pip install ty',
             pip_install_reqs,
-            f'ty check ./{self.rel_mod_dpath}',
+            f'ty check {target_text}',
         ]
 
     return commands
@@ -380,6 +391,35 @@ def make_install_and_test_wheel_parts(
     return install_and_test_wheel_parts
 
 
+def make_windows_msvc_bash_path_commands() -> list[str]:
+    """Prioritize the selected MSVC linker inside Git Bash on Windows.
+
+    Git Bash prepends its own ``usr/bin`` directory, which contains an
+    unrelated ``link.exe``.  Rust-backed Python packages then invoke that
+    program instead of Microsoft's linker when they must build from source.
+
+    ``ilammy/msvc-dev-cmd`` already puts the selected compiler directory on
+    ``PATH``.  ``cl.exe`` has no Git-Bash name collision, so locate it after
+    Bash starts and prepend its directory.  This follows the toolchain chosen
+    by the action without coupling generated workflows to its private
+    architecture environment variables.
+    """
+    return [
+        'if [[ "${RUNNER_OS:-}" == "Windows" ]]; then',
+        '    MSVC_CL_EXE="$(command -v cl.exe || true)"',
+        '    if [[ -n "$MSVC_CL_EXE" ]]; then',
+        '        MSVC_LINK_DIR="$(dirname "$MSVC_CL_EXE")"',
+        '        export PATH="$MSVC_LINK_DIR:$PATH"',
+        '        hash -r',
+        '        echo "Prioritized MSVC linker directory: $MSVC_LINK_DIR"',
+        '        echo "Resolved link.exe: $(command -v link.exe || true)"',
+        '    else',
+        '        echo "MSVC cl.exe was not found; leaving PATH unchanged"',
+        '    fi',
+        'fi',
+    ]
+
+
 def get_supported_platform_info(self):
     """
     CommandLine:
@@ -457,13 +497,15 @@ def get_supported_platform_info(self):
     # agnostic jobs.
     main_python_version = self.config['main_python']
     if main_python_version == 'max':
-        # import kwutil
+        main_python_version = None
         for pyver in supported_py_versions[::-1]:
             info = INFO_LUT[pyver]
             if info.get('is_prerelease'):
                 continue
             main_python_version = pyver
             break
+        if main_python_version is None:
+            main_python_version = supported_py_versions[-1]
     elif main_python_version == 'min':
         main_python_version = supported_py_versions[0]
     else:
@@ -476,8 +518,11 @@ def get_supported_platform_info(self):
     # be a prerelease version.
     cpython_versions_non34_ = []
     cpython_versions_non34_non_prerelease_ = []
+    prerelease_python_versions = []
     for pyver in cpython_versions_non34:
         info = INFO_LUT[pyver]
+        if info.get('is_prerelease'):
+            prerelease_python_versions.append(pyver)
         if 'github_action_version' in info:
             pyver = info['github_action_version']
         cpython_versions_non34_.append(pyver)
@@ -498,7 +543,10 @@ def get_supported_platform_info(self):
         elif v == 'min':
             v = [cpython_versions_non34_[0]]
         elif v == 'max':
-            v = [cpython_versions_non34_non_prerelease_[-1]]
+            max_candidates = cpython_versions_non34_non_prerelease_
+            if not max_candidates:
+                max_candidates = cpython_versions_non34_
+            v = [max_candidates[-1]]
             # v = [cpython_versions_non34_[-1]]
         elif v == 'main':
             v = [main_python_version]
@@ -515,6 +563,7 @@ def get_supported_platform_info(self):
         'os_list': os_list,
         'cpython_versions': cpython_versions_non34,
         'pypy_versions': pypy_versions,
+        'prerelease_python_versions': prerelease_python_versions,
         # 'min_python_version': supported_py_versions[0],
         # 'max_python_version': supported_py_versions[-1],
         'main_python_version': main_python_version,

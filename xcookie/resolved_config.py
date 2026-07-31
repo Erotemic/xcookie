@@ -40,6 +40,7 @@ class ResolvedXCookieConfig:
     ci_cpython_versions: tuple[str, ...]
     ci_pypy_versions: tuple[str, ...]
     use_uv: bool
+    use_setup_py: bool
 
     @classmethod
     def from_config(cls, config: Any) -> ResolvedXCookieConfig:
@@ -137,6 +138,11 @@ class ResolvedXCookieConfig:
             use_uv = Version(min_python) >= Version('3.8')
         use_uv = bool(use_uv)
 
+        use_setup_py = config.get('use_setup_py', 'auto')
+        if use_setup_py == 'auto':
+            use_setup_py = _infer_use_setup_py(repodir, is_new=is_new)
+        use_setup_py = bool(use_setup_py)
+
         return cls(
             repodir=repodir,
             repo_name=str(repo_name),
@@ -157,6 +163,7 @@ class ResolvedXCookieConfig:
             ci_cpython_versions=ci_cpython_versions,
             ci_pypy_versions=ci_pypy_versions,
             use_uv=use_uv,
+            use_setup_py=use_setup_py,
         )
 
     @property
@@ -188,6 +195,7 @@ class ResolvedXCookieConfig:
             'ci_cpython_versions': list(self.ci_cpython_versions),
             'ci_pypy_versions': list(self.ci_pypy_versions),
             'use_uv': self.use_uv,
+            'use_setup_py': self.use_setup_py,
         }
         for key, value in updates.items():
             config[key] = value
@@ -198,6 +206,32 @@ def resolve_xcookie_config(config: Any) -> ResolvedXCookieConfig:
     resolved = ResolvedXCookieConfig.from_config(config)
     resolved.apply_to_config(config)
     return resolved
+
+
+def _infer_use_setup_py(repodir: ub.Path, *, is_new: bool) -> bool:
+    """Choose the metadata mode for an omitted ``use_setup_py`` setting.
+
+    New repositories default to PEP 621. Existing repositories retain legacy
+    setup.py metadata when they have a setup.py and no ``[project]`` table.
+    A PEP 621 project table always wins over a compatibility setup.py shim.
+    """
+    if is_new:
+        return False
+
+    pyproject_fpath = repodir / 'pyproject.toml'
+    if pyproject_fpath.exists():
+        import toml
+
+        try:
+            pyproject = toml.loads(pyproject_fpath.read_text())
+        except Exception:
+            # Parsing errors are reported later by the normal config loader.
+            # Do not silently switch an existing legacy repository to PEP 621.
+            pyproject = {}
+        if 'project' in pyproject:
+            return False
+
+    return (repodir / 'setup.py').exists()
 
 
 def _coerce_meta_text(value: Any) -> str | list[str]:
@@ -273,12 +307,14 @@ def _infer_supported_python_versions(
         return True
 
     return tuple(
-        version for version in KNOWN_PYTHON_VERSIONS if satisfies_minmax(version)
+        version
+        for version in KNOWN_PYTHON_VERSIONS
+        if satisfies_minmax(version)
     )
 
 
 def _infer_pypy_versions(
-    supported_python_versions: tuple[str, ...]
+    supported_python_versions: tuple[str, ...],
 ) -> tuple[str, ...]:
     """Choose a default PyPy version to test on the CI.
 

@@ -38,9 +38,7 @@ def test_simple_repo() -> None:
     # rich.print(f'config = {ub.urepr(config, nl=1)}')
 
     self = main.XCookieConfig.main(argv=0, **kwargs)
-    import xdev
-
-    xdev.tree_repr(dpath)
+    print(f'Generated repo: {dpath}')
     # from xdev.cli.dirstats import DirectoryWalker
     # walker = DirectoryWalker(dpath, show_nfiles=0,
     #                          show_types=0,
@@ -119,7 +117,7 @@ def test_simple_repo() -> None:
 
     if 0:
         # For Debugging
-        import xdev
+        import webbrowser
 
         index_html_fpath = docs_dpath / 'build/html/index.html'
-        xdev.startfile(index_html_fpath)
+        webbrowser.open(index_html_fpath.as_uri())

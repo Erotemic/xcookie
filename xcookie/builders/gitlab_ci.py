@@ -14,7 +14,9 @@ class GitLabCIRenderer:
 
     def __init__(self, applier, plan: CIPlan | None = None):
         self.applier = applier
-        self.plan = plan if plan is not None else common_ci.make_ci_plan(applier)
+        self.plan = (
+            plan if plan is not None else common_ci.make_ci_plan(applier)
+        )
 
     def render(self) -> str:
         if 'purepy' in self.applier.tags:
@@ -23,7 +25,6 @@ class GitLabCIRenderer:
             return make_binpy_ci_jobs(self.applier, plan=self.plan)
         else:
             raise NotImplementedError
-
 
 
 def _add_yaml_merge(target, referent):
@@ -43,6 +44,7 @@ def _add_yaml_merge(target, referent):
         merge_value.merge_pos = 0
         merge_value.append(referent)
         target.add_yaml_merge(merge_value)
+
 
 def build_gitlab_ci(self):
     """
@@ -279,7 +281,6 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         """
     )
 
-
     artifact_test_cases = ci_model.make_artifact_test_cases(
         self, plan=plan, provider='gitlab'
     )
@@ -304,9 +305,7 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
             use_uv_lock = 'true' if case.use_lockfile else 'false'
             lock_requirements = case.lock_requirements or ''
             test_steps.append(f'export USE_UV_LOCK="{use_uv_lock}"')
-            test_steps.append(
-                f'export LOCK_REQUIREMENTS="{lock_requirements}"'
-            )
+            test_steps.append(f'export LOCK_REQUIREMENTS="{lock_requirements}"')
         test_steps += install_and_test_wheel_parts['install_wheel_commands']
         test_steps += install_and_test_wheel_parts['test_wheel_commands']
         test = {
@@ -362,7 +361,6 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
                 _add_yaml_merge(test_job, common_test_template)
                 jobs[test_name] = test_job
         body.update(jobs)
-
 
     if enable_wheel:
         # Construct the explicit build / test job pairs from the shared
@@ -617,9 +615,7 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
             use_uv_lock = 'true' if case.use_lockfile else 'false'
             lock_requirements = case.lock_requirements or ''
             test_steps.append(f'export USE_UV_LOCK="{use_uv_lock}"')
-            test_steps.append(
-                f'export LOCK_REQUIREMENTS="{lock_requirements}"'
-            )
+            test_steps.append(f'export LOCK_REQUIREMENTS="{lock_requirements}"')
         test_steps += install_and_test_wheel_parts['install_wheel_commands']
         test_steps += install_and_test_wheel_parts['test_wheel_commands']
         test = {
@@ -733,7 +729,9 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
     return text
 
 
-def build_lint_job(self, common_template, deploy_image, plan: CIPlan | None = None):
+def build_lint_job(
+    self, common_template, deploy_image, plan: CIPlan | None = None
+):
     from ruamel.yaml.comments import CommentedMap
 
     from xcookie.util_yaml import Yaml

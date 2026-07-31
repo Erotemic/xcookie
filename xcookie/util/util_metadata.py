@@ -57,7 +57,9 @@ def metadata_text(value: Any) -> str:
     return ', '.join(metadata_list(value))
 
 
-def coerce_author_entries(authors: Any, author_emails: Any) -> list[dict[str, str]]:
+def coerce_author_entries(
+    authors: Any, author_emails: Any
+) -> list[dict[str, str]]:
     """
     Normalize xcookie author metadata into PEP 621 author entries.
 
