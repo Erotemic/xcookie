@@ -7,6 +7,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Version 0.4.2 - Unreleased
 
+### Fixed
+* Generated Sphinx configuration reads `ast.Constant.value`, restoring Python
+  3.14 compatibility after removal of the legacy `.s` alias.
+
 
 ## Version 0.4.1 - Released 2026-07-30
 

@@ -311,7 +311,7 @@ def build_docs_conf(self):
                 def visit_Assign(self, node):
                     for target in node.targets:
                         if getattr(target, 'id', None) == '__version__':
-                            self.version = node.value.s
+                            self.version = node.value.value
             visitor = VersionVisitor()
             visitor.visit(pt)
             return visitor.version

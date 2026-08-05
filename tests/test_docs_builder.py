@@ -59,3 +59,5 @@ def test_generated_conf_uses_modern_sphinx_defaults(tmp_path, monkeypatch):
     assert "'display_version'" not in text
     assert 'html_static_path = []' in text
     assert 'myst_heading_anchors = 3' in text
+    assert 'self.version = node.value.value' in text
+    assert 'node.value.s' not in text
