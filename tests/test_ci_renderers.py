@@ -1,3 +1,4 @@
+from xcookie.builders import ci_model
 from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
 
@@ -145,7 +146,8 @@ def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
     self = _make_applier(tmp_path, tags=['gitlab', 'purepy'], min_python='3.10')
     text = self.build_gitlab_ci()
     assert 'build/sdist:' in text
-    assert 'build/cp' in text
+    assert 'build/wheel:' in text
+    assert 'build/cp' not in text
     assert 'test/full-loose/cp' in text
     assert 'test/minimal-strict/cp' in text
     assert 'export INSTALL_EXTRAS="tests,optional"' in text
@@ -154,6 +156,34 @@ def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
     assert 'export LOCK_REQUIREMENTS="requirements/locks/tests.txt"' in text
     assert 'tests-strict' not in text
     assert 'runtime-strict' not in text
+
+
+def test_gitlab_purepy_tests_share_one_wheel_build(tmp_path):
+    from xcookie.util_yaml import Yaml
+
+    self = _make_applier(tmp_path, tags=['gitlab', 'purepy'], min_python='3.10')
+    text = self.build_gitlab_ci()
+    body = Yaml.loads(text)
+
+    wheel_build_jobs = [
+        key
+        for key in body
+        if key.startswith('build/') and key != 'build/sdist'
+    ]
+    assert wheel_build_jobs == ['build/wheel']
+
+    wheel_test_jobs = {
+        key: job
+        for key, job in body.items()
+        if key.startswith('test/') and not key.startswith('test/sdist/')
+    }
+    artifact_test_cases = ci_model.make_artifact_test_cases(
+        self, provider='gitlab'
+    )
+    assert len(wheel_test_jobs) == len(artifact_test_cases)
+    assert all(
+        job['needs'] == ['build/wheel'] for job in wheel_test_jobs.values()
+    )
 
 
 def test_gitlab_binpy_render_uses_artifact_test_cases(tmp_path):

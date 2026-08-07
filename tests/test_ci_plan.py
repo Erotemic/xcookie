@@ -196,6 +196,21 @@ def test_gitlab_binpy_workflow_plan_has_template_job_keys(tmp_path):
     assert workflow_plan.artifact_test_cases
 
 
+def test_gitlab_purepy_workflow_plan_builds_one_reusable_wheel(tmp_path):
+    self = _make_applier(tmp_path, tags=['gitlab', 'purepy'])
+    plan = ci_plan.make_ci_plan(self)
+    workflow_plan = ci_model.make_test_workflow_plan(
+        self, plan=plan, provider='gitlab'
+    )
+    assert workflow_plan.package_kind == 'purepy'
+    assert workflow_plan.sdist_job_key == 'build/sdist'
+    assert workflow_plan.wheel_build_job_key == 'build/wheel'
+    assert (
+        workflow_plan.artifact_test_job_key == 'test/{variant_key}/{swenv_key}'
+    )
+    assert workflow_plan.artifact_test_cases
+
+
 def test_auto_setup_py_mode_preserves_existing_legacy_ci_contract(tmp_path):
     (tmp_path / '.git').mkdir()
     (tmp_path / 'setup.py').write_text('from setuptools import setup\n')

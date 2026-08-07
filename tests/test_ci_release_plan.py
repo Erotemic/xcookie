@@ -116,7 +116,7 @@ def test_gitlab_release_plan_describes_current_gpg_and_deploy_jobs(tmp_path):
 
     assert plan.provider == 'gitlab'
     assert plan.package_kind == 'purepy'
-    assert plan.build_job_keys == ('build/sdist', 'build/{swenv_key}')
+    assert plan.build_job_keys == ('build/sdist', 'build/wheel')
     assert plan.deploy_job_keys == ('gpgsign/wheels', 'deploy/wheels')
     assert plan.signing_transport == 'encrypted_repo'
     assert plan.distribution_globs == ('dist/*.whl', 'dist/*.tar.gz')
@@ -165,6 +165,8 @@ def test_github_release_workflow_direct_gpg_uses_environment_secrets(tmp_path):
 
 
 def test_gitlab_gpg_and_deploy_render_current_behavior_is_pinned(tmp_path):
+    from xcookie.util_yaml import Yaml
+
     self = _make_applier(
         tmp_path,
         tags=['gitlab', 'purepy'],
@@ -182,6 +184,12 @@ def test_gitlab_gpg_and_deploy_render_current_behavior_is_pinned(tmp_path):
     assert 'dev/ci_secret_gpg_subkeys.pgp.enc' in text
     assert 'opentimestamps-client' in text
     assert 'twine upload' in text
+
+    body = Yaml.loads(text)
+    assert body['gpgsign/wheels']['needs'] == [
+        {'job': 'build/sdist', 'artifacts': True},
+        {'job': 'build/wheel', 'artifacts': True},
+    ]
 
 
 def test_gitlab_direct_gpg_render_uses_ci_variables_not_encrypted_repo(

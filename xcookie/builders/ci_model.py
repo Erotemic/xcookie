@@ -412,7 +412,7 @@ def make_purepy_workflow_plan(
         sdist_job_key=sdist_job_key,
         wheel_build_job_key='build_purepy_wheels'
         if provider == 'github'
-        else 'build/{swenv_key}',
+        else 'build/wheel',
         artifact_test_job_key='test_purepy_wheels'
         if provider == 'github'
         else 'test/{variant_key}/{swenv_key}',
@@ -603,7 +603,7 @@ def make_release_plan(
         if package_kind == 'purepy':
             if 'nosrcdist' not in self.tags:
                 build_job_keys.append('build/sdist')
-            build_job_keys.append('build/{swenv_key}')
+            build_job_keys.append('build/wheel')
         else:
             build_job_keys.append('build/{swenv_key}')
 
