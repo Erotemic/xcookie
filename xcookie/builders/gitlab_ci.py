@@ -398,6 +398,8 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
             }
             test_job = CommentedMap(test_job)
             _add_yaml_merge(test_job, common_test_template)
+            if case.allow_failure:
+                test_job['allow_failure'] = True
             jobs[test_name] = test_job
         body.update(jobs)
 
@@ -682,6 +684,8 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
             }
             build_job = CommentedMap(build_job)
             _add_yaml_merge(build_job, cibuildwheel_template)
+            if case.allow_failure:
+                build_job['allow_failure'] = True
             jobs[build_name] = build_job
             build_names.append(build_name)
             build_job_names.add(build_name)
@@ -697,6 +701,8 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
         }
         test_job = CommentedMap(test_job)
         _add_yaml_merge(test_job, common_test_template)
+        if case.allow_failure:
+            test_job['allow_failure'] = True
         if extra_environs:
             test_job['variables'] = extra_environs.copy()
         jobs[test_name] = test_job

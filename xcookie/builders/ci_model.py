@@ -262,6 +262,34 @@ def _matches_any_rule(
     return False
 
 
+def _apply_prerelease_python_policy(
+    self: Any, cases: list[ArtifactTestCase]
+) -> list[ArtifactTestCase]:
+    """Apply the configured policy for unreleased CPython test cases."""
+    from xcookie.constants import (
+        PrereleasePythonPolicy,
+        is_prerelease_python_version,
+    )
+
+    policy = PrereleasePythonPolicy(self.config['ci_prerelease_python_policy'])
+    if policy is PrereleasePythonPolicy.SKIP:
+        return [
+            case
+            for case in cases
+            if not is_prerelease_python_version(case.python_version)
+        ]
+    if policy is PrereleasePythonPolicy.ALLOW_FAILURE:
+        return [
+            replace(case, allow_failure=True)
+            if is_prerelease_python_version(case.python_version)
+            else case
+            for case in cases
+        ]
+    if policy is PrereleasePythonPolicy.STRICT:
+        return cases
+    raise AssertionError(f'Unhandled prerelease python policy: {policy!r}')
+
+
 def _dedupe_cases(cases: list[ArtifactTestCase]) -> list[ArtifactTestCase]:
     seen: set[str] = set()
     deduped = []
@@ -345,6 +373,8 @@ def make_artifact_test_cases(
     else:
         duplicates = ub.find_duplicates(map(lambda c: c.key, cases))
         assert not duplicates, duplicates
+
+    cases = _apply_prerelease_python_policy(self, cases)
 
     if provider == 'github':
         ci_blocklist = Yaml.coerce(self.config.ci_blocklist)

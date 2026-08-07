@@ -225,6 +225,17 @@ class XCookieConfig(kwconf.Config):
             """
             ),
         ),
+        'ci_prerelease_python_policy': kwconf.Value(
+            'allow-failure',
+            help=ub.paragraph(
+                """
+            Policy for unreleased CPython versions in test CI.
+            "allow-failure" runs prerelease interpreter jobs but makes their
+            failures non-blocking. "strict" makes them normal blocking jobs.
+            "skip" omits prerelease interpreter-specific jobs.
+            """
+            ),
+        ),
         'ci_blocklist': kwconf.Value(
             [],
             help=ub.paragraph(

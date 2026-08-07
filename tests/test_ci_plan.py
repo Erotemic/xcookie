@@ -10,6 +10,7 @@ def _make_applier(
     min_python=None,
     use_setup_py=False,
     ci_allow_failure=None,
+    ci_prerelease_python_policy=None,
 ):
     if tags is None:
         tags = ['github', 'purepy']
@@ -37,6 +38,8 @@ def _make_applier(
     cfg['use_setup_py'] = use_setup_py
     if ci_allow_failure is not None:
         cfg['ci_allow_failure'] = ci_allow_failure
+    if ci_prerelease_python_policy is not None:
+        cfg['ci_prerelease_python_policy'] = ci_prerelease_python_policy
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -243,6 +246,7 @@ def test_github_allow_failure_rules_mark_matching_cases_experimental(tmp_path):
         tmp_path,
         tags=['github', 'purepy'],
         ci_allow_failure=[{'python-version': '3.15'}],
+        ci_prerelease_python_policy='strict',
     )
     cases = ci_model.make_artifact_test_cases(self, provider='github')
     prerelease_cases = [
@@ -257,3 +261,41 @@ def test_github_allow_failure_rules_mark_matching_cases_experimental(tmp_path):
         case.github_matrix_item()['experimental'] is True
         for case in prerelease_cases
     )
+
+
+def test_prerelease_python_policy_defaults_to_allow_failure(tmp_path):
+    self = _make_applier(tmp_path, tags=['github', 'purepy'])
+    cases = ci_model.make_artifact_test_cases(self, provider='github')
+    prerelease_cases = [
+        case for case in cases if case.python_version == '3.15'
+    ]
+    stable_cases = [case for case in cases if case.python_version != '3.15']
+    assert prerelease_cases
+    assert stable_cases
+    assert all(case.allow_failure for case in prerelease_cases)
+    assert all(not case.allow_failure for case in stable_cases)
+
+
+def test_prerelease_python_policy_strict_is_blocking(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        ci_prerelease_python_policy='strict',
+    )
+    cases = ci_model.make_artifact_test_cases(self, provider='github')
+    prerelease_cases = [
+        case for case in cases if case.python_version == '3.15'
+    ]
+    assert prerelease_cases
+    assert all(not case.allow_failure for case in prerelease_cases)
+
+
+def test_prerelease_python_policy_skip_omits_prerelease_cases(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        ci_prerelease_python_policy='skip',
+    )
+    cases = ci_model.make_artifact_test_cases(self, provider='github')
+    assert cases
+    assert all(case.python_version != '3.15' for case in cases)

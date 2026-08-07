@@ -7,6 +7,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## Version 0.4.2 - Unreleased
 
+### Changed
+* Unreleased CPython interpreter test jobs now default to non-blocking failures.
+  Projects can
+  set `tool.xcookie.ci_prerelease_python_policy` to `allow-failure`, `strict`,
+  or `skip` to control that behavior explicitly.
+
 ### Fixed
 * Generated Sphinx configuration reads `ast.Constant.value`, restoring Python
   3.14 compatibility after removal of the legacy `.s` alias.

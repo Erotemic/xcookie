@@ -6,6 +6,8 @@ from typing import Any
 import ubelt as ub
 from packaging.version import parse as Version
 
+from xcookie.constants import PrereleasePythonPolicy
+
 
 @dataclass(frozen=True)
 class ResolvedXCookieConfig:
@@ -39,6 +41,7 @@ class ResolvedXCookieConfig:
     supported_python_versions: tuple[str, ...]
     ci_cpython_versions: tuple[str, ...]
     ci_pypy_versions: tuple[str, ...]
+    ci_prerelease_python_policy: PrereleasePythonPolicy
     use_uv: bool
     use_setup_py: bool
 
@@ -131,6 +134,10 @@ class ResolvedXCookieConfig:
             )
         ci_pypy_versions = _coerce_tuple(ci_pypy_versions)
 
+        ci_prerelease_python_policy = _coerce_ci_prerelease_python_policy(
+            config['ci_prerelease_python_policy']
+        )
+
         use_uv = config['use_uv']
         if use_uv == 'auto':
             # Can only use uv if the min python >= 3.8
@@ -162,6 +169,7 @@ class ResolvedXCookieConfig:
             supported_python_versions=supported_python_versions,
             ci_cpython_versions=ci_cpython_versions,
             ci_pypy_versions=ci_pypy_versions,
+            ci_prerelease_python_policy=ci_prerelease_python_policy,
             use_uv=use_uv,
             use_setup_py=use_setup_py,
         )
@@ -194,6 +202,9 @@ class ResolvedXCookieConfig:
             'supported_python_versions': list(self.supported_python_versions),
             'ci_cpython_versions': list(self.ci_cpython_versions),
             'ci_pypy_versions': list(self.ci_pypy_versions),
+            'ci_prerelease_python_policy': (
+                self.ci_prerelease_python_policy.value
+            ),
             'use_uv': self.use_uv,
             'use_setup_py': self.use_setup_py,
         }
@@ -206,6 +217,20 @@ def resolve_xcookie_config(config: Any) -> ResolvedXCookieConfig:
     resolved = ResolvedXCookieConfig.from_config(config)
     resolved.apply_to_config(config)
     return resolved
+
+
+def _coerce_ci_prerelease_python_policy(
+    value: Any,
+) -> PrereleasePythonPolicy:
+    """Validate the policy used for unreleased CPython CI jobs."""
+    try:
+        return PrereleasePythonPolicy(str(value))
+    except ValueError:
+        choices = ', '.join(policy.value for policy in PrereleasePythonPolicy)
+        raise ValueError(
+            f'Invalid ci_prerelease_python_policy={value!r}. '
+            f'Expected one of: {choices}'
+        ) from None
 
 
 def _infer_use_setup_py(repodir: ub.Path, *, is_new: bool) -> bool:
