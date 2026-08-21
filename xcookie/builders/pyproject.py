@@ -4,6 +4,7 @@ import tempfile
 import toml
 import ubelt as ub
 
+from xcookie.requirements_layout import RequirementsLayout
 from xcookie.util.util_metadata import coerce_author_entries
 
 
@@ -12,6 +13,122 @@ from xcookie.util.util_metadata import coerce_author_entries
 # published in the last 7 days" -- this keeps the guard from going stale the
 # way a hard-coded absolute date would.
 DEFAULT_UV_EXCLUDE_NEWER = 'P7D'
+
+
+_METADATA_IGNORED_PIP_OPTIONS = (
+    '--extra-index-url',
+    '--find-links',
+    '--index-url',
+    '--pre',
+    '--prefer-binary',
+    '--trusted-host',
+    '-f',
+    '-i',
+)
+
+
+def _parse_requirement_file_for_metadata(fpath):
+    """Separate package requirements from pip-only composition/policy."""
+    fpath = ub.Path(fpath)
+    direct_lines = []
+    include_fpaths = []
+    ignored_lines = []
+    if not fpath.exists():
+        return direct_lines, include_fpaths, ignored_lines
+
+    for lineno, line in enumerate(fpath.read_text().splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+
+        include_target = None
+        if stripped.startswith('-r '):
+            include_target = stripped[3:].strip()
+        elif stripped.startswith('--requirement '):
+            include_target = stripped[len('--requirement '):].strip()
+        if include_target is not None:
+            include_fpaths.append(fpath.parent / include_target)
+            continue
+
+        if stripped.startswith(_METADATA_IGNORED_PIP_OPTIONS):
+            ignored_lines.append(stripped)
+            continue
+        if stripped.startswith('-'):
+            raise ValueError(
+                'cannot represent pip requirement directive in package '
+                f'metadata: {fpath}: line {lineno}: {stripped!r}'
+            )
+
+        # The legacy setup.py parser tolerated an inline find-links suffix.
+        # Keep that pip-facing syntax out of package metadata.
+        if ' --find-links ' in stripped:
+            stripped = stripped.split(' --find-links ', 1)[0].rstrip()
+            ignored_lines.append(line.strip())
+        direct_lines.append(stripped)
+
+    return direct_lines, include_fpaths, ignored_lines
+
+
+def _requirement_file_needs_metadata_copy(fpath):
+    """Whether a requirements file needs a companion for its local entries."""
+    direct_lines, include_fpaths, ignored_lines = (
+        _parse_requirement_file_for_metadata(fpath)
+    )
+    return bool(direct_lines and (include_fpaths or ignored_lines))
+
+
+def _build_setuptools_requirement_metadata_text(fpath):
+    """Build metadata for only the direct requirements in one pip file.
+
+    Recursive ``-r`` composition is represented by multiple paths in
+    ``tool.setuptools.dynamic`` instead of duplicating transitive requirements
+    into this companion file. Installer-only options are omitted.
+    """
+    direct_lines, _, _ = _parse_requirement_file_for_metadata(fpath)
+    return '\n'.join(direct_lines) + ('\n' if direct_lines else '')
+
+
+
+def _dynamic_requirement_relpaths(self, name):
+    """Resolve one pip requirements file into setuptools metadata sources."""
+    root_fpath = self.repodir / 'requirements' / f'{name}.txt'
+    if not root_fpath.exists():
+        # New projects may not have requirement files on disk until staging.
+        # Standard generated requirement files are metadata-safe.
+        return [f'requirements/{name}.txt']
+
+    result = []
+    stack = []
+
+    def _visit(fpath):
+        fpath = ub.Path(fpath)
+        if fpath in stack:
+            chain = ' -> '.join(map(str, stack + [fpath]))
+            raise ValueError(f'cyclic requirement include: {chain}')
+        if not fpath.exists():
+            raise ValueError(f'requirement include does not exist: {fpath}')
+
+        stack.append(fpath)
+        try:
+            direct_lines, include_fpaths, ignored_lines = (
+                _parse_requirement_file_for_metadata(fpath)
+            )
+            relpath = fpath.relative_to(self.repodir).as_posix()
+            if direct_lines:
+                if include_fpaths or ignored_lines:
+                    metadata_relpath = fpath.with_name(
+                        fpath.stem + '-metadata.txt'
+                    ).relative_to(self.repodir).as_posix()
+                    result.append(metadata_relpath)
+                else:
+                    result.append(relpath)
+            for include_fpath in include_fpaths:
+                _visit(include_fpath)
+        finally:
+            stack.pop()
+
+    _visit(root_fpath)
+    return list(ub.oset(result))
 
 
 def _resolve_uv_exclude_newer(self, pyproj_config):
@@ -101,6 +218,7 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'remote_group',
         'use_setup_py',
         'use_pyproject_requirements',
+        'requirements_package',
     ]
     raw_config = ub.udict(ub.dict_subset(self.config, options_to_save))
 
@@ -122,6 +240,7 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'typed',
         'use_setup_py',
         'use_pyproject_requirements',
+        'requirements_package',
     }
 
     default_os = {'linux', 'osx', 'win'}
@@ -351,6 +470,9 @@ def build_pyproject(self):
         project_block['description'] = self.config['description']
         project_block['requires-python'] = f'>={self.config["min_python"]}'
         dynamic_entries = list(project_block.get('dynamic', []))
+        has_static_readme = 'readme' in project_block
+        if not has_static_readme:
+            dynamic_entries.append('readme')
         dynamic_entries.append('version')
         if not use_pyproject_requirements:
             dynamic_entries.extend(['dependencies', 'optional-dependencies'])
@@ -396,52 +518,92 @@ def build_pyproject(self):
             }
 
         package_data = setuptools_block['package-data']
-        package_data['*'] = ['requirements/*.txt']
+
+        def _merge_package_data(key, values):
+            existing = package_data.get(key, []) or []
+            if isinstance(existing, str):
+                existing = [existing]
+            if isinstance(values, str):
+                values = [values]
+            package_data[key] = list(ub.oset([*existing, *values]))
+
+        _merge_package_data('*', ['requirements/*.txt'])
+        requirements_layout = RequirementsLayout.from_config(self.config)
+        if requirements_layout.package is not None:
+            _merge_package_data(
+                requirements_layout.package,
+                requirements_layout.package_data_patterns,
+            )
         if self.config['typed']:
-            package_data[self.mod_name] = ['py.typed']
+            _merge_package_data(self.mod_name, ['py.typed'])
         for key, value in pyproject_settings.get('package_data', {}).items():
             normalized_key = '*' if key == '' else key
-            package_data[normalized_key] = value
+            _merge_package_data(normalized_key, value)
 
         setuptools_dynamic = setuptools_block['dynamic']
         setuptools_dynamic['version'] = {
             'attr': f'{self.config["mod_name"]}.__version__'
         }
-        readme_fpath = self._readme_fpath()
-        setuptools_dynamic['readme'] = {
-            'file': [readme_fpath.name],
-            'content-type': self._readme_content_type(),
-        }
+        if has_static_readme:
+            setuptools_dynamic.pop('readme', None)
+        else:
+            readme_fpath = self._readme_fpath()
+            setuptools_dynamic['readme'] = {
+                'file': [readme_fpath.name],
+                'content-type': self._readme_content_type(),
+            }
         if not use_pyproject_requirements:
+            runtime_req_relpaths = _dynamic_requirement_relpaths(
+                self, 'runtime'
+            )
             setuptools_dynamic['dependencies'] = {
-                'file': ['requirements/runtime.txt']
+                'file': runtime_req_relpaths
             }
 
+            previous_optional_dynamic = dict(
+                setuptools_dynamic.get('optional-dependencies', {}) or {}
+            )
             extras = ['tests', 'optional', 'docs']
+            extras.extend(
+                name for name in previous_optional_dynamic if name != 'all'
+            )
             if 'cv2' in self.tags:
                 extras.extend(['headless', 'graphics'])
             if 'postgresql' in self.tags:
                 extras.append('postgresql')
+            if 'gdal' in self.tags:
+                extras.append('gdal')
 
-            # Auto-discover any additional requirements/<name>.txt files so
-            # they become optional extras. Mirrors the legacy setup.py
-            # builder which exposed one extra per requirements file.
+            # Auto-discover additional standalone requirements files. Files
+            # used only as ``-r`` composition fragments are implementation
+            # details, not public install extras, unless the project already
+            # exposed them explicitly above.
             requirements_dpath = self.repodir / 'requirements'
             if requirements_dpath.exists():
-                discovered = sorted(
-                    f.stem for f in requirements_dpath.glob('*.txt')
-                )
-                # ``runtime`` is the install_requires source, not an extra.
-                extras = list(
-                    ub.oset(
-                        extras
-                        + [name for name in discovered if name != 'runtime']
+                discovered_fpaths = sorted(requirements_dpath.glob('*.txt'))
+                included_names = set()
+                for req_fpath in discovered_fpaths:
+                    if req_fpath.stem.endswith('-metadata'):
+                        continue
+                    _, include_fpaths, _ = _parse_requirement_file_for_metadata(
+                        req_fpath
                     )
-                )
+                    for include_fpath in include_fpaths:
+                        if include_fpath.parent == requirements_dpath:
+                            included_names.add(include_fpath.stem)
+                discovered = [
+                    f.stem
+                    for f in discovered_fpaths
+                    if not f.stem.endswith('-metadata')
+                    and f.stem != 'runtime'
+                    and f.stem not in included_names
+                ]
+                extras = list(ub.oset(extras + discovered))
 
             optional_dynamic = {}
             for name in extras:
-                optional_dynamic[name] = {'file': [f'requirements/{name}.txt']}
+                req_relpaths = _dynamic_requirement_relpaths(self, name)
+                optional_dynamic[name] = {'file': req_relpaths}
 
             # Recreate the legacy ``all`` convenience extra so users can run
             # ``pip install pkg[all]``. setuptools concatenates a list of
@@ -458,9 +620,15 @@ def build_pyproject(self):
             ]
             if all_extra_names:
                 optional_dynamic['all'] = {
-                    'file': [
-                        f'requirements/{name}.txt' for name in all_extra_names
-                    ]
+                    'file': list(
+                        ub.oset(
+                            relpath
+                            for name in all_extra_names
+                            for relpath in _dynamic_requirement_relpaths(
+                                self, name
+                            )
+                        )
+                    )
                 }
 
             setuptools_dynamic['optional-dependencies'] = optional_dynamic

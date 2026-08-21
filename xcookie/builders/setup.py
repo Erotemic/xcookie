@@ -3,6 +3,8 @@ def build_setup(self):
 
     import ubelt as ub
 
+    from xcookie.requirements_layout import RequirementsLayout
+
     from xcookie import rc
     # from distutils.version import Version
     # from packaging.version import parse as Version
@@ -188,12 +190,12 @@ def build_setup(self):
     package_data = {}
 
     package_data[''] = ['requirements/*.txt']
-    # HACK: need to determine if we have the modname.rc structure or not
-    # for now just check if it exists, which wont work the first time.
-    has_rc_requirements = (self.mod_dpath / 'rc/requirements').exists()
-    if has_rc_requirements:
+    requirements_layout = RequirementsLayout.from_config(self.config)
+    if requirements_layout.package is not None:
         setupkw_parts['include_package_data'] = True
-        package_data[f'{self.mod_name}.rc.requirements'] = ['*.txt']
+        package_data[requirements_layout.package] = (
+            requirements_layout.package_data_patterns
+        )
 
     if self.config['typed']:
         package_data[self.mod_name] = ['py.typed']

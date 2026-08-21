@@ -351,7 +351,8 @@ class XCookieConfig(kwconf.Config):
             help=ub.paragraph(
                 """
             if specified, any modified template file that matches this pattern
-            will be considered for re-write
+            will be considered for re-write. This does not limit generation to
+            matching files; combine with --only-generate to scope the run.
             """
             ),
         ),
@@ -466,7 +467,28 @@ class XCookieConfig(kwconf.Config):
             ),
         ),
         'use_pyproject_requirements': kwconf.Value(
-            False, help=ub.paragraph('experimental new style version testing')
+            False,
+            help=ub.paragraph(
+                """
+            If False, keep requirements/*.txt as the dependency source of
+            truth. In PEP 621 mode xcookie references those files via
+            setuptools dynamic dependency metadata. If True, write dependency
+            declarations directly into pyproject.toml instead.
+            """
+            ),
+        ),
+        'requirements_package': kwconf.Value(
+            'auto',
+            help=ub.paragraph(
+                """
+            Import package that owns the requirements resource tree. With
+            "auto", xcookie recognizes a repository-level requirements
+            symlink that points into an importable package (for example,
+            requirements -> kwcoco/rc/requirements). When enabled, both the
+            regular requirement files and requirements/locks/*.txt are shipped
+            as package data. Set to False to disable packaged requirements.
+            """
+            ),
         ),
         'use_setup_py': kwconf.Value(
             'auto',
@@ -1190,6 +1212,45 @@ class TemplateApplier:
                 'input_fname': rc.resource_fpath('run_tests.purepy.py.in'),
             },
         ]
+
+        # Dynamic PEP 621 dependency metadata cannot directly consume pip
+        # directives such as ``-r`` or index-selection options. Preserve
+        # installer-facing files and stage metadata-only companions only when
+        # a user-managed requirements file actually needs one.
+        if (
+            not self.config['use_pyproject_requirements']
+            and not self.config['use_setup_py']
+        ):
+            from xcookie.builders.pyproject import (
+                _requirement_file_needs_metadata_copy,
+            )
+
+            requirements_dpath = self.repodir / 'requirements'
+            if requirements_dpath.exists():
+                known_fnames = {
+                    os.fspath(info.get('fname', '')) for info in raw_template_infos
+                }
+                for req_fpath in sorted(requirements_dpath.glob('*.txt')):
+                    if req_fpath.stem.endswith('-metadata'):
+                        continue
+                    if req_fpath.name == 'gdal.txt' and 'gdal' in self.tags:
+                        # The staged GDAL file is generated metadata-safe; its
+                        # custom wheel index remains CI installer policy.
+                        continue
+                    if _requirement_file_needs_metadata_copy(req_fpath):
+                        metadata_relpath = ub.Path('requirements') / (
+                            req_fpath.stem + '-metadata.txt'
+                        )
+                        if os.fspath(metadata_relpath) not in known_fnames:
+                            raw_template_infos.append(
+                                {
+                                    'source': 'dynamic',
+                                    'overwrite': 1,
+                                    'fname': metadata_relpath,
+                                }
+                            )
+                            known_fnames.add(os.fspath(metadata_relpath))
+
         self.template_infos = coerce_template_infos(raw_template_infos)
 
         # The user specified some files to not overwrite by default
@@ -2198,7 +2259,9 @@ class TemplateApplier:
         one ``uv export`` invocation per unique extras combo.
         """
         from xcookie.builders import common_ci, ci_plan
+        from xcookie.requirements_layout import RequirementsLayout
 
+        layout = RequirementsLayout.from_config(self.config)
         plan = common_ci.make_ci_plan(self)
         strict_variants = list(
             plan.iter_active_variants(['minimal-strict', 'full-strict'])
@@ -2235,14 +2298,20 @@ class TemplateApplier:
             # on uses_lockfile_ci, but emit something safe if it does.
             export_blocks.append('# No strict CI variants are active.')
 
+        package_note = ''
+        if layout.package is not None:
+            package_note = (
+                '# The requirements tree is also shipped as package resources '
+                f'under {layout.package}.\n'
+            )
         header = ub.codeblock(
-            """
+            f"""
             #!/usr/bin/env bash
             # Regenerate uv.lock and the pinned lock files in requirements/locks/.
             #
             # Run this whenever a dependency in pyproject.toml changes so the
             # strict CI variants install the same versions you tested locally.
-            #
+            {package_note}#
             # This script is generated by xcookie; see
             # xcookie/main.py:build_refresh_locks_sh.  Manual edits will be
             # overwritten on the next regeneration.
@@ -2250,6 +2319,7 @@ class TemplateApplier:
 
             cd "$(dirname "$0")/.."
 
+            mkdir -p {layout.lock_relpath.as_posix()}
             uv lock
             """
         )
@@ -2390,7 +2460,6 @@ class TemplateApplier:
             ge = max(row['pyver_ge'], min_pyver)
             skip = row['pyver_ge'] > max_pyver
             skip |= row['pyver_lt'] < min_pyver
-            print(lt, ge, skip, min_pyver, max_pyver, row)
             if not skip:
                 req_lines.append(
                     f"{variant}{row['version']} ; python_version < '{lt}' and python_version >= '{ge}'"
@@ -2447,12 +2516,9 @@ class TemplateApplier:
         variant = 'opencv-python'
         return self._build_cv2_requirements(variant)
 
-    def build_gdal_requirements_txt(self):
+    def _gdal_requirement_parts(self):
         # TODO: make more dynamic
         variant = 'GDAL'
-        header_lines = [
-            '--find-links https://girder.github.io/large_image_wheels',
-        ]
         version_defaults = [
             {
                 'version': '>=3.11.3.1',
@@ -2480,8 +2546,12 @@ class TemplateApplier:
                 'pyver_lt': Version('3.11'),
             },
         ]
+        return variant, version_defaults
+
+    def build_gdal_requirements_txt(self):
+        variant, version_defaults = self._gdal_requirement_parts()
         return self._build_special_requirements(
-            variant, version_defaults, header_lines
+            variant, version_defaults, header_lines=[]
         )
 
     def build_run_doctests(self):
@@ -2500,7 +2570,19 @@ class TemplateApplier:
         Returns:
             str: templated code
         """
-        fname = ub.Path(info['fname']).name
+        rel_fpath = ub.Path(info['fname'])
+        fname = rel_fpath.name
+        if (
+            rel_fpath.parent == ub.Path('requirements')
+            and fname.endswith('-metadata.txt')
+        ):
+            from xcookie.builders.pyproject import (
+                _build_setuptools_requirement_metadata_text,
+            )
+
+            source_name = fname[:-len('-metadata.txt')] + '.txt'
+            source_fpath = self.repodir / 'requirements' / source_name
+            return _build_setuptools_requirement_metadata_text(source_fpath)
         if fname == 'CHANGELOG.md':
             return ub.codeblock(
                 """

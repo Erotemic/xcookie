@@ -35,6 +35,7 @@ def test_use_setup_py_false_generates_pep621(tmp_path) -> None:
     project_block = pyproject_data['project']
     assert project_block['name'] == config['pkg_name']
     assert 'dependencies' in project_block['dynamic']
+    assert 'readme' in project_block['dynamic']
     assert (
         pyproject_data['build-system']['build-backend']
         == 'setuptools.build_meta'
@@ -211,7 +212,10 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(
     pyproject_data = toml.loads(pyproject_text)
 
     assert pyproject_data['project']['authors'][0]['name'] == 'Existing Author'
-    assert pyproject_data['project']['dynamic'] == ['version']
+    assert set(pyproject_data['project']['dynamic']) == {
+        'readme',
+        'version',
+    }
     assert pyproject_data['project']['dependencies'] == [
         'package-a>=1.0',
         'package-b>=2.0',
@@ -314,7 +318,10 @@ def test_pyproject_requirements_mode_preserves_project_dependencies(
         'coverage>=7.0',
         'pytest>=8.0',
     ]
-    assert project_block['dynamic'] == ['version']
+    assert set(project_block['dynamic']) == {
+        'readme',
+        'version',
+    }
     assert 'dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
     assert (
         'optional-dependencies'
@@ -390,6 +397,55 @@ def test_markdown_readme_is_preserved_and_reflected_in_metadata(
     setup_text = applier.build_setup()
     assert 'get_readme_fpath()' in setup_text
     assert 'text/markdown' in setup_text
+
+
+def test_static_project_readme_is_preserved(tmp_path) -> None:
+    """Preserve a static PEP 621 readme instead of duplicating it."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'src' / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (repodir / 'README.md').write_text('# Demo\n')
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-pkg',
+                    'readme': 'README.md',
+                    'version': '1.2.3',
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'rel_mod_parent_dpath': 'src',
+                    }
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+    project = pyproject_data['project']
+    assert project['readme'] == 'README.md'
+    assert 'readme' not in project['dynamic']
+    assert 'readme' not in pyproject_data['tool']['setuptools']['dynamic']
 
 
 def test_xcookie_tags_are_not_written_as_project_keywords(tmp_path) -> None:
@@ -1010,3 +1066,151 @@ def test_explicit_packages_list_is_converted_to_find_dict(tmp_path) -> None:
     assert 'find' in packages
     assert 'where' in packages['find']
     assert 'include' in packages['find']
+
+
+def test_gdal_dynamic_metadata_uses_pep508_only_file(tmp_path) -> None:
+    """Keep GDAL requirement metadata PEP 508-only."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['gitlab', 'purepy', 'gdal'],
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+        use_vcs=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+    optional = pyproject_data['tool']['setuptools']['dynamic'][
+        'optional-dependencies'
+    ]
+    assert optional['gdal']['file'] == ['requirements/gdal.txt']
+    assert 'requirements/gdal.txt' in optional['all']['file']
+
+    pip_text = applier.build_gdal_requirements_txt()
+    assert '--find-links' not in pip_text
+    assert 'GDAL' in pip_text
+
+
+def test_dynamic_metadata_splits_pip_requirements(tmp_path) -> None:
+    """Split pip composition into metadata-safe setuptools file lists."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    reqdir = repodir / 'requirements'
+    reqdir.mkdir(parents=True)
+    (reqdir / 'base.txt').write_text('ubelt>=1.3.0\n')
+    (reqdir / 'docs-core.txt').write_text('sphinx>=5.0.1\n')
+    (reqdir / 'docs.txt').write_text(
+        'sphinx-autobuild>=2021.3.14\n'
+        '-r docs-core.txt\n'
+        '-r base.txt\n'
+    )
+    (reqdir / 'runtime.txt').write_text(
+        '--extra-index-url https://example.com/simple\n'
+        '-r base.txt\n'
+        'packaging>=21.0\n'
+    )
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['github', 'purepy'],
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+        use_vcs=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+    dynamic = pyproject_data['tool']['setuptools']['dynamic']
+    assert dynamic['dependencies']['file'] == [
+        'requirements/runtime-metadata.txt',
+        'requirements/base.txt',
+    ]
+    assert dynamic['optional-dependencies']['docs']['file'] == [
+        'requirements/docs-metadata.txt',
+        'requirements/docs-core.txt',
+        'requirements/base.txt',
+    ]
+    assert 'docs-core' not in dynamic['optional-dependencies']
+    assert 'base' not in dynamic['optional-dependencies']
+    metadata_text = (
+        applier.staging_dpath / 'requirements/runtime-metadata.txt'
+    ).read_text()
+    assert 'ubelt>=1.3.0' not in metadata_text
+    assert 'packaging>=21.0' in metadata_text
+    assert '--extra-index-url' not in metadata_text
+    assert '-r base.txt' not in metadata_text
+
+    docs_metadata_text = (
+        applier.staging_dpath / 'requirements/docs-metadata.txt'
+    ).read_text()
+    assert 'sphinx-autobuild>=2021.3.14' in docs_metadata_text
+    assert 'sphinx>=5.0.1' not in docs_metadata_text
+    assert 'ubelt>=1.3.0' not in docs_metadata_text
+    assert '-r ' not in docs_metadata_text
+
+
+def test_existing_setuptools_package_data_is_merged(tmp_path) -> None:
+    """Generated defaults must not erase project-specific package data."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '1.0.0'\n")
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-mod',
+                    'dynamic': ['version'],
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'repo_name': 'demo_mod',
+                        'typed': True,
+                        'use_setup_py': False,
+                        'use_pyproject_requirements': False,
+                    },
+                    'setuptools': {
+                        'package-data': {
+                            'demo_mod': ['coco_schema.json'],
+                        }
+                    },
+                },
+            }
+        )
+    )
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        rotate_secrets=False,
+        init_new_remotes=False,
+        use_vcs=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+    data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
+    package_data = data['tool']['setuptools']['package-data']
+    assert package_data['demo_mod'] == ['coco_schema.json', 'py.typed']

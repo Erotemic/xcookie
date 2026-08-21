@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Mapping
 
+from xcookie.requirements_layout import DEFAULT_LOCKS_RELPATH
+
 VariantKey = Literal[
     'minimal-loose',
     'full-loose',
@@ -119,7 +121,7 @@ def uses_lockfile_ci(self: Any) -> bool:
     )
 
 
-LOCK_REQUIREMENTS_DPATH = 'requirements/locks'
+LOCK_REQUIREMENTS_DPATH = DEFAULT_LOCKS_RELPATH.as_posix()
 
 
 def lock_requirements_name(extras: Iterable[str]) -> str:

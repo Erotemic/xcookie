@@ -7,6 +7,7 @@ import ubelt as ub
 from packaging.version import parse as Version
 
 from xcookie.constants import PrereleasePythonPolicy
+from xcookie.requirements_layout import resolve_requirements_package
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class ResolvedXCookieConfig:
     ci_prerelease_python_policy: PrereleasePythonPolicy
     use_uv: bool
     use_setup_py: bool
+    requirements_package: str | None
 
     @classmethod
     def from_config(cls, config: Any) -> ResolvedXCookieConfig:
@@ -135,7 +137,7 @@ class ResolvedXCookieConfig:
         ci_pypy_versions = _coerce_tuple(ci_pypy_versions)
 
         ci_prerelease_python_policy = _coerce_ci_prerelease_python_policy(
-            config['ci_prerelease_python_policy']
+            config.get('ci_prerelease_python_policy', 'allow-failure')
         )
 
         use_uv = config['use_uv']
@@ -149,6 +151,13 @@ class ResolvedXCookieConfig:
         if use_setup_py == 'auto':
             use_setup_py = _infer_use_setup_py(repodir, is_new=is_new)
         use_setup_py = bool(use_setup_py)
+
+        requirements_package = resolve_requirements_package(
+            config,
+            repodir=repodir,
+            mod_name=str(mod_name),
+            rel_mod_parent_dpath=str(config['rel_mod_parent_dpath']),
+        )
 
         return cls(
             repodir=repodir,
@@ -172,6 +181,7 @@ class ResolvedXCookieConfig:
             ci_prerelease_python_policy=ci_prerelease_python_policy,
             use_uv=use_uv,
             use_setup_py=use_setup_py,
+            requirements_package=requirements_package,
         )
 
     @property
@@ -207,6 +217,7 @@ class ResolvedXCookieConfig:
             ),
             'use_uv': self.use_uv,
             'use_setup_py': self.use_setup_py,
+            'requirements_package': self.requirements_package,
         }
         for key, value in updates.items():
             config[key] = value

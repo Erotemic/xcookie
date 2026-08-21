@@ -102,12 +102,20 @@ class ArtifactTestCase:
     def gitlab_special_install_lines(self, pip_install: str) -> list[str]:
         if self.gdal_requirement_txt is None:
             return []
+        find_links = (
+            '--find-links https://girder.github.io/large_image_wheels'
+        )
         if self.variant.is_strict:
+            strict_req_command = (
+                "sed 's/>=/==/' \"requirements/gdal.txt\" "
+                '> "requirements/gdal-strict.txt"'
+            )
             return [
-                'sed \'s/>=/==/\' "requirements/gdal.txt" > "requirements/gdal-strict.txt"',
-                f'{pip_install} -r requirements/gdal-strict.txt',
+                strict_req_command,
+                f'{pip_install} {find_links} -r requirements/gdal-strict.txt',
             ]
-        return [f'{pip_install} -r requirements/gdal.txt']
+        return [f'{pip_install} {find_links} -r requirements/gdal.txt']
+
 
 
 @dataclass(frozen=True)

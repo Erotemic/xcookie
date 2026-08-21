@@ -120,7 +120,7 @@ def make_build_sdist_parts(self, wheelhouse_dpath='wheelhouse'):
     commands = [
         # 'python -m pip install pip -U',
         f'{self.UPDATE_PIP}',
-        f'{self.PIP_INSTALL} setuptools>=0.8 wheel build twine',
+        f'{self.PIP_INSTALL} setuptools>=77 wheel build twine',
         f'python -m build --sdist --outdir {wheelhouse_dpath}',
         f'python -m twine check ./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz',
     ]
@@ -136,7 +136,7 @@ def make_build_wheel_parts(self, wheelhouse_dpath='wheelhouse'):
     commands = [
         # 'python -m pip install pip -U',
         f'{self.UPDATE_PIP}',
-        f'{self.PIP_INSTALL} setuptools>=0.8 wheel build twine',
+        f'{self.PIP_INSTALL} setuptools>=77 wheel build twine',
         f'python -m build --wheel --outdir {wheelhouse_dpath}',
         f'python -m twine check ./{wheelhouse_dpath}/{self.pkg_fname_prefix}*.whl',
     ]
@@ -275,14 +275,14 @@ def make_install_and_test_wheel_parts(
     if use_lockfile_ci:
         install_helpers = [
             'echo "Installing helpers: setuptools"',
-            'python -m uv pip install --resolution=highest setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+            'python -m uv pip install --resolution=highest setuptools>=77 setuptools_scm wheel build -U',  # is this necessary?
             'echo "Installing helpers: tomli and pkginfo"',
             'python -m uv pip install --resolution=highest tomli pkginfo packaging',
         ]
     else:
         install_helpers = [
             'echo "Installing helpers: setuptools"',
-            f'{self.PIP_INSTALL} setuptools>=0.8 setuptools_scm wheel build -U',  # is this necessary?
+            f'{self.PIP_INSTALL} setuptools>=77 setuptools_scm wheel build -U',  # is this necessary?
             'echo "Installing helpers: tomli and pkginfo"',
             f'{self.PIP_INSTALL} tomli pkginfo packaging',
         ]

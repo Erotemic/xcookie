@@ -28,6 +28,7 @@ classifiers = [
 dynamic = [
   "dependencies",
   "optional-dependencies",
+  "readme",
   "version",
 ]
 urls.Homepage = "https://github.com/Erotemic/xcookie"

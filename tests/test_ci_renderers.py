@@ -159,6 +159,7 @@ def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
     assert 'export LOCK_REQUIREMENTS="requirements/locks/tests.txt"' in text
     assert 'tests-strict' not in text
     assert 'runtime-strict' not in text
+    assert 'setuptools>=77' in text
 
 
 def test_gitlab_purepy_tests_share_one_wheel_build(tmp_path):
@@ -223,6 +224,7 @@ def test_gitlab_purepy_gdal_cases_select_strict_and_loose_requirement_files(
     assert 'requirements/gdal.txt' in text
     assert 'requirements/gdal-strict.txt' in text
     assert "sed 's/>=/==/'" in text
+    assert '--find-links https://girder.github.io/large_image_wheels' in text
 
 
 def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
