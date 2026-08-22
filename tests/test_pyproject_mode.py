@@ -1068,6 +1068,37 @@ def test_explicit_packages_list_is_converted_to_find_dict(tmp_path) -> None:
     assert 'include' in packages['find']
 
 
+def test_gdal_numpy2_compatible_floor_for_modern_python(tmp_path) -> None:
+    """Avoid old GDAL wheels built against the NumPy 1 C API."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['gitlab', 'purepy', 'gdal'],
+        rotate_secrets=False,
+        init_new_remotes=False,
+        interactive=False,
+        min_python='3.11',
+        max_python='3.13',
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+        use_vcs=False,
+    )
+    applier = TemplateApplier(config)
+    text = applier.build_gdal_requirements_txt()
+
+    assert (
+        "GDAL>=3.10.0 ; python_version < '3.14' "
+        "and python_version >= '3.11'"
+    ) in text
+    assert 'GDAL>=3.5.2' not in text
+    assert 'GDAL>=3.7.2' not in text
+
+
 def test_gdal_dynamic_metadata_uses_pep508_only_file(tmp_path) -> None:
     """Keep GDAL requirement metadata PEP 508-only."""
     from xcookie.main import TemplateApplier, XCookieConfig

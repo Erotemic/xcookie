@@ -453,7 +453,7 @@ class XCookieConfig(kwconf.Config):
             ),
         ),
         'uv_exclude_newer': kwconf.Value(
-            'auto',
+            False,
             help=ub.paragraph(
                 """
             Supply-chain guard: passed through to ``[tool.uv] exclude-newer``
@@ -2526,24 +2526,18 @@ class TemplateApplier:
                 'pyver_lt': Version('4.0'),
             },
             {
+                # GDAL 3.9+ builds its NumPy bindings against NumPy 2 on
+                # Python 3.9+, producing bindings that are compatible with
+                # both NumPy 1 and 2.  The large-image wheelhouse provides
+                # GDAL 3.10.0 wheels for Python 3.9 through 3.13.
                 'version': '>=3.10.0',
-                'pyver_ge': Version('3.13'),
+                'pyver_ge': Version('3.9'),
                 'pyver_lt': Version('3.14'),
-            },
-            {
-                'version': '>=3.7.2',
-                'pyver_ge': Version('3.12'),
-                'pyver_lt': Version('3.13'),
-            },
-            {
-                'version': '>=3.5.2',
-                'pyver_ge': Version('3.11'),
-                'pyver_lt': Version('3.12'),
             },
             {
                 'version': '>=3.4.1,<=3.11.0',
                 'pyver_ge': Version('3.6'),
-                'pyver_lt': Version('3.11'),
+                'pyver_lt': Version('3.9'),
             },
         ]
         return variant, version_defaults
