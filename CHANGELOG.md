@@ -8,6 +8,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Version 0.4.2 - Unreleased
 
 ### Changed
+* The console entrypoint is now a modal CLI. Existing project generation lives
+  under `xcookie generate`, leaving the root command namespace available for
+  maintenance subcommands. `python -m xcookie.main`
+  remains the direct generator entrypoint for compatibility.
+* Require `kwconf>=0.11.0` so modal commands preserve explicit child CLI
+  arguments during dispatch.
 * Unreleased CPython interpreter test jobs now default to non-blocking failures.
   Projects can
   set `tool.xcookie.ci_prerelease_python_policy` to `allow-failure`, `strict`,
