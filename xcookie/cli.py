@@ -11,6 +11,7 @@ from xcookie import __version__
 from xcookie.docs import DocsRefresher
 from xcookie.main import TemplateApplier, XCookieConfig
 from xcookie.secrets import SecretRotator
+from xcookie.versioning import VersionBumper
 
 
 class GenerateConfig(XCookieConfig):
@@ -121,6 +122,41 @@ class RotateSecretsConfig(kwconf.Config):
         return rotator
 
 
+class BumpConfig(kwconf.Config):
+    """Bump the package version and start the next changelog section."""
+
+    __command__ = 'bump'
+    __default__ = {
+        'target': kwconf.Value(
+            'patch',
+            position=1,
+            help='patch, minor, major, micro, or an explicit target version',
+        ),
+        'repodir': kwconf.Value(
+            '.', position=2, help='path to the existing repository'
+        ),
+    }
+
+    @classmethod
+    def main(
+        cls,
+        argv: int | bool | str | Sequence[str] | None = False,
+        strict: bool = True,
+        autocomplete: bool | str = 'auto',
+        **kwargs: Any,
+    ) -> VersionBumper:
+        """Bump the authoritative version source and roll the changelog."""
+        command_config = cls.cli(
+            argv=argv,
+            data=kwargs,
+            strict=strict,
+            autocomplete=autocomplete,
+        )
+        bumper = VersionBumper(command_config['repodir'])
+        bumper.bump(command_config['target'])
+        return bumper
+
+
 class XCookieCLI(kwconf.ModalCLI):
     """Generate and maintain Python project infrastructure."""
 
@@ -128,6 +164,7 @@ class XCookieCLI(kwconf.ModalCLI):
     __version__ = __version__
 
     generate = GenerateConfig
+    bump = BumpConfig
     refresh_docs = RefreshDocsConfig
     rotate_secrets = RotateSecretsConfig
 

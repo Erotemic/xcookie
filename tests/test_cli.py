@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import ubelt as ub
+
 
 def test_modal_root_help_is_command_oriented() -> None:
     from xcookie.cli import XCookieCLI
 
     help_text = XCookieCLI().argparse().format_help()
     assert 'generate' in help_text
+    assert 'bump' in help_text
     assert 'rotate-secrets' in help_text
     assert 'refresh-docs' in help_text
     assert '--regen' not in help_text
@@ -144,3 +147,44 @@ def test_refresh_docs_dispatches_as_separate_action(monkeypatch) -> None:
         'kwargs': {'repodir': 'demo-repo'},
     }
     assert str(refreshed['repodir']) == 'demo-repo'
+
+
+def test_bump_dispatches_as_separate_action(monkeypatch) -> None:
+    from xcookie.cli import XCookieCLI
+    from xcookie.versioning import VersionBumper
+
+    called = {}
+
+    def fake_bump(self, target='patch'):
+        called['repodir'] = self.repodir
+        called['target'] = target
+
+    monkeypatch.setattr(VersionBumper, 'bump', fake_bump)
+
+    result = XCookieCLI.main(
+        argv=['bump', 'minor', 'demo-repo'],
+        autocomplete=False,
+    )
+
+    assert isinstance(result, VersionBumper)
+    assert called['target'] == 'minor'
+    assert called['repodir'].name == 'demo-repo'
+
+
+def test_bump_defaults_to_patch_in_current_directory(monkeypatch) -> None:
+    from xcookie.cli import XCookieCLI
+    from xcookie.versioning import VersionBumper
+
+    called = {}
+
+    def fake_bump(self, target='patch'):
+        called['repodir'] = self.repodir
+        called['target'] = target
+
+    monkeypatch.setattr(VersionBumper, 'bump', fake_bump)
+
+    result = XCookieCLI.main(argv=['bump'], autocomplete=False)
+
+    assert isinstance(result, VersionBumper)
+    assert called['target'] == 'patch'
+    assert called['repodir'].name == ub.Path.cwd().name

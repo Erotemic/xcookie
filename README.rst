@@ -55,15 +55,26 @@ The top level CLI is command-oriented:
 
 .. code::
 
-    usage: xcookie [-h] [--version] {generate,refresh-docs,rotate-secrets} ...
+    usage: xcookie [-h] [--version] {generate,bump,refresh-docs,rotate-secrets} ...
 
     commands:
-      {generate,refresh-docs,rotate-secrets}
+      {generate,bump,refresh-docs,rotate-secrets}
         generate            generate or update project boilerplate
+        bump                bump the package version and changelog
         refresh-docs        regenerate Sphinx API documentation
         rotate-secrets      rotate CI secrets for an existing repository
 
 Run ``xcookie generate --help`` for the project-generation options.
+
+Version bumps are a separate maintenance command. They update the authoritative
+package version and roll ``CHANGELOG.md`` from the current release into the next
+``Unreleased`` section::
+
+    xcookie bump              # patch, by default
+    xcookie bump patch
+    xcookie bump minor
+    xcookie bump major
+    xcookie bump 2.0.0        # explicit target version
 
 
 Invocations to create a new github repo:

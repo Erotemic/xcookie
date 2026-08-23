@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Version 0.4.2 - Unreleased
 
 ### Changed
+* Added ``xcookie bump`` for package-version maintenance. It supports patch,
+  minor, major (plus ``micro`` as a patch alias), and explicit target versions;
+  it updates the authoritative static version source, marks the current
+  changelog section released, and inserts the next ``Unreleased`` section.
 * Secret rotation is now the separate `xcookie rotate-secrets` command instead
   of a side effect of `xcookie generate`.
 * Sphinx API refresh is now the separate `xcookie refresh-docs` command instead
