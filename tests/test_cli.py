@@ -155,9 +155,10 @@ def test_bump_dispatches_as_separate_action(monkeypatch) -> None:
 
     called = {}
 
-    def fake_bump(self, target='patch'):
+    def fake_bump(self, target='patch', *, branch=False):
         called['repodir'] = self.repodir
         called['target'] = target
+        called['branch'] = branch
 
     monkeypatch.setattr(VersionBumper, 'bump', fake_bump)
 
@@ -168,6 +169,7 @@ def test_bump_dispatches_as_separate_action(monkeypatch) -> None:
 
     assert isinstance(result, VersionBumper)
     assert called['target'] == 'minor'
+    assert called['branch'] is False
     assert called['repodir'].name == 'demo-repo'
 
 
@@ -177,9 +179,10 @@ def test_bump_defaults_to_patch_in_current_directory(monkeypatch) -> None:
 
     called = {}
 
-    def fake_bump(self, target='patch'):
+    def fake_bump(self, target='patch', *, branch=False):
         called['repodir'] = self.repodir
         called['target'] = target
+        called['branch'] = branch
 
     monkeypatch.setattr(VersionBumper, 'bump', fake_bump)
 
@@ -187,4 +190,30 @@ def test_bump_defaults_to_patch_in_current_directory(monkeypatch) -> None:
 
     assert isinstance(result, VersionBumper)
     assert called['target'] == 'patch'
+    assert called['branch'] is False
     assert called['repodir'].name == ub.Path.cwd().name
+
+
+def test_bump_forwards_optional_branch(monkeypatch) -> None:
+    from xcookie.cli import XCookieCLI
+    from xcookie.versioning import VersionBumper
+
+    called = {}
+
+    def fake_bump(self, target='patch', *, branch=False):
+        called['target'] = target
+        called['branch'] = branch
+
+    monkeypatch.setattr(VersionBumper, 'bump', fake_bump)
+
+    XCookieCLI.main(
+        argv=[
+            'bump',
+            'patch',
+            'demo-repo',
+            '--branch',
+        ],
+        autocomplete=False,
+    )
+
+    assert called == {'target': 'patch', 'branch': True}

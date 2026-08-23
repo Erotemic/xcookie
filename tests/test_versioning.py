@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as datetime_mod
+import subprocess
 
 import pytest
 
@@ -108,6 +109,108 @@ def test_bump_accepts_already_released_current_changelog(tmp_path):
     changelog = changelog_path.read_text()
     assert '## Version 1.2.4 - Unreleased' in changelog
     assert '## Version 1.2.3 - Released 2026-08-20' in changelog
+
+
+def test_bump_accepts_legacy_stale_changelog(tmp_path):
+    _write_dynamic_attr_repo(tmp_path, version='2.3.0')
+    changelog_path = tmp_path / 'CHANGELOG.md'
+    changelog_path.write_text(
+        '''
+# Changelog
+
+## [Version 2.2.0] -
+
+### Fixed:
+* old fix
+
+## [Version 2.1.2]
+
+### Changed
+* old change
+'''.lstrip()
+    )
+
+    VersionBumper(tmp_path).bump(
+        'patch', release_date=datetime_mod.date(2026, 8, 23)
+    )
+
+    changelog = changelog_path.read_text()
+    assert '## Version 2.3.1 - Unreleased' in changelog
+    assert '## [Version 2.2.0] -' in changelog
+    assert '## Version 2.3.0 - Released' not in changelog
+    assert changelog.index('2.3.1') < changelog.index('2.2.0')
+
+
+def test_bump_normalizes_legacy_current_changelog_heading(tmp_path):
+    _write_dynamic_attr_repo(tmp_path, version='2.3.0')
+    changelog_path = tmp_path / 'CHANGELOG.md'
+    changelog_path.write_text(
+        '# Changelog\n\n## [Version 2.3.0] -\n\n### Fixed\n* work\n'
+    )
+
+    VersionBumper(tmp_path).bump(
+        'patch', release_date=datetime_mod.date(2026, 8, 23)
+    )
+
+    changelog = changelog_path.read_text()
+    assert '## Version 2.3.1 - Unreleased' in changelog
+    assert '## Version 2.3.0 - Released 2026-08-23' in changelog
+
+
+def test_bump_can_create_version_branch(tmp_path):
+    _write_dynamic_attr_repo(tmp_path)
+    subprocess.run(['git', 'init', '-q'], cwd=tmp_path, check=True)
+    subprocess.run(
+        ['git', 'config', 'user.email', 'test@example.com'],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        ['git', 'config', 'user.name', 'XCookie Test'],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(['git', 'add', '.'], cwd=tmp_path, check=True)
+    subprocess.run(
+        ['git', 'commit', '-qm', 'initial'], cwd=tmp_path, check=True
+    )
+
+    VersionBumper(tmp_path).bump(
+        'patch',
+        branch=True,
+        release_date=datetime_mod.date(2026, 8, 23),
+    )
+
+    branch = subprocess.run(
+        ['git', 'branch', '--show-current'],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert branch == 'dev/1.2.4'
+    assert "__version__ = '1.2.4'" in (
+        tmp_path / 'demo' / '__init__.py'
+    ).read_text()
+
+
+def test_branch_failure_does_not_apply_bump(tmp_path, monkeypatch):
+    _write_dynamic_attr_repo(tmp_path)
+    init_path = tmp_path / 'demo' / '__init__.py'
+    changelog_path = tmp_path / 'CHANGELOG.md'
+    before_init = init_path.read_text()
+    before_changelog = changelog_path.read_text()
+
+    def fail_branch(self, branch_name):
+        raise RuntimeError(f'cannot create {branch_name}')
+
+    monkeypatch.setattr(VersionBumper, 'create_branch', fail_branch)
+
+    with pytest.raises(RuntimeError, match='cannot create dev/1.2.4'):
+        VersionBumper(tmp_path).bump('patch', branch=True)
+
+    assert init_path.read_text() == before_init
+    assert changelog_path.read_text() == before_changelog
 
 
 def test_bump_validates_changelog_before_writing_version(tmp_path):

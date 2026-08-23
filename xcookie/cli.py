@@ -135,6 +135,14 @@ class BumpConfig(kwconf.Config):
         'repodir': kwconf.Value(
             '.', position=2, help='path to the existing repository'
         ),
+        'branch': kwconf.Value(
+            False,
+            isflag=True,
+            help=(
+                'create and switch to dev/<new-version> before applying '
+                'the bump'
+            ),
+        ),
     }
 
     @classmethod
@@ -153,7 +161,10 @@ class BumpConfig(kwconf.Config):
             autocomplete=autocomplete,
         )
         bumper = VersionBumper(command_config['repodir'])
-        bumper.bump(command_config['target'])
+        bumper.bump(
+            command_config['target'],
+            branch=command_config['branch'],
+        )
         return bumper
 
 

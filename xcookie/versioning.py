@@ -288,65 +288,87 @@ def update_changelog_for_bump(
     next_version: str,
     release_date: datetime_mod.date,
 ) -> str:
-    """Close the current changelog entry and prepend the next version."""
+    """Close the current changelog entry and prepend the next version.
+
+    Older xcookie repositories do not all use the current changelog heading
+    convention. In particular, some released versions use headings such as
+    ``## [Version 2.2.0] -`` or omit the current package version entirely.
+    Treat an older leading version as stale history and start the new cycle
+    above it instead of requiring a manual changelog rewrite first.
+    """
     heading_pattern = re.compile(
-        r'^(?P<prefix>##\s+\[?Version\s+)'
+        r'^##\s+\[?Version\s+'
         r'(?P<version>[^\]\s]+)'
-        r'(?P<close>\]?)'
-        r'(?P<separator>\s*-\s*)'
-        r'(?P<status>.*)$'
+        r'\]?'
+        r'(?P<tail>.*)$'
     )
     lines = text.splitlines(keepends=True)
     headings = []
     for index, line in enumerate(lines):
         match = heading_pattern.match(line.rstrip('\r\n'))
         if match:
-            headings.append((index, match))
+            tail = match.group('tail').strip()
+            status = tail[1:].strip() if tail.startswith('-') else tail
+            headings.append((index, match, status))
+
+    if not headings:
+        raise RuntimeError('Could not find any version headings in CHANGELOG.md')
 
     current_matches = [
         item for item in headings if item[1].group('version') == current_version
     ]
-    if len(current_matches) != 1:
+    if len(current_matches) > 1:
         raise RuntimeError(
-            f'Expected exactly one changelog heading for version '
+            f'Expected at most one changelog heading for version '
             f'{current_version}, found {len(current_matches)}'
         )
-    if headings[0][1].group('version') != current_version:
-        raise RuntimeError(
-            'The package version must match the first changelog version; '
-            f'package={current_version}, changelog='
-            f'{headings[0][1].group("version")}'
-        )
-    if any(m.group('version') == next_version for _, m in headings):
+    if any(m.group('version') == next_version for _, m, _ in headings):
         raise RuntimeError(f'CHANGELOG.md already contains version {next_version}')
 
-    current_index, match = current_matches[0]
-    status = match.group('status').strip()
-    if status == 'Unreleased':
+    if current_matches:
+        current_index, _, status = current_matches[0]
+        if headings[0][1].group('version') != current_version:
+            raise RuntimeError(
+                'The current package version appears in CHANGELOG.md but is '
+                'not the first version heading; '
+                f'package={current_version}, changelog='
+                f'{headings[0][1].group("version")}'
+            )
+    else:
+        first_index, first_match, _ = headings[0]
+        try:
+            first_version = Version(first_match.group('version'))
+        except ValueError as ex:
+            raise RuntimeError(
+                'Cannot compare the package version against the first '
+                f'changelog version {first_match.group("version")!r}'
+            ) from ex
+        if first_version >= Version(current_version):
+            raise RuntimeError(
+                'The package version is missing from the changelog and the '
+                'first changelog version is not older; '
+                f'package={current_version}, changelog={first_version}'
+            )
+        current_index = first_index
+        status = None
+
+    if status in {'Unreleased', ''}:
         newline = '\n' if lines[current_index].endswith('\n') else ''
         if lines[current_index].endswith('\r\n'):
             newline = '\r\n'
         lines[current_index] = (
-            match.group('prefix')
-            + current_version
-            + match.group('close')
-            + match.group('separator')
-            + f'Released {release_date.isoformat()}'
-            + newline
+            f'## Version {current_version} - '
+            f'Released {release_date.isoformat()}{newline}'
         )
-    elif not re.fullmatch(r'Released\s+\d{4}-\d{2}-\d{2}', status):
+    elif status is not None and not re.fullmatch(
+        r'Released\s+\d{4}-\d{2}-\d{2}', status
+    ):
         raise RuntimeError(
             f'Expected version {current_version} changelog status to be '
-            f'Unreleased or Released YYYY-MM-DD, found {status!r}'
+            f'Unreleased, blank, or Released YYYY-MM-DD, found {status!r}'
         )
 
-    new_heading = (
-        match.group('prefix')
-        + next_version
-        + match.group('close')
-        + match.group('separator')
-        + 'Unreleased\n\n\n'
-    )
+    new_heading = f'## Version {next_version} - Unreleased\n\n\n'
     lines.insert(current_index, new_heading)
     return ''.join(lines)
 
@@ -362,6 +384,18 @@ class VersionBumper:
         source = find_version_source(self.repodir, required=True)
         assert source is not None
         return source
+
+    def create_branch(self, branch_name: str) -> None:
+        """Create and switch to the requested branch before editing files."""
+        info = ub.cmd(
+            ['git', 'switch', '-c', branch_name],
+            cwd=self.repodir,
+            verbose=2,
+        )
+        if info['ret'] != 0:
+            detail = (info.get('err') or info.get('out') or '').strip()
+            suffix = f': {detail}' if detail else ''
+            raise RuntimeError(f'Could not create branch {branch_name!r}{suffix}')
 
     @staticmethod
     def resolve_next_version(current: str, target: str) -> str:
@@ -438,9 +472,14 @@ class VersionBumper:
         target: str = 'patch',
         *,
         release_date: datetime_mod.date | None = None,
+        branch: bool = False,
     ) -> VersionBumpPlan:
         """Apply a validated package/changelog bump and report the transition."""
         plan = self.plan(target, release_date=release_date)
+        if branch:
+            branch_name = f'dev/{plan.next_version}'
+            self.create_branch(branch_name)
+            print(f'Created branch {branch_name}')
         plan.apply()
         print(f'Bumped version {plan.current_version} -> {plan.next_version}')
         print(f'Updated {plan.version_source.path}')
