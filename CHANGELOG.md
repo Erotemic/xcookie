@@ -8,6 +8,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Version 0.4.2 - Unreleased
 
 ### Changed
+* Split template inventory, remote resolution, Git URL parsing, and new-repository initialization out of `xcookie.main` while preserving the generator entrypoints.
+* Initial changelogs now use the configured package version and an `Unreleased` heading, matching the contract used by `xcookie bump`.
+* Package-version inference and `xcookie bump` now share the same static version-source discovery.
+* Small generated files now use explicit builder functions instead of the `TemplateApplier.lut` fallback.
+* Removed unused generator plumbing for `deploy_gitlab`, the old docs quickstart scratchpad, and inactive TemplateApplier wrappers for disabled templates.
 * Added ``xcookie bump`` for package-version maintenance. It supports patch,
   minor, major (plus ``micro`` as a patch alias), and explicit target versions;
   it updates the authoritative static version source, marks the current

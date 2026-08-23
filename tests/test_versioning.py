@@ -4,7 +4,11 @@ import datetime as datetime_mod
 
 import pytest
 
-from xcookie.versioning import VersionBumper
+from xcookie.versioning import (
+    VersionBumper,
+    build_initial_changelog,
+    find_version_source,
+)
 
 
 def _write_dynamic_attr_repo(tmp_path, version='1.2.3'):
@@ -122,3 +126,21 @@ def test_bump_validates_changelog_before_writing_version(tmp_path):
 def test_relative_bump_rejects_prerelease():
     with pytest.raises(ValueError, match='explicit target'):
         VersionBumper.resolve_next_version('1.2.3rc1', 'patch')
+
+
+
+def test_initial_changelog_matches_bump_contract():
+    text = build_initial_changelog('2.3.4')
+    assert '## Version 2.3.4 - Unreleased' in text
+    assert 'Version 0.0.1' not in text
+
+
+def test_shared_version_discovery_for_config_inference(tmp_path):
+    _write_dynamic_attr_repo(tmp_path, version='5.6.7')
+    import toml
+
+    data = toml.loads((tmp_path / 'pyproject.toml').read_text())
+    source = find_version_source(tmp_path, data=data, required=False)
+    assert source is not None
+    assert source.version == '5.6.7'
+    assert source.path == tmp_path / 'demo' / '__init__.py'

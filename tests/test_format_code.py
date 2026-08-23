@@ -112,7 +112,7 @@ def test_generated_init_text_formats_platform_specific(tmp_path) -> None:
     """
     Regression test for formatting the generated ``__init__.py`` template.
 
-    This covers the path where xcookie builds ``__init__.py`` via ``lut()`` and
+    This covers the path where xcookie builds the generated ``__init__.py`` and
     then formats the generated source. It guards against Windows-specific path
     escaping bugs in the templated ``__mkinit__`` block.
     """
@@ -145,7 +145,11 @@ def test_generated_init_text_formats_platform_specific(tmp_path) -> None:
         'repo_fpath': repo_init_fpath,
     }
 
-    text = applier.lut(info)
+    from xcookie.builders.basic import build_package_init
+    from xcookie.template_registry import TemplateInfo
+
+    info = TemplateInfo.coerce(info)
+    text = build_package_init(applier, info)
     formatted = applier.format_code(text, filename='__init__.py')
 
     assert '__mkinit__' in formatted

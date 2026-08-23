@@ -76,7 +76,7 @@ import re
 import shutil
 import tempfile
 import warnings
-from collections.abc import MutableMapping, Sequence
+from collections.abc import Sequence
 from typing import Any, cast
 
 import kwconf
@@ -91,10 +91,9 @@ from xcookie.staging import apply_template_context
 from xcookie.template_registry import (
     TemplateContext,
     TemplateInfo,
-    coerce_template_infos,
 )
 from xcookie.util.util_metadata import metadata_text
-from xcookie.util_command import make_command_queue
+from xcookie.vcs.url import GitURL
 
 
 class SkipFile(Exception):
@@ -151,9 +150,6 @@ class XCookieConfig(kwconf.Config):
         ),
         'deploy_artifacts': kwconf.Value(
             True, help='If False, disable github/gitlab deployment', isflag=True
-        ),
-        'deploy_gitlab': kwconf.Value(
-            True, help='If False, disable gitlab deployment', isflag=True
         ),
         'os': kwconf.Value('all', help='all or any of win,osx,linux'),
         'is_new': kwconf.Value(
@@ -558,76 +554,6 @@ class XCookieConfig(kwconf.Config):
             )
         return config
 
-    def _infer_version_from_file(self, fpath):
-        try:
-            text = ub.Path(fpath).read_text()
-        except Exception:
-            return None
-
-        match = re.search(
-            r"""(?m)^__version__\s*=\s*(['"])(?P<ver>[^'"]+)\1\s*$""", text
-        )
-        if match:
-            return match.group('ver')
-        return None
-
-    def _infer_version_from_pyproject(self, disk_config):
-        project_block = disk_config.get('project', {})
-        version = project_block.get('version')
-        if version:
-            return version
-
-        tool_block = disk_config.get('tool', {})
-        setuptools_config = tool_block.get('setuptools', {})
-        setuptools_dynamic = setuptools_config.get('dynamic', {})
-        version_spec = setuptools_dynamic.get('version', {})
-        if isinstance(version_spec, dict):
-            version_file = version_spec.get('file')
-            if isinstance(version_file, str):
-                version_file = [version_file]
-            if isinstance(version_file, (list, tuple)):
-                for rel_fpath in version_file:
-                    fpath = self.repodir / rel_fpath
-                    version = self._infer_version_from_file(fpath)
-                    if version:
-                        return version
-
-            version_attr = version_spec.get('attr')
-            if isinstance(version_attr, str):
-                module_name = version_attr.rsplit('.', 1)[0]
-                candidate_rel_paths = []
-
-                xcookie_config = tool_block.get('xcookie', {})
-                rel_mod_parent_dpath = xcookie_config.get(
-                    'rel_mod_parent_dpath', '.'
-                )
-                candidate_roots = [ub.Path(rel_mod_parent_dpath)]
-
-                setuptools_packages = setuptools_config.get('packages', {})
-                if isinstance(setuptools_packages, dict):
-                    find_config = setuptools_packages.get('find', {})
-                    if isinstance(find_config, dict):
-                        for where in find_config.get('where', []) or []:
-                            candidate_roots.append(ub.Path(where))
-
-                candidate_roots.append(ub.Path('.'))
-                rel_module_dpath = ub.Path(*module_name.split('.'))
-                for root in candidate_roots:
-                    candidate_rel_paths.extend(
-                        [
-                            root / rel_module_dpath / '__init__.py',
-                            root / f'{rel_module_dpath}.py',
-                        ]
-                    )
-
-                for rel_fpath in ub.oset(candidate_rel_paths):
-                    fpath = self.repodir / rel_fpath
-                    version = self._infer_version_from_file(fpath)
-                    if version:
-                        return version
-
-        return None
-
     def _infer_xcookie_settings_from_pyproject(self, disk_config):
         """
         Helper to populate the xcookie main settings from more standard
@@ -638,9 +564,13 @@ class XCookieConfig(kwconf.Config):
         config['pkg_name'] = project_block.get('name')
         config['description'] = project_block.get('description')
         config.update(self._infer_project_authors(disk_config))
-        version = self._infer_version_from_pyproject(disk_config)
-        if version:
-            config['version'] = version
+        from xcookie.versioning import find_version_source
+
+        version_source = find_version_source(
+            self.repodir, data=disk_config, required=False
+        )
+        if version_source is not None:
+            config['version'] = version_source.version
 
         setuptools_config = disk_config.get('tool', {}).get('setuptools', {})
         setuptools_packages = setuptools_config.get('packages', [])
@@ -917,377 +847,11 @@ class TemplateApplier:
         return 'text/x-rst'
 
     def _build_template_registry(self):
-        """
-        Take stock of the files in the template repo and ensure they all have
-        appropriate properties.
-        """
-        from xcookie import rc
-        from xcookie.builders import ci_plan
+        """Build the active template inventory."""
+        from xcookie.template_registry import build_template_registry
 
-        rel_mod_dpath = self.rel_mod_dpath
-
-        raw_template_infos: list[TemplateInfo | MutableMapping[str, Any]] = [
-            # {'template': 1, 'overwrite': False, 'fname': '.circleci/config.yml'},
-            # {'template': 1, 'overwrite': False, 'fname': '.travis.yml'},
-            {
-                'template': 0,
-                'overwrite': 1,
-                'fname': 'dev/setup_secrets.sh',
-                'enabled': self.config['enable_gpg'],
-                'input_fname': rc.resource_fpath('setup_secrets.sh.in'),
-            },
-            {
-                'template': 0,
-                'overwrite': 0,
-                'fname': '.gitignore',
-                'input_fname': rc.resource_fpath('gitignore.in'),
-            },
-            # {'template': 1, 'overwrite': 1, 'fname': '.coveragerc'},
-            {
-                'template': 1,
-                'overwrite': 1,
-                'fname': '.readthedocs.yml',
-                'dynamic': 'build_readthedocs',
-            },
-            # {'template': 0, 'overwrite': 1, 'fname': 'pytest.ini'},
-            {
-                'template': 0,
-                'overwrite': 0,
-                'fname': 'pyproject.toml',
-                'dynamic': 'build_pyproject',
-            },
-            {
-                'template': 1,
-                'overwrite': 0,
-                'fname': 'setup.py',
-                # 'input_fname': rc.resource_fpath('setup.py.in'),
-                'dynamic': 'build_setup',
-                'enabled': self.config['use_setup_py'],
-                'perms': 'x',
-            },
-            {
-                'template': 0,
-                'overwrite': 0,
-                'fname': 'docs/source/index.rst',
-                'dynamic': 'build_docs_index',
-            },
-            {
-                'template': 0,
-                'overwrite': 0,
-                'fname': 'README.rst',
-                'dynamic': 'build_readme',
-            },
-            #
-            {'source': 'dynamic', 'overwrite': 0, 'fname': 'CHANGELOG.md'},
-            {
-                'source': 'dynamic',
-                'overwrite': 0,
-                'fname': rel_mod_dpath / '__init__.py',
-            },
-            # {'source': 'dynamic', 'overwrite': 0, 'fname': rel_mod_dpath / '__main__.py'},
-            {
-                'source': 'dynamic',
-                'overwrite': 0,
-                'fname': 'tests/test_import.py',
-            },
-            {
-                'template': 0,
-                'overwrite': 1,
-                'fname': '.github/dependabot.yml',
-                'tags': 'github',
-                'input_fname': rc.resource_fpath('dependabot.yml.in'),
-            },
-            # {'template': 0, 'overwrite': 1,
-            #  'tags': 'binpy,github',
-            #  'fname': '.github/workflows/test_binaries.yml',
-            #  'input_fname': rc.resource_fpath('test_binaries.yml.in')},
-            {
-                'template': 1,
-                'overwrite': 1,
-                'tags': 'github',
-                'fname': '.github/workflows/tests.yml',
-                'dynamic': 'build_github_actions_tests',
-            },
-            {
-                'template': 1,
-                'overwrite': 1,
-                'tags': 'github',
-                'fname': '.github/workflows/release.yml',
-                'dynamic': 'build_github_actions_release',
-            },
-            {
-                'template': 0,
-                'overwrite': 1,
-                'fname': '.gitlab-ci.yml',
-                'tags': 'gitlab,purepy',
-                # 'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')
-                'dynamic': 'build_gitlab_ci',
-            },
-            # Broken
-            # {'template': 0, 'overwrite': 1, 'fname': '.gitlab/rules.yml', 'tags': 'gitlab',
-            #  # 'input_fname': rc.resource_fpath('gitlab-ci.purepy.yml.in')
-            #  'dynamic': 'build_gitlab_rules'
-            #  },
-            {
-                'template': 0,
-                'overwrite': 1,
-                'fname': '.gitlab-ci.yml',
-                'tags': 'gitlab,binpy',
-                'dynamic': 'build_gitlab_ci',
-            },
-            # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
-            {
-                'template': 1,
-                'overwrite': 0,
-                'fname': 'CMakeLists.txt',
-                'tags': 'binpy',
-                'input_fname': rc.resource_fpath('CMakeLists.txt.in'),
-            },
-            # {'template': 0, 'overwrite': 1, 'fname': 'dev/make_strict_req.sh', 'perms': 'x'},
-            {
-                'template': 0,
-                'overwrite': 1,
-                'fname': 'requirements.txt',
-                'enabled': not self.config['use_pyproject_requirements'],
-                'dynamic': 'build_requirements_txt',
-            },
-            {
-                'template': 1,
-                'overwrite': 1,
-                'fname': 'requirements/graphics.txt',
-                'tags': 'cv2',
-                'enabled': not self.config['use_pyproject_requirements'],
-                'dynamic': 'build_cv2_graphics_requirements_txt',
-            },
-            {
-                'template': 1,
-                'overwrite': 1,
-                'fname': 'requirements/headless.txt',
-                'tags': 'cv2',
-                'enabled': not self.config['use_pyproject_requirements'],
-                'dynamic': 'build_cv2_headless_requirements_txt',
-            },
-            {
-                'template': 1,
-                'overwrite': 1,
-                'fname': 'requirements/gdal.txt',
-                'tags': 'gdal',
-                'enabled': not self.config['use_pyproject_requirements'],
-                'dynamic': 'build_gdal_requirements_txt',
-            },
-            {
-                'template': 0,
-                'overwrite': 0,
-                'fname': 'requirements/optional.txt',
-                'enabled': not self.config['use_pyproject_requirements'],
-                'dynamic': 'build_optional_requirements',
-            },
-            {
-                'template': 0,
-                'overwrite': 0,
-                'fname': 'requirements/runtime.txt',
-                'enabled': not self.config['use_pyproject_requirements'],
-                'dynamic': 'build_runtime_requirements',
-            },
-            {
-                'template': 0,
-                'overwrite': 0,
-                'fname': 'requirements/tests.txt',
-                'enabled': not self.config['use_pyproject_requirements'],
-                'dynamic': 'build_tests_requirements',
-            },
-            {
-                'template': 0,
-                'overwrite': 0,
-                'fname': 'requirements/docs.txt',
-                'enabled': not self.config['use_pyproject_requirements'],
-                'dynamic': 'build_docs_requirements',
-            },
-            {
-                'template': 1,
-                'overwrite': 1,
-                'fname': 'docs/source/conf.py',
-                'dynamic': 'build_docs_conf',
-            },
-            {
-                'template': 1,
-                'overwrite': 1,
-                'fname': 'docs/Makefile',
-                'input_fname': rc.resource_fpath('docs_makefile.in'),
-            },
-            {
-                'template': 1,
-                'overwrite': 1,
-                'fname': 'docs/make.bat',
-                'input_fname': rc.resource_fpath('docs_make.bat.in'),
-            },
-            # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_static', 'path_type': 'dir'},
-            # {'template': 0, 'overwrite': 0, 'fname': 'docs/source/_templates', 'path_type': 'dir'},
-            {
-                'template': 0,
-                'overwrite': 1,
-                'fname': 'publish.sh',
-                'perms': 'x',
-                'input_fname': rc.resource_fpath('publish.sh.in'),
-            },
-            {
-                'template': 1,
-                'overwrite': 1,
-                'fname': 'build_wheels.sh',
-                'perms': 'x',
-                'tags': 'binpy',
-            },
-            {
-                'template': 1,
-                'overwrite': 1,
-                'fname': 'run_doctests.sh',
-                'perms': 'x',
-                'dynamic': 'build_run_doctests',
-            },  # TODO: template with xdoctest-style
-            # TODO: add this back in eventually
-            # {'template': 1, 'overwrite': 1, 'fname': 'MANIFEST.in', 'dynamic': 'build_manifest_in'},
-            {
-                'template': 0,
-                'overwrite': 0,
-                'fname': 'run_linter.sh',
-                'perms': 'x',
-                'dynamic': 'build_run_linter',
-            },
-            {
-                # Helper that re-exports requirements/locks/*.txt from uv.lock
-                # for every strict CI variant. Only meaningful when the project
-                # uses pyproject + uv (lockfile-driven CI); skipped otherwise.
-                'template': 0,
-                'overwrite': 1,
-                'fname': 'dev/refresh_locks.sh',
-                'perms': 'x',
-                'enabled': ci_plan.uses_lockfile_ci(self),
-                'dynamic': 'build_refresh_locks_sh',
-            },
-            # TODO: template a clean script
-            {
-                'template': 1,
-                'overwrite': 0,
-                'fname': 'run_tests.py',
-                'perms': 'x',
-                'tags': 'binpy',
-                'input_fname': rc.resource_fpath('run_tests.binpy.py.in'),
-            },
-            {
-                'template': 1,
-                'overwrite': 0,
-                'fname': 'run_tests.py',
-                'perms': 'x',
-                'tags': 'purepy',
-                'input_fname': rc.resource_fpath('run_tests.purepy.py.in'),
-            },
-        ]
-
-        # Dynamic PEP 621 dependency metadata cannot directly consume pip
-        # directives such as ``-r`` or index-selection options. Preserve
-        # installer-facing files and stage metadata-only companions only when
-        # a user-managed requirements file actually needs one.
-        if (
-            not self.config['use_pyproject_requirements']
-            and not self.config['use_setup_py']
-        ):
-            from xcookie.builders.pyproject import (
-                _requirement_file_needs_metadata_copy,
-            )
-
-            requirements_dpath = self.repodir / 'requirements'
-            if requirements_dpath.exists():
-                known_fnames = {
-                    os.fspath(info.get('fname', '')) for info in raw_template_infos
-                }
-                for req_fpath in sorted(requirements_dpath.glob('*.txt')):
-                    if req_fpath.stem.endswith('-metadata'):
-                        continue
-                    if req_fpath.name == 'gdal.txt' and 'gdal' in self.tags:
-                        # The staged GDAL file is generated metadata-safe; its
-                        # custom wheel index remains CI installer policy.
-                        continue
-                    if _requirement_file_needs_metadata_copy(req_fpath):
-                        metadata_relpath = ub.Path('requirements') / (
-                            req_fpath.stem + '-metadata.txt'
-                        )
-                        if os.fspath(metadata_relpath) not in known_fnames:
-                            raw_template_infos.append(
-                                {
-                                    'source': 'dynamic',
-                                    'overwrite': 1,
-                                    'fname': metadata_relpath,
-                                }
-                            )
-                            known_fnames.add(os.fspath(metadata_relpath))
-
-        self.template_infos = coerce_template_infos(raw_template_infos)
-
-        # The user specified some files to not overwrite by default
-        skip_autogen = {
-            os.fspath(p) for p in (self.config['skip_autogen'] or [])
-        }
-        if skip_autogen:
-            for item in self.template_infos:
-                if os.fspath(item.fname) in skip_autogen:
-                    item.overwrite = False
-                    item.skip = True
-
-        if 0:
-            # Checker and help autopopulate
-            template_contents = []
-            dname_blocklist = {
-                '__pycache__',
-                'old',
-                '.circleci',
-                'xcookie',
-                '.git',
-            }
-            fname_blocklist = set()
-            for root, ds, fs in self.template_dpath.walk():
-                for d in set(ds) & dname_blocklist:
-                    ds.remove(d)
-                fs = set(fs) - fname_blocklist
-                if fs:
-                    rel_root = root.relative_to(self.template_dpath)
-                    for fname in fs:
-                        abs_fpath = root / fname
-                        if abs_fpath.name.endswith('.in'):
-                            is_template = 1
-                        else:
-                            try:
-                                is_template = int(
-                                    'xcookie' in abs_fpath.read_text()
-                                )
-                            except Exception:
-                                is_template = 0
-                            # is_template = 0
-                        rel_fpath = rel_root / fname
-                        # overwrite indicates if we dont expect the user to
-                        # make modifications
-                        template_contents.append(
-                            {
-                                'template': is_template,
-                                'overwrite': False,
-                                'fname': os.fspath(rel_fpath),
-                            }
-                        )
-            print(
-                'template_contents = {}'.format(
-                    ub.urepr(
-                        sorted(template_contents, key=lambda x: x['fname']),
-                        nl=1,
-                        sort=0,
-                    )
-                )
-            )
-            known_fpaths = {os.fspath(d.fname) for d in self.template_infos}
-            exist_fpaths = {d['fname'] for d in template_contents}
-            unexpected_fpaths = exist_fpaths - known_fpaths
-            if unexpected_fpaths:
-                print(
-                    f'WARNING UNREGISTERED unexpected_fpaths={unexpected_fpaths}'
-                )
+        self.template_infos = build_template_registry(self)
+        return self.template_infos
 
     @property
     def tags(self):
@@ -1343,96 +907,10 @@ class TemplateApplier:
         return classifiers
 
     def _presetup(self):
-        """
-        This logic used to live in setup, but it doesn't have external side
-        effects, so it would be good if we were able have these fields
-        populated on initialization for tests.
-        """
-        tags = set(self.config['tags'])
-        self.remote_info = {'type': 'unknown'}
+        """Resolve repository hosting metadata before staging templates."""
+        from xcookie.vcs.remote_info import resolve_remote_info
 
-        if isinstance(self.config.url, str) and self.config.url.lower() in {
-            'none',
-            'null',
-        }:
-            self.config.url = None
-
-        if self.config.url is None:
-            # if 'github' not in tags and 'gitlab' not in tags:
-            # We can infer this if the repo already exists.
-            git_dpath = self.repodir / '.git'
-            if git_dpath.exists():
-                resp = ub.cmd('git remote -v  get-url origin', cwd=self.repodir)
-                if resp['ret'] == 0:
-                    remote_url = resp['out'].strip()
-                    if self.config.url is None:
-                        try:
-                            self.config.url = GitURL(remote_url).to_https()
-                            if self.config.url.endswith('.git'):
-                                self.config.url = self.config.url[:-4]
-                            # print(f'self.config.url={self.config.url}')
-                        except IndexError:
-                            ...
-
-        if self.config['remote_host'] is not None:
-            self.remote_info['host'] = self.config['remote_host']
-
-        if self.config['remote_group'] is not None:
-            self.remote_info['group'] = self.config['remote_group']
-
-        url = self.config.get('url', None)
-        if url is not None:
-            url = GitURL(url)
-            info = url.info
-            self.remote_info['group'] = info['group']
-            self.remote_info['host'] = info['host']
-            self.remote_info['repo_name'] = info['repo_name']
-            if 'github' in self.remote_info['host']:
-                self.remote_info['type'] = 'github'
-            if 'gitlab' in self.remote_info['host']:
-                self.remote_info['type'] = 'gitlab'
-
-        if 'gitlab' in tags:
-            self.remote_info['type'] = 'gitlab'
-        if 'github' in tags:
-            self.remote_info['type'] = 'github'
-
-        default_remote_info = {}
-
-        if self.remote_info['type'] == 'gitlab':
-            if 'kitware' in tags:
-                default_remote_info['host'] = 'https://gitlab.kitware.com'
-                default_remote_info['group'] = 'computer-vision'  # hack
-        if self.remote_info['type'] == 'github':
-            default_remote_info['host'] = 'https://github.com'
-            if 'erotemic' in tags:
-                default_remote_info['group'] = 'Erotemic'  # hack
-            if 'pyutils' in tags:
-                default_remote_info['group'] = 'pyutils'  # hack
-
-        self.remote_info = ub.udict(default_remote_info) | ub.udict(
-            self.remote_info
-        )
-
-        self.remote_info['repo_name'] = self.config['repo_name']
-
-        if 'group' in self.remote_info and 'host' in self.remote_info:
-            self.config['remote_host'] = self.remote_info['host']
-            self.config['remote_group'] = self.remote_info['group']
-            self.remote_info['url'] = '/'.join(
-                [
-                    self.remote_info['host'],
-                    self.remote_info['group'],
-                    self.config['repo_name'],
-                ]
-            )
-            self.remote_info['git_url'] = '/'.join(
-                [
-                    self.remote_info['host'],
-                    self.remote_info['group'],
-                    self.config['repo_name'] + '.git',
-                ]
-            )
+        self.remote_info = resolve_remote_info(self.config, self.repodir)
 
     def setup(self):
         """
@@ -1500,91 +978,13 @@ class TemplateApplier:
                 plan.apply_some(selected)
 
     def vcs_checks(self):
-        # repodir = self.config['repodir']
-        # mod_dpath = None
-        # if mod_dpath is None:
-        #     mod_name = self.config['mod_name']
-        #     mod_dpath = repodir / mod_name
+        """Initialize Git and hosting state for a newly generated repository."""
+        from xcookie.repository import RepositoryInitializer
 
-        # package_structure = [
-        #     repodir / 'CHANGELOG.md',
-        #     mod_dpath / '__init__.py',
-        #     mod_dpath / '__main__.py',
-        # ]
-        # missing = []
-        # for fpath in package_structure:
-        #     if not fpath.exists():
-        #         missing.append(fpath)
-        # if missing:
-        #     print('missing = {}'.format(ub.urepr(missing, nl=1)))
-        if self.config['is_new']:
-            create_new_repo_info = ub.codeblock(
-                f"""
-                TODO: call the APIS
-                git init
-                gh repo create {self.repo_name} --public
-                # https://cli.github.com/manual/gh_repo_create
-                """
-            )
-            print(create_new_repo_info)
-            queue = make_command_queue(cwd=self.repodir)
-            git_dpath = self.repodir / '.git'
-            if not git_dpath.exists():
-                queue.submit('git init')
-                queue.sync().submit(
-                    f'git remote add origin {self.remote_info["url"]}'
-                )
-
-            if 'erotemic' in self.tags:
-                # TODO: ensure this works
-                # for erotemic repos, configure the local user and email
-                # TODO: make an xcookie user configuration where this
-                # information is pulled from.
-                queue.sync().submit('git config --local user.name "Jon Crall"')
-                queue.sync().submit(
-                    'git config --local user.email "erotemic@gmail.com"'
-                )
-                # see also:
-                # ~/local/scripts/git-autoconf-gpgsign.sh Erotemic
-                queue.sync().submit('git config --local commit.gpgsign true')
-                queue.sync().submit(
-                    'git config --local user.signingkey 4AC8B478335ED6ED667715F3622BE571405441B4'
-                )
-
-            if queue.jobs:
-                queue.rprint()
-                if self.config.confirm('Do git init?'):
-                    self.repodir.ensuredir()
-                    queue.run()
-
-            if self.config['init_new_remotes'] and self.config.confirm(
-                'Do you want to create the repo on the remote?'
-            ):
-                if 'gitlab' in self.tags:
-                    """
-                    Requires user do something to load secrets:
-
-                    load_secrets
-                    HOST=https://gitlab.kitware.com
-                    export PRIVATE_GITLAB_TOKEN=$(git_token_for "$HOST")
-                    """
-                    from xcookie.vcs_remotes import GitlabRemote
-
-                    vcs_remote = GitlabRemote(
-                        proj_name=self.remote_info['repo_name'],
-                        proj_group=self.remote_info['group'],
-                        url=self.remote_info['host'],
-                        visibility=self.config['visibility'],
-                    )
-                    vcs_remote.auth()
-                    vcs_remote.new_project()
-                elif 'github' in self.tags:
-                    from xcookie.vcs_remotes import GithubRemote
-
-                    vcs_remote = GithubRemote(self.remote_info['repo_name'])
-                    vcs_remote.new_project()
-                else:
-                    raise NotImplementedError('unknown vcs remote')
+        initializer = RepositoryInitializer(
+            self.config, self.repodir, self.remote_info
+        )
+        initializer.initialize()
 
     @property
     def template_context(self) -> TemplateContext:
@@ -1634,13 +1034,14 @@ class TemplateApplier:
             stage_fpath.ensuredir()
         else:
             stage_fpath.parent.ensuredir()
-            dynamic = info.dynamic or info.source == 'dynamic'
-            if dynamic:
-                dynamic_var = info.dynamic
-                if dynamic_var == '':
-                    text = self.lut(info)
-                else:
-                    text = getattr(self, dynamic_var)()
+            if info.builder is not None:
+                text = info.builder(self, info)
+            elif info.dynamic:
+                text = getattr(self, info.dynamic)()
+            else:
+                text = None
+
+            if info.builder is not None or info.dynamic:
                 if text is None:
                     raise SkipFile('file was disabled')
                 try:
@@ -2015,13 +1416,6 @@ class TemplateApplier:
         self._setup_pip_commands()  # Do we need this here?
         return gitlab_ci.build_gitlab_ci(self)
 
-    def build_manifest_in(self):
-        text = ub.codeblock(
-            """
-            include requirements/*.txt
-            """
-        )
-        return text
 
     def build_refresh_locks_sh(self):
         """Build ``dev/refresh_locks.sh``.
@@ -2109,10 +1503,6 @@ class TemplateApplier:
         )
         return text
 
-    def build_gitlab_rules(self):
-        from xcookie.builders import gitlab_ci
-
-        return gitlab_ci.build_gitlab_rules(self)
 
     def build_readme(self):
         from xcookie.builders import readme
@@ -2328,135 +1718,11 @@ class TemplateApplier:
             """
         )
 
-    def lut(self, info):
-        """
-        Hacked builders when template_info source is dynamic, but there is no
-        corresponding explicit function.
 
-        Returns:
-            str: templated code
-        """
-        rel_fpath = ub.Path(info['fname'])
-        fname = rel_fpath.name
-        if (
-            rel_fpath.parent == ub.Path('requirements')
-            and fname.endswith('-metadata.txt')
-        ):
-            from xcookie.builders.pyproject import (
-                _build_setuptools_requirement_metadata_text,
-            )
-
-            source_name = fname[:-len('-metadata.txt')] + '.txt'
-            source_fpath = self.repodir / 'requirements' / source_name
-            return _build_setuptools_requirement_metadata_text(source_fpath)
-        if fname == 'CHANGELOG.md':
-            return ub.codeblock(
-                """
-                # Changelog
-                We [keep a changelog](https://keepachangelog.com/en/1.0.0/).
-                We aim to adhere to [semantic versioning](https://semver.org/spec/v2.0.0.html).
-
-                ## [Version 0.0.1] -
-
-                ### Added
-                * Initial version
-                """
-            )
-        elif fname == 'test_import.py':
-            return ub.codeblock(
-                f"""
-                def test_import():
-                    import {self.config['mod_name']}
-                """
-            )
-        elif fname == '__main__.py':
-            return ub.codeblock(
-                """
-                #!/usr/bin/env python
-                """
-            )
-        elif fname == '__init__.py':
-            mkinit_target = ub.Path(info['repo_fpath']).as_posix()
-            version = metadata_text(self.config['version'])
-            author = metadata_text(self.config['author'])
-            author_email = metadata_text(self.config['author_email'])
-            url = metadata_text(self.config['url'])
-            return ub.codeblock(
-                f'''
-                """
-                Basic
-                """
-                __version__ = {version!r}
-                __author__ = {author!r}
-                __author_email__ = {author_email!r}
-                __url__ = {url!r}
-
-                __mkinit__ = """
-                mkinit {mkinit_target}
-                """
-                '''
-            )
-        else:
-            raise KeyError(fname)
-
-    @staticmethod
-    def _docs_quickstart() -> None:
-        # Probably just need to copy/paste the conf.py
-        r"""
-
-        TODO:
-            - [ ] Auto-edit the index.py to include the magic reference to `__init__`
-            - [ ] If this is a utility library, populate the "usefulness section"
-            - [ ] Try and find out how to auto-expand the toc tree
-            - [ ] Auto-run the sphinx-apidoc for the user
-
-        REPO_NAME=xcookie
-        REPO_DPATH=$HOME/code/$REPO_NAME
-        AUTHOR=$(git config --global user.name)
-        cd $REPO_DPATH/docs
-        sphinx-quickstart -q --sep \
-            --project="$REPO_NAME" \
-            --author="$AUTHOR" \
-            --ext-autodoc \
-            --ext-viewcode \
-            --ext-intersphinx \
-            --ext-todo \
-            --extensions=sphinx.ext.autodoc,sphinx.ext.viewcode,sphinx.ext.napoleon,sphinx.ext.intersphinx,sphinx.ext.todo,sphinx.ext.autosummary \
-            "$REPO_DPATH/docs"
-
-        # THEN NEED TO:
-        REPO_NAME=kwarray
-        REPO_DPATH=$HOME/code/$REPO_NAME
-        MOD_DPATH=$REPO_DPATH/$REPO_NAME
-        sphinx-apidoc -f -o "$REPO_DPATH/docs/source"  "$MOD_DPATH" --separate
-        cd "$REPO_DPATH/docs"
-        make html
-
-        The user will need to enable the repo on their readthedocs account:
-        https://readthedocs.org/dashboard/import/manual/?
-
-        To enable the read-the-docs go to https://readthedocs.org/dashboard/ and login
-
-        Make sure you have a .readthedocs.yml file
-
-        Click import project: (for github you can select, but gitlab you need to import manually)
-            Set the Repository NAME: $REPO_NAME
-            Set the Repository URL: $REPO_URL
-
-        For gitlab you also need to setup an integrations and add gitlab
-        incoming webhook Then go to $REPO_URL/hooks and add the URL
-
-        Will also need to activate the main branch:
-            https://readthedocs.org/projects/xcookie/versions/
-        """
-        pass
-
-
-def main():
-    XCookieConfig.main(argv=True, strict=True, autocomplete=True)
 
 
 def _parse_remote_url(url):
+    """Legacy remote URL parser retained for import compatibility."""
     info = {}
     if url.startswith('https://'):
         parts = url.split('https://')[1].split('/')
@@ -2464,7 +1730,6 @@ def _parse_remote_url(url):
         info['group'] = parts[1]
         info['repo_name'] = parts[2]
     elif url.startswith('git@'):
-        url.split('git@')[1]
         parts = url.split('git@')[1].split(':')
         info['host'] = 'https://' + parts[0]
         info['group'] = parts[1].split('/')[0]
@@ -2475,6 +1740,7 @@ def _parse_remote_url(url):
 
 
 def find_git_root(dpath):
+    """Find the nearest ancestor containing ``.git``."""
     cwd = ub.Path(dpath).resolve()
     parts = cwd.parts
     found = None
@@ -2491,148 +1757,10 @@ def find_git_root(dpath):
         raise Exception('cannot find git root')
     return found
 
+def main():
+    XCookieConfig.main(argv=True, strict=True, autocomplete=True)
 
-class GitURL(str):
-    """
-    Represents a url to a git repo and can parse info about / modify the
-    protocol
-
-    References:
-        https://git-scm.com/docs/git-clone#_git_urls
-
-    TODO: can use git-well as a helper here.
-
-    CommandLine:
-        xdoctest -m /home/joncrall/code/xcookie/xcookie/main.py GitURL
-        xdoctest -m xcookie.main GitURL
-
-    Example:
-        >>> urls = [
-        >>>     GitURL('https://foo.bar/user/repo.git'),
-        >>>     GitURL('ssh://foo.bar/user/repo.git'),
-        >>>     GitURL('ssh://git@foo.bar/user/repo.git'),
-        >>>     GitURL('git@foo.bar:group/repo.git'),
-        >>>     GitURL('host:path/to/my/repo/.git'),
-        >>> ]
-        >>> for url in urls:
-        >>>     print('---')
-        >>>     print(f'url = {url}')
-        >>>     print(ub.urepr(url.info))
-        >>>     print('As git   : ' + url.to_git())
-        >>>     print('As ssh   : ' + url.to_ssh())
-        >>>     print('As https : ' + url.to_https())
-
-    """
-
-    def __init__(self, data):
-        # note: inheriting from str so data is handled in __new__
-        self._info = None
-
-    def _parse(self):
-        import parse
-
-        parse.Parser('ssh://{user}')
-
-    @property
-    def info(self):
-        if self._info is None:
-            url = self
-            info = {}
-            if url == '':
-                ...
-            elif url.startswith('https://'):
-                parts = url.split('https://')[1].split('/', 3)
-                info['host'] = parts[0]
-                info['group'] = parts[1]
-                info['repo_name'] = parts[2]
-                info['user'] = None
-                info['protocol'] = 'https'
-            elif url.startswith('git@'):
-                parts = url.split('git@')[1].split(':')
-                info['host'] = parts[0]
-                info['group'] = parts[1].split('/')[0]
-                info['repo_name'] = parts[1].split('/')[1]
-                info['user'] = 'git'
-                info['protocol'] = 'git'
-            elif url.startswith('ssh://'):
-                parts = url.split('ssh://')[1].split('/', 3)
-                user = None
-                if '@' in parts[0]:
-                    user, host = parts[0].split('@')
-                else:
-                    host = parts[0]
-                info['host'] = host
-                info['user'] = user
-                info['group'] = parts[1]
-                info['repo_name'] = parts[2]
-                info['protocol'] = 'ssh'
-            elif url.endswith('/.git'):
-                # An ssh protocol to an explicit directory
-                host, rest = url.split(':', 1)
-                parts = rest.rsplit('/', 2)
-                info['host'] = host
-                info['group'] = parts[0]
-                # info['group'] = ''
-                info['repo_name'] = parts[1] + '/.git'
-                info['protocol'] = 'scp'
-            elif '//' not in url and '@' not in url:
-                parts = url.split(':')
-                info['host'] = parts[0]
-                info['group'] = parts[1].split('/')[0]
-                info['repo_name'] = parts[1].split('/')[1]
-                info['protocol'] = 'ssh'
-            else:
-                raise ValueError(url)
-            info['url'] = url
-            self._info = info
-        return self._info
-
-    def to_git(self):
-        info = self.info
-        new_url = (
-            'git@'
-            + info['host']
-            + ':'
-            + info['group']
-            + '/'
-            + info['repo_name']
-        )
-        return self.__class__(new_url)
-
-    def to_ssh(self):
-        info = self.info
-        user = info.get('user', None)
-        if user is None:
-            user_part = ''
-        else:
-            user_part = user + '@'
-        new_url = (
-            'ssh://'
-            + user_part
-            + info['host']
-            + '/'
-            + info['group']
-            + '/'
-            + info['repo_name']
-        )
-        return self.__class__(new_url)
-
-    def to_https(self):
-        info = self.info
-        new_url = (
-            'https://'
-            + info['host']
-            + '/'
-            + info['group']
-            + '/'
-            + info['repo_name']
-        )
-        return self.__class__(new_url)
 
 
 if __name__ == '__main__':
-    """
-    CommandLine:
-        python ~/misc/templates/xcookie/apply_template.py --help
-    """
     main()

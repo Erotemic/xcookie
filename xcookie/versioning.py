@@ -1,4 +1,4 @@
-"""Package-version maintenance for the modal CLI."""
+"""Package-version discovery and maintenance for xcookie."""
 
 from __future__ import annotations
 
@@ -119,140 +119,249 @@ class VersionBumpPlan:
         self.changelog_path.write_text(self.changelog_text)
 
 
+def _parse_python_assignment(path: ub.Path, variable: str) -> str | None:
+    try:
+        tree = ast.parse(path.read_text())
+    except (OSError, SyntaxError):
+        return None
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id == variable:
+                    try:
+                        value = ast.literal_eval(node.value)
+                    except (TypeError, ValueError):
+                        return None
+                    return value if isinstance(value, str) else None
+    return None
+
+
+def _candidate_module_paths(
+    repodir: ub.Path, data: dict, module_name: str
+) -> list[ub.Path]:
+    tool = data.get('tool', {})
+    xcookie_config = tool.get('xcookie', {})
+    setuptools = tool.get('setuptools', {})
+    roots = [ub.Path(xcookie_config.get('rel_mod_parent_dpath', '.'))]
+
+    packages = setuptools.get('packages', {})
+    if isinstance(packages, dict):
+        find_config = packages.get('find', {})
+        if isinstance(find_config, dict):
+            where = find_config.get('where', []) or []
+            roots.extend(ub.Path(item) for item in where)
+
+    roots.append(ub.Path('.'))
+    rel_module = ub.Path(*module_name.split('.'))
+    candidates = []
+    for root in ub.oset(roots):
+        candidates.extend(
+            [
+                repodir / root / rel_module / '__init__.py',
+                repodir / root / f'{rel_module}.py',
+            ]
+        )
+    return list(ub.oset(candidates))
+
+
+def find_version_source(
+    repodir: str | ub.Path,
+    data: dict | None = None,
+    *,
+    required: bool = True,
+) -> VersionSource | None:
+    """Locate the authoritative package version without importing package code."""
+    repodir = ub.Path(repodir).absolute()
+    pyproject_path = repodir / 'pyproject.toml'
+    if data is None:
+        if not pyproject_path.exists():
+            if required:
+                raise RuntimeError(
+                    f'Cannot find version: {pyproject_path} does not exist'
+                )
+            return None
+        data = toml.loads(pyproject_path.read_text())
+
+    project = data.get('project', {})
+    static_version = project.get('version')
+    if isinstance(static_version, str):
+        return VersionSource(
+            path=pyproject_path,
+            kind='pyproject',
+            version=static_version,
+        )
+
+    tool = data.get('tool', {})
+    setuptools = tool.get('setuptools', {})
+    dynamic = setuptools.get('dynamic', {})
+    version_spec = dynamic.get('version', {})
+    if not isinstance(version_spec, dict):
+        version_spec = {}
+
+    attr = version_spec.get('attr')
+    if isinstance(attr, str):
+        module_name, sep, variable = attr.rpartition('.')
+        if not sep:
+            if required:
+                raise RuntimeError(
+                    f'Invalid tool.setuptools.dynamic.version.attr={attr!r}'
+                )
+            return None
+        matches = []
+        for path in _candidate_module_paths(repodir, data, module_name):
+            version = _parse_python_assignment(path, variable)
+            if version is not None:
+                matches.append((path, version))
+        if len(matches) == 1:
+            path, version = matches[0]
+            return VersionSource(
+                path=path,
+                kind='python',
+                version=version,
+                variable=variable,
+            )
+        if matches:
+            if required:
+                raise RuntimeError(
+                    f'Version attr {attr!r} resolved to multiple files: '
+                    + ', '.join(map(str, ub.take_column(matches, 0)))
+                )
+            return None
+        if required:
+            raise RuntimeError(
+                f'Could not resolve version attr {attr!r} to a Python file'
+            )
+        return None
+
+    version_files = version_spec.get('file')
+    if isinstance(version_files, str):
+        version_files = [version_files]
+    if isinstance(version_files, (list, tuple)):
+        matches = []
+        for relpath in version_files:
+            path = repodir / relpath
+            if path.exists():
+                version = path.read_text().strip()
+                if version:
+                    matches.append((path, version))
+        if len(matches) == 1:
+            path, version = matches[0]
+            return VersionSource(
+                path=path, kind='version-file', version=version
+            )
+        if matches:
+            if required:
+                raise RuntimeError(
+                    'Dynamic version file resolved to multiple candidates: '
+                    + ', '.join(map(str, ub.take_column(matches, 0)))
+                )
+            return None
+
+    if required:
+        raise RuntimeError(
+            'Could not find an editable package version. Expected '
+            '[project].version or [tool.setuptools.dynamic].version.attr/file.'
+        )
+    return None
+
+
+def build_initial_changelog(version: str) -> str:
+    """Build the changelog scaffold used for a newly generated project."""
+    return ub.codeblock(
+        f"""
+        # Changelog
+        We [keep a changelog](https://keepachangelog.com/en/1.0.0/).
+        We aim to adhere to [semantic versioning](https://semver.org/spec/v2.0.0.html).
+
+        ## Version {version} - Unreleased
+
+        ### Added
+        * Initial version
+        """
+    )
+
+
+def update_changelog_for_bump(
+    text: str,
+    current_version: str,
+    next_version: str,
+    release_date: datetime_mod.date,
+) -> str:
+    """Close the current changelog entry and prepend the next version."""
+    heading_pattern = re.compile(
+        r'^(?P<prefix>##\s+\[?Version\s+)'
+        r'(?P<version>[^\]\s]+)'
+        r'(?P<close>\]?)'
+        r'(?P<separator>\s*-\s*)'
+        r'(?P<status>.*)$'
+    )
+    lines = text.splitlines(keepends=True)
+    headings = []
+    for index, line in enumerate(lines):
+        match = heading_pattern.match(line.rstrip('\r\n'))
+        if match:
+            headings.append((index, match))
+
+    current_matches = [
+        item for item in headings if item[1].group('version') == current_version
+    ]
+    if len(current_matches) != 1:
+        raise RuntimeError(
+            f'Expected exactly one changelog heading for version '
+            f'{current_version}, found {len(current_matches)}'
+        )
+    if headings[0][1].group('version') != current_version:
+        raise RuntimeError(
+            'The package version must match the first changelog version; '
+            f'package={current_version}, changelog='
+            f'{headings[0][1].group("version")}'
+        )
+    if any(m.group('version') == next_version for _, m in headings):
+        raise RuntimeError(f'CHANGELOG.md already contains version {next_version}')
+
+    current_index, match = current_matches[0]
+    status = match.group('status').strip()
+    if status == 'Unreleased':
+        newline = '\n' if lines[current_index].endswith('\n') else ''
+        if lines[current_index].endswith('\r\n'):
+            newline = '\r\n'
+        lines[current_index] = (
+            match.group('prefix')
+            + current_version
+            + match.group('close')
+            + match.group('separator')
+            + f'Released {release_date.isoformat()}'
+            + newline
+        )
+    elif not re.fullmatch(r'Released\s+\d{4}-\d{2}-\d{2}', status):
+        raise RuntimeError(
+            f'Expected version {current_version} changelog status to be '
+            f'Unreleased or Released YYYY-MM-DD, found {status!r}'
+        )
+
+    new_heading = (
+        match.group('prefix')
+        + next_version
+        + match.group('close')
+        + match.group('separator')
+        + 'Unreleased\n\n\n'
+    )
+    lines.insert(current_index, new_heading)
+    return ''.join(lines)
+
+
 class VersionBumper:
     """Bump a package version and roll its changelog to the next cycle."""
 
     def __init__(self, repodir: str | ub.Path = '.') -> None:
         self.repodir = ub.Path(repodir).absolute()
 
-    def _parse_python_assignment(
-        self, path: ub.Path, variable: str
-    ) -> str | None:
-        try:
-            tree = ast.parse(path.read_text())
-        except (OSError, SyntaxError):
-            return None
-        for node in tree.body:
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                if isinstance(node, ast.Assign):
-                    targets = node.targets
-                else:
-                    targets = [node.target]
-                for target in targets:
-                    if isinstance(target, ast.Name) and target.id == variable:
-                        try:
-                            value = ast.literal_eval(node.value)
-                        except (TypeError, ValueError):
-                            return None
-                        return value if isinstance(value, str) else None
-        return None
-
-    def _candidate_module_paths(
-        self, data: dict, module_name: str
-    ) -> list[ub.Path]:
-        tool = data.get('tool', {})
-        xcookie_config = tool.get('xcookie', {})
-        setuptools = tool.get('setuptools', {})
-        roots = [ub.Path(xcookie_config.get('rel_mod_parent_dpath', '.'))]
-
-        packages = setuptools.get('packages', {})
-        if isinstance(packages, dict):
-            find_config = packages.get('find', {})
-            if isinstance(find_config, dict):
-                where = find_config.get('where', []) or []
-                roots.extend(ub.Path(item) for item in where)
-
-        roots.append(ub.Path('.'))
-        rel_module = ub.Path(*module_name.split('.'))
-        candidates = []
-        for root in ub.oset(roots):
-            candidates.extend(
-                [
-                    self.repodir / root / rel_module / '__init__.py',
-                    self.repodir / root / f'{rel_module}.py',
-                ]
-            )
-        return list(ub.oset(candidates))
-
     def find_version_source(self) -> VersionSource:
         """Locate the authoritative version without importing package code."""
-        pyproject_path = self.repodir / 'pyproject.toml'
-        if not pyproject_path.exists():
-            raise RuntimeError(
-                f'Cannot bump version: {pyproject_path} does not exist'
-            )
-        data = toml.loads(pyproject_path.read_text())
-        project = data.get('project', {})
-        static_version = project.get('version')
-        if isinstance(static_version, str):
-            return VersionSource(
-                path=pyproject_path,
-                kind='pyproject',
-                version=static_version,
-            )
-
-        tool = data.get('tool', {})
-        setuptools = tool.get('setuptools', {})
-        dynamic = setuptools.get('dynamic', {})
-        version_spec = dynamic.get('version', {})
-        if not isinstance(version_spec, dict):
-            version_spec = {}
-
-        attr = version_spec.get('attr')
-        if isinstance(attr, str):
-            module_name, sep, variable = attr.rpartition('.')
-            if not sep:
-                raise RuntimeError(
-                    f'Invalid tool.setuptools.dynamic.version.attr={attr!r}'
-                )
-            matches = []
-            for path in self._candidate_module_paths(data, module_name):
-                version = self._parse_python_assignment(path, variable)
-                if version is not None:
-                    matches.append((path, version))
-            if len(matches) == 1:
-                path, version = matches[0]
-                return VersionSource(
-                    path=path,
-                    kind='python',
-                    version=version,
-                    variable=variable,
-                )
-            if not matches:
-                raise RuntimeError(
-                    f'Could not resolve version attr {attr!r} to a Python file'
-                )
-            raise RuntimeError(
-                f'Version attr {attr!r} resolved to multiple files: '
-                + ', '.join(map(str, ub.take_column(matches, 0)))
-            )
-
-        version_files = version_spec.get('file')
-        if isinstance(version_files, str):
-            version_files = [version_files]
-        if isinstance(version_files, (list, tuple)):
-            matches = []
-            for relpath in version_files:
-                path = self.repodir / relpath
-                if path.exists():
-                    version = path.read_text().strip()
-                    if version:
-                        matches.append((path, version))
-            if len(matches) == 1:
-                path, version = matches[0]
-                return VersionSource(
-                    path=path, kind='version-file', version=version
-                )
-            if matches:
-                raise RuntimeError(
-                    'Dynamic version file resolved to multiple candidates: '
-                    + ', '.join(map(str, ub.take_column(matches, 0)))
-                )
-
-        raise RuntimeError(
-            'Could not find an editable package version. Expected '
-            '[project].version or [tool.setuptools.dynamic].version.attr/file.'
-        )
+        source = find_version_source(self.repodir, required=True)
+        assert source is not None
+        return source
 
     @staticmethod
     def resolve_next_version(current: str, target: str) -> str:
@@ -292,78 +401,6 @@ class VersionBumper:
             )
         return str(next_version)
 
-    @staticmethod
-    def _updated_changelog(
-        text: str,
-        current_version: str,
-        next_version: str,
-        release_date: datetime_mod.date,
-    ) -> str:
-        heading_pattern = re.compile(
-            r'^(?P<prefix>##\s+\[?Version\s+)'
-            r'(?P<version>[^\]\s]+)'
-            r'(?P<close>\]?)'
-            r'(?P<separator>\s*-\s*)'
-            r'(?P<status>.*)$'
-        )
-        lines = text.splitlines(keepends=True)
-        headings = []
-        for index, line in enumerate(lines):
-            match = heading_pattern.match(line.rstrip('\r\n'))
-            if match:
-                headings.append((index, match))
-
-        current_matches = [
-            item
-            for item in headings
-            if item[1].group('version') == current_version
-        ]
-        if len(current_matches) != 1:
-            raise RuntimeError(
-                f'Expected exactly one changelog heading for version '
-                f'{current_version}, found {len(current_matches)}'
-            )
-        if headings[0][1].group('version') != current_version:
-            raise RuntimeError(
-                'The package version must match the first changelog version; '
-                f'package={current_version}, changelog='
-                f'{headings[0][1].group("version")}'
-            )
-        if any(m.group('version') == next_version for _, m in headings):
-            raise RuntimeError(
-                f'CHANGELOG.md already contains version {next_version}'
-            )
-
-        current_index, match = current_matches[0]
-        status = match.group('status').strip()
-        if status == 'Unreleased':
-            newline = '\n' if lines[current_index].endswith('\n') else ''
-            if lines[current_index].endswith('\r\n'):
-                newline = '\r\n'
-            lines[current_index] = (
-                match.group('prefix')
-                + current_version
-                + match.group('close')
-                + match.group('separator')
-                + f'Released {release_date.isoformat()}'
-                + newline
-            )
-        elif not re.fullmatch(r'Released\s+\d{4}-\d{2}-\d{2}', status):
-            raise RuntimeError(
-                f'Expected version {current_version} changelog status to be '
-                f'Unreleased or Released YYYY-MM-DD, found {status!r}'
-            )
-
-        new_heading = (
-            match.group('prefix')
-            + next_version
-            + match.group('close')
-            + match.group('separator')
-            + 'Unreleased\n\n\n'
-        )
-        lines.insert(current_index, new_heading)
-        return ''.join(lines)
-
     def plan(
         self,
         target: str = 'patch',
@@ -381,7 +418,7 @@ class VersionBumper:
         if release_date is None:
             release_date = datetime_mod.date.today()
         version_text = source.updated_text(next_version)
-        changelog_text = self._updated_changelog(
+        changelog_text = update_changelog_for_bump(
             changelog_path.read_text(),
             source.version,
             next_version,
