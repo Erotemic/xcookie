@@ -20,8 +20,6 @@ def _make_applier(
         mod_name='demo_pkg',
         tags=tags,
         interactive=False,
-        rotate_secrets=False,
-        refresh_docs=False,
         test_variants=[
             'minimal-loose',
             'full-loose',

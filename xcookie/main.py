@@ -140,12 +140,6 @@ class XCookieConfig(kwconf.Config):
             """
             ),
         ),
-        'rotate_secrets': kwconf.Value(
-            'auto', help='If True will execute secret rotation', isflag=True
-        ),
-        'refresh_docs': kwconf.Value(
-            'auto', help='If True will refresh the docs', isflag=True
-        ),
         'deploy': kwconf.Value(
             True, help='If False, disable all deployment', isflag=True
         ),
@@ -450,20 +444,6 @@ class XCookieConfig(kwconf.Config):
             'auto',
             help=ub.paragraph(
                 'if False use plain pip, otherwise use uv instead'
-            ),
-        ),
-        'uv_exclude_newer': kwconf.Value(
-            False,
-            help=ub.paragraph(
-                """
-            Supply-chain guard: passed through to ``[tool.uv] exclude-newer``
-            in the generated pyproject.toml. ``'auto'`` (default) preserves
-            an existing value if one is on disk, otherwise uses a relative
-            ``'P7D'`` window (ignore packages published in the last 7 days).
-            Set to ``False``/``None`` to disable the guard entirely. Set to
-            any other string to use it verbatim, e.g. a relative window
-            (``'30 days'`` / ``'P30D'``) or a fixed ISO date (``'2026-05-22'``).
-            """
             ),
         ),
         'use_pyproject_requirements': kwconf.Value(
@@ -880,12 +860,6 @@ class TemplateApplier:
         if self.config['use_vcs']:
             self.vcs_checks()
         self.copy_staged_files()
-        if self.config['refresh_docs']:
-            self.refresh_docs()
-        if self.config['use_vcs']:
-            if self.config['rotate_secrets']:
-                self.rotate_secrets()
-
         if self.config['use_vcs']:
             if self.config['autostage']:
                 self.autostage()
@@ -903,10 +877,6 @@ class TemplateApplier:
                 untracked.append(fpath)
 
         repo.git.add(untracked)
-
-    @property
-    def has_git(self) -> bool:
-        return (self.config['repodir'] / '.git').exists()
 
     @property
     def rel_mod_dpath(self) -> ub.Path:
@@ -1639,7 +1609,6 @@ class TemplateApplier:
             >>> kwargs = {
             >>>     'repodir': dpath / 'testrepo',
             >>>     'tags': ['gitlab', 'kitware', 'purepy', 'cv2'],
-            >>>     'rotate_secrets': False,
             >>>     'is_new': False,
             >>>     'interactive': False,
             >>> }
@@ -1912,202 +1881,6 @@ class TemplateApplier:
 
         text = '\n'.join(requirement_lines)
         return text
-
-    def refresh_docs(self):
-        from xcookie.builders import docs
-
-        docs_builder = docs.DocsBuilder(self.config)
-
-        docs_dpath = docs_builder.docs_dpath
-        docs_auto_outdir = docs_builder.docs_auto_outdir
-        command = docs_builder.sphinx_apidoc_invocation()
-
-        ub.cmd(command, verbose=3, check=True, cwd=docs_dpath)
-        if self.has_git:
-            ub.cmd(
-                f'git add {docs_auto_outdir}/*.rst',
-                verbose=3,
-                check=True,
-                cwd=docs_dpath,
-            )
-            # ub.cmd('make html', verbose=3, check=True, cwd=docs_dpath)
-
-    def _github_org_environ(self):
-        """
-        Resolve which org-specific GitHub environ-export function to use.
-
-        The GitHub upload functions read backend-specific secret-variable
-        names from dev/secrets_configuration.sh, which differ per account
-        (e.g. erotemic vs pyutils). Prefer an explicit org tag; otherwise
-        infer the account from the GitHub remote owner.
-        """
-        tags = self.config['tags']
-        if 'erotemic' in tags:
-            return 'setup_package_environs_github_erotemic'
-        if 'pyutils' in tags:
-            return 'setup_package_environs_github_pyutils'
-
-        # No explicit org tag: infer the account from the github remote owner.
-        owner_to_environ = {
-            'erotemic': 'setup_package_environs_github_erotemic',
-            'pyutils': 'setup_package_environs_github_pyutils',
-        }
-        owner = None
-        url = self.config.get('url', None)
-        if isinstance(url, str) and 'github' in url:
-            # https://github.com/<owner>/<repo>
-            parts = url.split('github.com/', 1)[-1].strip('/').split('/')
-            if parts and parts[0]:
-                owner = parts[0].lower()
-        environ = owner_to_environ.get(owner) if owner is not None else None
-        if environ is None:
-            raise Exception(
-                'Cannot determine which GitHub org secret-config to use for '
-                'the github backend. Add an org tag (e.g. "erotemic" or '
-                f'"pyutils") to tags, or extend _github_org_environ for '
-                f'owner={owner!r}.'
-            )
-        return environ
-
-    def _secret_rotation_backends(self):
-        """
-        Determine which CI backends to rotate secrets for, based on tags.
-
-        Returns a list of backend descriptors. A repo may target more than
-        one backend (e.g. both github and gitlab).
-        """
-        tags = self.config['tags']
-        backends = []
-
-        if {'github', 'erotemic', 'pyutils'} & set(tags):
-            backends.append(
-                {
-                    'name': 'github',
-                    'environ_export': self._github_org_environ(),
-                    'upload_secret_cmd': 'upload_github_secrets',
-                    'gpg_upload_cmd': 'upload_github_gpg_secrets',
-                    'is_github': True,
-                }
-            )
-
-        if {'gitlab', 'kitware'} & set(tags):
-            backends.append(
-                {
-                    'name': 'gitlab',
-                    'environ_export': 'setup_package_environs_gitlab_kitware',
-                    'upload_secret_cmd': 'upload_gitlab_repo_secrets',
-                    'gpg_upload_cmd': 'upload_gitlab_gpg_secrets',
-                    'is_github': False,
-                }
-            )
-
-        if not backends:
-            raise Exception(
-                'No known CI backend in tags; expected one of '
-                '{github, erotemic, pyutils, gitlab, kitware}. '
-                f'Got tags={tags!r}'
-            )
-        return backends
-
-    def rotate_secrets(self):
-        setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
-        enable_gpg = self.config['enable_gpg']
-        use_trusted_publishing = self.config.get(
-            'ci_pypi_trusted_publishing', False
-        )
-        ci_gpg_transport = self.config.get(
-            'ci_gpg_secret_transport', 'encrypted_repo'
-        )
-        use_direct_gpg = ci_gpg_transport == 'direct_ci'
-
-        # A repo can target more than one backend (e.g. kwconf mirrors to
-        # both github.com and gitlab.kitware.com). Build the list of backends
-        # to rotate secrets for, rather than picking a single one by tag
-        # priority. Each backend runs its own environ_export immediately
-        # before its uploads, because the export commands overwrite
-        # dev/secrets_configuration.sh with backend-specific VARNAME_* values.
-        backends = self._secret_rotation_backends()
-
-        script = make_command_queue(
-            cwd=self.repodir, backend='serial', log=False
-        )
-        script.submit(f'source {setup_secrets_fpath}', log=False)
-        # Secret env vars (CI_SECRET, TWINE_PASSWORD, PRIVATE_GITLAB_TOKEN,
-        # ...) must already be exported in the parent shell — they're
-        # inherited by the bash subprocess. We do not source any user-side
-        # secret_loader: that previously relied on `load_secrets` being a
-        # function in ~/.bashrc, which doesn't survive into a non-login
-        # bash. Each setup_secrets.sh upload function now validates its
-        # required env vars and fails clearly if anything is missing.
-
-        for backend in backends:
-            environ_export = backend['environ_export']
-            upload_secret_cmd = backend['upload_secret_cmd']
-            gpg_upload_cmd = backend['gpg_upload_cmd']
-            is_github = backend['is_github']
-
-            script.sync().submit(
-                f'echo "===== Rotating secrets for {backend["name"]}'
-                ' backend ====="',
-                log=False,
-            )
-            script.sync().submit(f'{environ_export}', log=False)
-
-            # Step 1: export GPG material to repo (encrypted_repo) or upload
-            # directly to CI provider (direct_ci).
-            if enable_gpg:
-                if use_direct_gpg:
-                    script.sync().submit(gpg_upload_cmd, log=False)
-                else:
-                    script.sync().submit(
-                        'export_encrypted_code_signing_keys', log=False
-                    )
-
-            # Step 2: upload non-GPG secrets (Twine, push token, CI_SECRET).
-            # Skip entirely when trusted publishing + GitHub + (no GPG or
-            # direct GPG): OIDC covers PyPI auth and GPG material is already
-            # uploaded.
-            skip_non_gpg = (
-                use_trusted_publishing
-                and is_github
-                and (not enable_gpg or use_direct_gpg)
-            )
-
-            if skip_non_gpg:
-                script.sync().submit(
-                    'echo "Trusted publishing + direct GPG (or no GPG):'
-                    ' no additional CI secrets to upload."',
-                    log=False,
-                )
-            elif use_trusted_publishing and is_github:
-                # encrypted_repo + trusted publishing: CI_SECRET goes to
-                # deployment environments so the GPG decrypt step can access
-                # it.
-                script.sync().submit(
-                    f'{upload_secret_cmd} trusted_publishing', log=False
-                )
-            elif use_direct_gpg:
-                # direct_ci + non-trusted publishing: upload Twine credentials
-                # (environment-scoped); CI_SECRET is not uploaded.
-                script.sync().submit(
-                    f'{upload_secret_cmd} direct_gpg', log=False
-                )
-            else:
-                # encrypted_repo + non-trusted: full legacy upload (Twine +
-                # CI_SECRET, all repo-level).
-                script.sync().submit(f'{upload_secret_cmd}', log=False)
-
-            # encrypted_repo transport writes GPG material into the working
-            # tree; for that mode the export only needs to happen once, but
-            # re-running it per backend is harmless and keeps the per-backend
-            # blocks self-contained.
-
-        script.rprint()
-        if self.config.confirm('Ready to rotate secrets?'):
-            # The vendored serial queue does not add xtrace guards, so secret
-            # values remain untraced while its platform-aware Bash resolver is
-            # used consistently (including Git Bash on Windows).
-            script.run()
 
     def build_readthedocs(self):
         """
@@ -2433,7 +2206,6 @@ class TemplateApplier:
             >>> kwargs = {
             >>>     'repodir': dpath / 'testrepo',
             >>>     'tags': ['gitlab', 'kitware', 'purepy', 'cv2'],
-            >>>     'rotate_secrets': False,
             >>>     'is_new': False,
             >>>     'min_python': '3.9',
             >>>     'max_python': '3.12',

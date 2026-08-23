@@ -1,7 +1,8 @@
-import xcookie.main as main_mod
+import xcookie.secrets as secrets_mod
 
 from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
+from xcookie.secrets import SecretRotator
 
 
 def _make_applier(
@@ -20,8 +21,6 @@ def _make_applier(
         repo_name='demo_pkg',
         tags=tags,
         interactive=False,
-        rotate_secrets=False,
-        refresh_docs=False,
     )
     if min_python is not None:
         kwargs['min_python'] = min_python
@@ -68,7 +67,7 @@ class _FakeQueue:
 def _patch_command_queue(monkeypatch):
     """Replace xcookie's vendored queue without invoking a real shell."""
     _FakeQueue.created.clear()
-    monkeypatch.setattr(main_mod, 'make_command_queue', _FakeQueue.create)
+    monkeypatch.setattr(secrets_mod, 'make_command_queue', _FakeQueue.create)
 
 
 def test_template_registry_contains_tests_and_release_workflows(tmp_path):
@@ -177,7 +176,7 @@ def test_rotate_secrets_trusted_without_gpg_skips_secret_upload(
     _patch_command_queue(monkeypatch)
 
     self = _make_applier(tmp_path, trusted=True, enable_gpg=False)
-    self.rotate_secrets()
+    SecretRotator(self.config).rotate_secrets()
 
     queue = _FakeQueue.created[-1]
     joined = '\n'.join(queue.commands)
@@ -205,7 +204,7 @@ def test_rotate_secrets_trusted_with_gpg_keeps_gpg_export_and_secret_upload(
 
     self = _make_applier(tmp_path, trusted=True, enable_gpg=True)
     self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
-    self.rotate_secrets()
+    SecretRotator(self.config).rotate_secrets()
 
     queue = _FakeQueue.created[-1]
     joined = '\n'.join(queue.commands)
@@ -381,7 +380,7 @@ def test_rotate_secrets_direct_gpg_calls_gpg_upload_not_encrypt(
     _patch_command_queue(monkeypatch)
 
     self = _make_direct_gpg_applier(tmp_path, trusted=False)
-    self.rotate_secrets()
+    SecretRotator(self.config).rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
     assert 'export_encrypted_code_signing_keys' not in joined
@@ -399,7 +398,7 @@ def test_rotate_secrets_direct_gpg_trusted_skips_non_gpg_upload(
     _patch_command_queue(monkeypatch)
 
     self = _make_direct_gpg_applier(tmp_path, trusted=True)
-    self.rotate_secrets()
+    SecretRotator(self.config).rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
     assert 'upload_github_gpg_secrets' in joined
@@ -419,7 +418,7 @@ def test_rotate_secrets_direct_gpg_gitlab_excludes_ci_secret(
     self = _make_direct_gpg_applier(
         tmp_path, trusted=False, tags=['gitlab', 'kitware', 'purepy']
     )
-    self.rotate_secrets()
+    SecretRotator(self.config).rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
     assert 'upload_gitlab_gpg_secrets' in joined
@@ -442,7 +441,7 @@ def test_rotate_secrets_encrypted_repo_behavior_unchanged(
 
     self = _make_applier(tmp_path, trusted=False, enable_gpg=True)
     self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
-    self.rotate_secrets()
+    SecretRotator(self.config).rotate_secrets()
 
     joined = '\n'.join(_FakeQueue.created[-1].commands)
     assert 'export_encrypted_code_signing_keys' in joined

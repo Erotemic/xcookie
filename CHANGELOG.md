@@ -8,6 +8,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Version 0.4.2 - Unreleased
 
 ### Changed
+* Secret rotation is now the separate `xcookie rotate-secrets` command instead
+  of a side effect of `xcookie generate`.
+* Sphinx API refresh is now the separate `xcookie refresh-docs` command instead
+  of a post-generation side effect.
+* xcookie no longer generates `[tool.uv] exclude-newer` or exposes an
+  `uv_exclude_newer` generator option. Existing user-owned `[tool.uv]` settings
+  are preserved during regeneration.
 * The console entrypoint is now a modal CLI. Existing project generation lives
   under `xcookie generate`, leaving the root command namespace available for
   maintenance subcommands. `python -m xcookie.main`

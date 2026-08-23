@@ -8,7 +8,9 @@ from typing import Any
 import kwconf
 
 from xcookie import __version__
+from xcookie.docs import DocsRefresher
 from xcookie.main import TemplateApplier, XCookieConfig
+from xcookie.secrets import SecretRotator
 
 
 class GenerateConfig(XCookieConfig):
@@ -44,6 +46,81 @@ class GenerateConfig(XCookieConfig):
         )
 
 
+class RefreshDocsConfig(kwconf.Config):
+    """Regenerate Sphinx API documentation for an existing repository."""
+
+    __command__ = 'refresh-docs'
+    __default__ = {
+        'repodir': kwconf.Value(
+            '.', position=1, help='path to the existing repository'
+        ),
+    }
+
+    @classmethod
+    def main(
+        cls,
+        argv: int | bool | str | Sequence[str] | None = False,
+        strict: bool = True,
+        autocomplete: bool | str = 'auto',
+        **kwargs: Any,
+    ) -> DocsRefresher:
+        """Load project settings and regenerate its API documentation."""
+        command_config = cls.cli(
+            argv=argv,
+            data=kwargs,
+            strict=strict,
+            autocomplete=autocomplete,
+        )
+        project_config = XCookieConfig.load_from_cli_and_pyproject(
+            argv=False, repodir=command_config['repodir']
+        )
+        refresher = DocsRefresher(project_config)
+        refresher.refresh_docs()
+        return refresher
+
+
+class RotateSecretsConfig(kwconf.Config):
+    """Rotate CI secrets for an existing repository."""
+
+    __command__ = 'rotate-secrets'
+    __default__ = {
+        'repodir': kwconf.Value(
+            '.', position=1, help='path to the existing repository'
+        ),
+        'interactive': kwconf.Value(
+            True, isflag=True, help='prompt before executing the rotation plan'
+        ),
+        'yes': kwconf.Value(
+            False, isflag=True, help='accept the rotation confirmation'
+        ),
+    }
+
+    @classmethod
+    def main(
+        cls,
+        argv: int | bool | str | Sequence[str] | None = False,
+        strict: bool = True,
+        autocomplete: bool | str = 'auto',
+        **kwargs: Any,
+    ) -> SecretRotator:
+        """Load project settings and rotate its configured CI secrets."""
+        command_config = cls.cli(
+            argv=argv,
+            data=kwargs,
+            strict=strict,
+            autocomplete=autocomplete,
+        )
+        project_config = XCookieConfig.load_from_cli_and_pyproject(
+            argv=False,
+            repodir=command_config['repodir'],
+            interactive=command_config['interactive'],
+            yes=command_config['yes'],
+        )
+        rotator = SecretRotator(project_config)
+        rotator.rotate_secrets()
+        return rotator
+
+
 class XCookieCLI(kwconf.ModalCLI):
     """Generate and maintain Python project infrastructure."""
 
@@ -51,6 +128,8 @@ class XCookieCLI(kwconf.ModalCLI):
     __version__ = __version__
 
     generate = GenerateConfig
+    refresh_docs = RefreshDocsConfig
+    rotate_secrets = RotateSecretsConfig
 
 
 def main(argv: Sequence[str] | None = None) -> Any:

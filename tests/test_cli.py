@@ -6,8 +6,9 @@ def test_modal_root_help_is_command_oriented() -> None:
 
     help_text = XCookieCLI().argparse().format_help()
     assert 'generate' in help_text
+    assert 'rotate-secrets' in help_text
+    assert 'refresh-docs' in help_text
     assert '--regen' not in help_text
-    assert '--rotate-secrets' not in help_text
 
 
 def test_generate_help_contains_existing_generator_options() -> None:
@@ -21,7 +22,8 @@ def test_generate_help_contains_existing_generator_options() -> None:
     )
     help_text = generate_parser.format_help()
     assert '--regen' in help_text
-    assert '--rotate_secrets' in help_text
+    assert '--rotate_secrets' not in help_text
+    assert '--refresh_docs' not in help_text
     assert 'repodir' in help_text
 
 
@@ -43,7 +45,6 @@ def test_generate_dispatch_forwards_explicit_values(monkeypatch) -> None:
             'generate',
             'demo-repo',
             '--regen=setup.py',
-            '--rotate-secrets=False',
             '--interactive=False',
         ],
         autocomplete=False,
@@ -57,7 +58,6 @@ def test_generate_dispatch_forwards_explicit_values(monkeypatch) -> None:
             'autocomplete': 'auto',
             'repodir': 'demo-repo',
             'regen': 'setup.py',
-            'rotate_secrets': False,
             'interactive': False,
         },
     }
@@ -72,3 +72,75 @@ def test_modal_version_matches_package_version(capsys) -> None:
 
     assert result == 0
     assert captured.out.strip() == xcookie.__version__
+
+
+def test_rotate_secrets_dispatches_as_separate_action(monkeypatch) -> None:
+    from xcookie.cli import XCookieCLI
+    from xcookie.main import XCookieConfig
+    from xcookie.secrets import SecretRotator
+
+    loaded = {}
+    rotated = {}
+
+    def fake_load(cls, argv=False, **kwargs):
+        loaded['argv'] = argv
+        loaded['kwargs'] = kwargs
+        return {'repodir': kwargs['repodir']}
+
+    def fake_rotate(self):
+        rotated['repodir'] = self.repodir
+
+    monkeypatch.setattr(
+        XCookieConfig, 'load_from_cli_and_pyproject', classmethod(fake_load)
+    )
+    monkeypatch.setattr(SecretRotator, 'rotate_secrets', fake_rotate)
+
+    result = XCookieCLI.main(
+        argv=['rotate-secrets', 'demo-repo', '--yes'],
+        autocomplete=False,
+    )
+
+    assert isinstance(result, SecretRotator)
+    assert loaded == {
+        'argv': False,
+        'kwargs': {
+            'repodir': 'demo-repo',
+            'interactive': True,
+            'yes': True,
+        },
+    }
+    assert str(rotated['repodir']) == 'demo-repo'
+
+
+def test_refresh_docs_dispatches_as_separate_action(monkeypatch) -> None:
+    from xcookie.cli import XCookieCLI
+    from xcookie.docs import DocsRefresher
+    from xcookie.main import XCookieConfig
+
+    loaded = {}
+    refreshed = {}
+
+    def fake_load(cls, argv=False, **kwargs):
+        loaded['argv'] = argv
+        loaded['kwargs'] = kwargs
+        return {'repodir': kwargs['repodir']}
+
+    def fake_refresh(self):
+        refreshed['repodir'] = self.repodir
+
+    monkeypatch.setattr(
+        XCookieConfig, 'load_from_cli_and_pyproject', classmethod(fake_load)
+    )
+    monkeypatch.setattr(DocsRefresher, 'refresh_docs', fake_refresh)
+
+    result = XCookieCLI.main(
+        argv=['refresh-docs', 'demo-repo'],
+        autocomplete=False,
+    )
+
+    assert isinstance(result, DocsRefresher)
+    assert loaded == {
+        'argv': False,
+        'kwargs': {'repodir': 'demo-repo'},
+    }
+    assert str(refreshed['repodir']) == 'demo-repo'

@@ -55,11 +55,13 @@ The top level CLI is command-oriented:
 
 .. code::
 
-    usage: xcookie [-h] [--version] {generate} ...
+    usage: xcookie [-h] [--version] {generate,refresh-docs,rotate-secrets} ...
 
     commands:
-      {generate}            specify a command to run
+      {generate,refresh-docs,rotate-secrets}
         generate            generate or update project boilerplate
+        refresh-docs        regenerate Sphinx API documentation
+        rotate-secrets      rotate CI secrets for an existing repository
 
 Run ``xcookie generate --help`` for the project-generation options.
 
@@ -87,12 +89,21 @@ overwrite the file unless you tell it to regenerate it.  The ``setup.py`` is
 the main example of this, so if you want xcookie to update your setup.py you
 would run ``xcookie generate --regen setup.py``
 
-For rotating secrets, the interface is a bit weird. I haven't gotten it to work
-within an xcookie invocation due to the interactive nature of some of the
-secret tools, but if you run ``xcookie generate --rotate-secrets``, when it asks you
-``"Ready to rotate secrets?"``, say no, and it will list the commands that it
-would have run. So you can just copy / paste those manually. I hope to make
-this easier in the future.
+Documentation refresh is also a separate maintenance command:
+
+.. code:: bash
+
+    xcookie refresh-docs
+
+Secret rotation is a separate maintenance command rather than a generation
+option:
+
+.. code:: bash
+
+    xcookie rotate-secrets
+
+The command loads the repository's xcookie configuration, prints the commands
+it plans to run, and asks for confirmation before executing them.
 
 .. |CircleCI| image:: https://circleci.com/gh/Erotemic/xcookie.svg?style=svg
     :target: https://circleci.com/gh/Erotemic/xcookie

@@ -29,8 +29,6 @@ class ResolvedXCookieConfig:
     tags: tuple[str, ...]
     os: tuple[str, ...]
     is_new: bool
-    rotate_secrets: bool
-    refresh_docs: bool
     # Author metadata may be a single string or a list of names/emails.
     # It must round-trip unflattened: str() on a list produces its Python
     # repr, which leaks into generated files (e.g. invalid docs/conf.py).
@@ -70,16 +68,6 @@ class ResolvedXCookieConfig:
         if is_new == 'auto':
             is_new = not (repodir / '.git').exists()
         is_new = bool(is_new)
-
-        rotate_secrets = config['rotate_secrets']
-        if rotate_secrets == 'auto':
-            rotate_secrets = is_new
-        rotate_secrets = bool(rotate_secrets)
-
-        refresh_docs = config['refresh_docs']
-        if refresh_docs == 'auto':
-            refresh_docs = is_new
-        refresh_docs = bool(refresh_docs)
 
         author = config['author']
         if author is None:
@@ -168,8 +156,6 @@ class ResolvedXCookieConfig:
             tags=tags,
             os=os_values,
             is_new=is_new,
-            rotate_secrets=rotate_secrets,
-            refresh_docs=refresh_docs,
             author=_coerce_meta_text(author),
             author_email=_coerce_meta_text(author_email),
             license=str(license_text),
@@ -202,8 +188,6 @@ class ResolvedXCookieConfig:
             'tags': list(self.tags),
             'os': list(self.os),
             'is_new': self.is_new,
-            'rotate_secrets': self.rotate_secrets,
-            'refresh_docs': self.refresh_docs,
             'author': self.author,
             'author_email': self.author_email,
             'license': self.license,

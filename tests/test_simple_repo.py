@@ -28,7 +28,6 @@ def test_simple_repo() -> None:
         repodir=dpath,
         mod_name='simple_mod',
         remote_group='demo_group',
-        rotate_secrets=False,
         init_new_remotes=False,
         tags=['github', 'purepy'],
         interactive=False,
@@ -101,9 +100,11 @@ def test_simple_repo() -> None:
     self = main.XCookieConfig.main(
         argv=0,
         **kwargs,
-        refresh_docs=True,
         render_doc_images=True,
     )
+    from xcookie.docs import DocsRefresher
+
+    DocsRefresher(self.config).refresh_docs()
     docs_dpath = self.repodir / 'docs'
 
     # hack to ensure module is importable before make html
