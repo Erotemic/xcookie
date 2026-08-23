@@ -76,6 +76,7 @@ import re
 import shutil
 import tempfile
 import warnings
+import weakref
 from collections.abc import Sequence
 from typing import Any, cast
 
@@ -770,6 +771,11 @@ class TemplateApplier:
         self.repodir = self.resolved.repodir
         self.repo_name = self.resolved.repo_name
         self._tmpdir = tempfile.TemporaryDirectory(prefix=self.repo_name)
+        # TemporaryDirectory emits a ResourceWarning when its own finalizer has
+        # to clean up implicitly. Tie cleanup to the TemplateApplier lifetime
+        # so temporary staging directories are removed without warning even
+        # when callers do not use the explicit close/context-manager API.
+        self._tmpdir_cleanup = weakref.finalize(self, self._tmpdir.cleanup)
 
         self.template_infos: list[TemplateInfo] = []
         try:
@@ -780,6 +786,16 @@ class TemplateApplier:
         self.staging_dpath = ub.Path(self._tmpdir.name)
         self.remote_info = {'type': 'unknown'}
         self._setup_pip_commands()  # Is this sufficient here?
+
+    def close(self) -> None:
+        """Remove the temporary staging directory owned by this applier."""
+        self._tmpdir_cleanup()
+
+    def __enter__(self) -> TemplateApplier:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
 
     def apply(self):
         """
@@ -922,31 +938,36 @@ class TemplateApplier:
         tags = set(self.config['tags'])
 
         use_vcs = self.config['use_vcs']
+        warn_on_vcs_fallback = use_vcs == 'auto'
 
         if self.remote_info['type'] == 'unknown':
             if use_vcs == 'auto':
                 use_vcs = False
-            print(f'tags={tags}')
-            print(
-                'self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1))
-            )
             msg = 'Tags does not include github or gitlab. Cannot use VCS system without that'
             if use_vcs:
                 raise Exception(msg)
-            else:
+            if warn_on_vcs_fallback:
+                print(f'tags={tags}')
+                print(
+                    'self.remote_info = {}'.format(
+                        ub.urepr(self.remote_info, nl=1)
+                    )
+                )
                 warnings.warn(msg)
 
         if 'group' not in self.remote_info:
             if use_vcs == 'auto':
                 use_vcs = False
-            print(f'tags={tags}')
-            print(
-                'self.remote_info = {}'.format(ub.urepr(self.remote_info, nl=1))
-            )
             msg = 'Unknown user / group, specify a tag for a known user. Or a URL in the pyproject.toml [tool.xcookie]'
             if use_vcs:
                 raise Exception(msg)
-            else:
+            if warn_on_vcs_fallback:
+                print(f'tags={tags}')
+                print(
+                    'self.remote_info = {}'.format(
+                        ub.urepr(self.remote_info, nl=1)
+                    )
+                )
                 warnings.warn(msg)
 
         if use_vcs == 'auto':
