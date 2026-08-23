@@ -632,6 +632,11 @@ def make_release_plan(
             build_job_keys.append('build_purepy_wheels')
         else:
             build_job_keys.append('build_binpy_wheels')
+        build_job_keys.extend(
+            artifact.job_key
+            for artifact in ci_plan.load_ci_artifacts(self.config)
+            if artifact.release
+        )
 
         deploy_job_keys = []
         if deploy:
@@ -657,6 +662,14 @@ def make_release_plan(
             self.config.get('ci_gpg_secret_transport', 'direct_ci')
         )
 
+    artifact_globs = list(
+        make_release_artifact_globs(self, wheelhouse_dpath)
+    )
+    if provider == 'github' and any(
+        artifact.release for artifact in ci_plan.load_ci_artifacts(self.config)
+    ):
+        artifact_globs.append('release_artifacts/**/*')
+
     return ReleasePlan(
         provider=provider,
         package_kind=package_kind,
@@ -665,5 +678,5 @@ def make_release_plan(
         publish_targets=make_publish_targets(self, provider=provider),
         signing_transport=signing_transport,
         distribution_globs=make_distribution_globs(self, wheelhouse_dpath),
-        artifact_globs=make_release_artifact_globs(self, wheelhouse_dpath),
+        artifact_globs=tuple(artifact_globs),
     )

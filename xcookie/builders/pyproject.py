@@ -213,6 +213,7 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'typed',
         'typecheck_extra_paths',
         'ci_prerelease_python_policy',
+        'ci_artifacts',
         'remote_host',
         'remote_group',
         'use_setup_py',
@@ -240,6 +241,7 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'use_setup_py',
         'use_pyproject_requirements',
         'requirements_package',
+        'ci_artifacts',
     }
 
     default_os = {'linux', 'osx', 'win'}

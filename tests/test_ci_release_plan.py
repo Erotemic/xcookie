@@ -12,6 +12,7 @@ def _make_applier(
     direct_gpg=False,
     gpg_transport=None,
     min_python=None,
+    ci_artifacts=None,
 ):
     kwargs = dict(
         repodir=tmp_path,
@@ -23,6 +24,8 @@ def _make_applier(
     )
     if min_python is not None:
         kwargs['min_python'] = min_python
+    if ci_artifacts is not None:
+        kwargs['ci_artifacts'] = ci_artifacts
     cfg = XCookieConfig(**kwargs)
     cfg['enable_gpg'] = enable_gpg
     cfg['deploy'] = deploy
@@ -207,3 +210,81 @@ def test_gitlab_direct_gpg_render_uses_ci_variables_not_encrypted_repo(
     assert 'GPG_OWNER_TRUST_B64' in text
     assert 'dev/ci_secret_gpg_subkeys.pgp.enc' not in text
     assert 'CI_SECRET=${!VARNAME_CI_SECRET}' not in text
+
+
+def test_github_project_artifact_survives_ci_and_release_generation(tmp_path):
+    from xcookie.util_yaml import Yaml
+
+    ci_artifacts = {
+        'windows_installer': {
+            'name': 'Windows installer',
+            'runner': 'windows-latest',
+            'shell': 'pwsh',
+            'python_version': '3.13',
+            'setup_commands': [
+                'python -m pip install -U pip',
+                'python -m pip install -U uv',
+            ],
+            'build_command': '.\\dev\\_installers\\build_installer.ps1 -Checks',
+            'post_build_commands': [
+                'Get-ChildItem -Recurse dist | Format-Table FullName, Length'
+            ],
+            'artifact_paths': [
+                'dist\\installer\\*',
+                'dist\\diagnostics\\*',
+            ],
+            'release': True,
+            'release_paths': ['dist\\installer\\*.exe'],
+        }
+    }
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy', 'erotemic', 'nosrcdist'],
+        enable_gpg=True,
+        deploy=True,
+        trusted=True,
+        direct_gpg=True,
+        ci_artifacts=ci_artifacts,
+    )
+
+    test_body = Yaml.loads(self.build_github_actions())
+    assert 'build_windows_installer' in test_body['jobs']
+    test_job = test_body['jobs']['build_windows_installer']
+    assert test_job['runs-on'] == 'windows-latest'
+    assert test_job['steps'][-1]['with']['name'] == 'windows-installer'
+    assert 'dist\\diagnostics\\*' in test_job['steps'][-1]['with']['path']
+
+    release_text = self.build_github_actions_release()
+    release_body = Yaml.loads(release_text)
+    release_job = release_body['jobs']['build_windows_installer']
+    assert release_job['steps'][-1]['with']['name'] == 'windows-installer-release'
+    assert release_job['steps'][-1]['with']['path'] == 'dist\\installer\\*.exe'
+
+    for deploy_key in ['test_deploy', 'live_deploy']:
+        deploy_job = release_body['jobs'][deploy_key]
+        assert 'build_windows_installer' in deploy_job['needs']
+        download_steps = [
+            step
+            for step in deploy_job['steps']
+            if step.get('name') == 'Download Windows installer'
+        ]
+        assert len(download_steps) == 1
+        assert download_steps[0]['with']['name'] == 'windows-installer-release'
+        assert any(
+            step.get('with', {}).get('name') == 'deploy_extra_artifacts'
+            for step in deploy_job['steps']
+        )
+
+    final_release = release_body['jobs']['release']
+    assert any(
+        step.get('with', {}).get('name') == 'deploy_extra_artifacts'
+        for step in final_release['steps']
+    )
+    create_release = next(
+        step for step in final_release['steps'] if step.get('name') == 'Create Release'
+    )
+    assert 'release_artifacts/**/*' in create_release['with']['files']
+
+    plan = ci_model.make_release_plan(self, provider='github')
+    assert 'build_windows_installer' in plan.build_job_keys
+    assert 'release_artifacts/**/*' in plan.artifact_globs

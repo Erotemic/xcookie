@@ -65,6 +65,36 @@ class TestVariant:
 
 
 @dataclass(frozen=True)
+class CIArtifact:
+    """A project-owned artifact that xcookie should build and carry through CI."""
+
+    key: str
+    name: str
+    runner: str
+    shell: str
+    python_version: str | None
+    setup_commands: tuple[str, ...]
+    build_commands: tuple[str, ...]
+    post_build_commands: tuple[str, ...]
+    artifact_paths: tuple[str, ...]
+    release_paths: tuple[str, ...]
+    test: bool
+    release: bool
+
+    @property
+    def job_key(self) -> str:
+        return f'build_{self.key.replace("-", "_")}'
+
+    @property
+    def artifact_name(self) -> str:
+        return self.key.replace('_', '-')
+
+    @property
+    def release_artifact_name(self) -> str:
+        return self.artifact_name + '-release'
+
+
+@dataclass(frozen=True)
 class CIPlan:
     """Provider-neutral CI decisions shared by GitHub and GitLab renderers."""
 
@@ -73,6 +103,7 @@ class CIPlan:
     active_test_variants: tuple[TestVariant, ...]
     typecheck_extras: tuple[str, ...]
     sdist_test_extras: tuple[str, ...]
+    ci_artifacts: tuple[CIArtifact, ...]
 
     def variants_by_key(self) -> dict[VariantKey, TestVariant]:
         return {variant.key: variant for variant in self.test_variants}
@@ -171,6 +202,102 @@ def _load_ci_extras(config: Mapping[str, Any]) -> dict[str, list[str]]:
     if not isinstance(ci_extras, Mapping):
         raise TypeError(f'ci_extras must be a mapping, got {type(ci_extras)!r}')
     return {str(key): _as_list(value) for key, value in ci_extras.items()}
+
+
+def _as_commands(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return tuple()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(str(item) for item in value)
+
+
+def _validate_artifact_key(key: str) -> None:
+    if not key:
+        raise ValueError('ci_artifacts keys must be non-empty')
+    if not (key[0].isalpha() or key[0] == '_'):
+        raise ValueError(
+            f'ci_artifacts key must start with a letter or underscore: {key!r}'
+        )
+    invalid = [c for c in key if not (c.isalnum() or c in {'_', '-'})]
+    if invalid:
+        raise ValueError(
+            f'ci_artifacts key contains unsupported characters: {key!r}'
+        )
+
+
+def load_ci_artifacts(config: Mapping[str, Any]) -> tuple[CIArtifact, ...]:
+    """Normalize project-owned artifact build declarations.
+
+    The artifact build itself remains in the target repository. xcookie only
+    renders the checkout/setup/build/upload plumbing and, for release artifacts,
+    carries the produced files through signing and GitHub release creation.
+    """
+    raw = config.get('ci_artifacts')
+    if not raw:
+        return tuple()
+    if isinstance(raw, str):
+        from xcookie.util_yaml import Yaml
+
+        raw = Yaml.loads(raw)
+    if not isinstance(raw, Mapping):
+        raise TypeError(f'ci_artifacts must be a mapping, got {type(raw)!r}')
+
+    artifacts = []
+    for key_, item in raw.items():
+        key = str(key_)
+        _validate_artifact_key(key)
+        if not isinstance(item, Mapping):
+            raise TypeError(
+                f'ci_artifacts[{key!r}] must be a mapping, got {type(item)!r}'
+            )
+
+        build_commands = _as_commands(
+            item.get('build_commands', item.get('build_command'))
+        )
+        artifact_paths = _as_commands(item.get('artifact_paths'))
+        if not build_commands:
+            raise ValueError(
+                f'ci_artifacts[{key!r}] requires build_command/build_commands'
+            )
+        if not artifact_paths:
+            raise ValueError(
+                f'ci_artifacts[{key!r}] requires artifact_paths'
+            )
+
+        release_paths = _as_commands(item.get('release_paths'))
+        release = bool(item.get('release', bool(release_paths)))
+        if release and not release_paths:
+            release_paths = artifact_paths
+
+        python_version = item.get('python_version')
+        if python_version is not None:
+            python_version = str(python_version)
+
+        artifacts.append(
+            CIArtifact(
+                key=key,
+                name=str(
+                    item.get(
+                        'name',
+                        key.replace('_', ' ').replace('-', ' ').title(),
+                    )
+                ),
+                runner=str(item.get('runner', 'ubuntu-latest')),
+                shell=str(item.get('shell', 'bash')),
+                python_version=python_version,
+                setup_commands=_as_commands(item.get('setup_commands')),
+                build_commands=build_commands,
+                post_build_commands=_as_commands(
+                    item.get('post_build_commands')
+                ),
+                artifact_paths=artifact_paths,
+                release_paths=release_paths,
+                test=bool(item.get('test', True)),
+                release=release,
+            )
+        )
+    return tuple(artifacts)
 
 
 def get_pyproject_optional_dependency_keys(self: Any) -> set[str]:
@@ -337,4 +464,5 @@ def make_ci_plan(self: Any) -> CIPlan:
         active_test_variants=active_variants,
         typecheck_extras=tuple(typecheck_extras),
         sdist_test_extras=tuple(sdist_test_extras),
+        ci_artifacts=load_ci_artifacts(self.config),
     )

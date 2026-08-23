@@ -429,6 +429,18 @@ class XCookieConfig(kwconf.Config):
             """
             ),
         ),
+        'ci_artifacts': kwconf.Value(
+            None,
+            help=ub.paragraph(
+                """
+            A mapping of additional CI artifacts built by the project. Each
+            entry declares a runner, build command, uploaded paths, and whether
+            the artifact participates in the release workflow. The project
+            owns the build implementation; xcookie owns the CI/release plumbing.
+            GitHub Actions is the first supported renderer for this feature.
+            """
+            ),
+        ),
         'use_vcs': kwconf.Value(
             'auto',
             help=ub.paragraph(
