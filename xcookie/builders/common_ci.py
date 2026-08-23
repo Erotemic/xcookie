@@ -253,18 +253,12 @@ def make_install_and_test_wheel_parts(
     test_command = self.config['test_command']
 
     if test_command == 'auto':
-        if 'ibeis' == self.mod_name:
-            test_command = [
-                'python -m xdoctest $MOD_DPATH --style=google all',
-                'echo "xdoctest command finished"',
-            ]
-        else:
-            test_command = [
-                Yaml.CodeBlock(
-                    'python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --durations=100 --cov="$MOD_NAME" "$MOD_DPATH" ../tests'
-                ),
-                'echo "pytest command finished, moving the coverage file to the repo root"',
-            ]
+        test_command = [
+            Yaml.CodeBlock(
+                'python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --durations=100 --cov="$MOD_NAME" "$MOD_DPATH" ../tests'
+            ),
+            'echo "pytest command finished, moving the coverage file to the repo root"',
+        ]
     else:
         if isinstance(test_command, str):
             test_command = [Yaml.CodeBlock(test_command)]
