@@ -1621,7 +1621,8 @@ class TemplateApplier:
             # lt = min(row['pyver_lt'], max_pyver) # FIXME, exclusive vs inclusive
             ge = max(row['pyver_ge'], min_pyver)
             skip = row['pyver_ge'] > max_pyver
-            skip |= row['pyver_lt'] < min_pyver
+            skip |= row['pyver_lt'] <= min_pyver
+            skip |= ge >= lt
             if not skip:
                 req_lines.append(
                     f"{variant}{row['version']} ; python_version < '{lt}' and python_version >= '{ge}'"

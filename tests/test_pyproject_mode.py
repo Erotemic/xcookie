@@ -1180,3 +1180,98 @@ def test_existing_setuptools_package_data_is_merged(tmp_path) -> None:
     data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
     package_data = data['tool']['setuptools']['package-data']
     assert package_data['demo_mod'] == ['coco_schema.json', 'py.typed']
+
+
+def test_dynamic_comments_only_extra_and_all_order_are_preserved(tmp_path):
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    reqdir = repodir / 'requirements'
+    pkgdir.mkdir(parents=True)
+    reqdir.mkdir()
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (reqdir / 'runtime.txt').write_text('ubelt>=1.3.3\n')
+    (reqdir / 'tests.txt').write_text('pytest>=8\n')
+    (reqdir / 'docs.txt').write_text('sphinx>=8\n')
+    (reqdir / 'optional.txt').write_text('# No optional requirements yet\n')
+    (reqdir / 'headless.txt').write_text('opencv-python-headless>=4.5.4.58\n')
+    (reqdir / 'graphics.txt').write_text('opencv-python>=4.5.4.58\n')
+    (reqdir / 'build.txt').write_text('build>=1\n')
+    all_files = [
+        'requirements/optional.txt',
+        'requirements/headless.txt',
+        'requirements/graphics.txt',
+        'requirements/build.txt',
+    ]
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo_mod',
+                    'description': 'Demo module',
+                    'requires-python': '>=3.10',
+                    'dynamic': [
+                        'dependencies',
+                        'optional-dependencies',
+                        'version',
+                    ],
+                },
+                'tool': {
+                    'xcookie': {
+                        'tags': ['github', 'purepy', 'cv2'],
+                        'mod_name': 'demo_mod',
+                        'repo_name': 'demo_mod',
+                        'description': 'Demo module',
+                        'min_python': '3.10',
+                        'os': ['linux', 'windows', 'osx'],
+                    },
+                    'setuptools': {
+                        'dynamic': {
+                            'dependencies': {
+                                'file': ['requirements/runtime.txt']
+                            },
+                            'optional-dependencies': {
+                                'all': {'file': all_files},
+                                'build': {
+                                    'file': ['requirements/build.txt']
+                                },
+                                'docs': {'file': ['requirements/docs.txt']},
+                                'graphics': {
+                                    'file': ['requirements/graphics.txt']
+                                },
+                                'headless': {
+                                    'file': ['requirements/headless.txt']
+                                },
+                                'optional': {
+                                    'file': ['requirements/optional.txt']
+                                },
+                                'tests': {'file': ['requirements/tests.txt']},
+                            },
+                        }
+                    },
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+    optional = pyproject_data['tool']['setuptools']['dynamic'][
+        'optional-dependencies'
+    ]
+
+    assert optional['optional']['file'] == ['requirements/optional.txt']
+    assert optional['all']['file'] == all_files

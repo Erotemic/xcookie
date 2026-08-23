@@ -174,10 +174,12 @@ class XCookieCLI(kwconf.ModalCLI):
     __prog__ = 'xcookie'
     __version__ = __version__
 
-    generate = GenerateConfig
-    bump = BumpConfig
-    refresh_docs = RefreshDocsConfig
-    rotate_secrets = RotateSecretsConfig
+    generate = kwconf.ModalValue(GenerateConfig, alias=['g'])
+    bump = kwconf.ModalValue(BumpConfig, alias=['b'])
+    refresh_docs = kwconf.ModalValue(RefreshDocsConfig, alias=['docs'])
+    rotate_secrets = kwconf.ModalValue(
+        RotateSecretsConfig, alias=['secrets']
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> Any:

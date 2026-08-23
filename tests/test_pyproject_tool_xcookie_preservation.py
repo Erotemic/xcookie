@@ -205,3 +205,49 @@ def test_invalid_prerelease_python_policy_is_rejected(tmp_path):
             interactive=False,
             ci_prerelease_python_policy='maybe',
         )
+
+
+def test_pyproject_regen_preserves_equivalent_os_spelling(tmp_path):
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '2.0.0'\n")
+    original_os = ['linux', 'windows', 'osx']
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'tool': {
+                    'xcookie': {
+                        'tags': ['github', 'purepy'],
+                        'mod_name': 'demo_mod',
+                        'repo_name': 'demo_mod',
+                        'author': 'Existing Author',
+                        'author_email': 'author@example.com',
+                        'url': 'https://github.com/example/demo_mod',
+                        'description': 'Demo module',
+                        'min_python': '3.10',
+                        'os': original_os,
+                    }
+                }
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+
+    assert pyproject_data['tool']['xcookie']['os'] == original_os

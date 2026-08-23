@@ -117,6 +117,11 @@ def _dynamic_requirement_relpaths(self, name):
                     result.append(metadata_relpath)
                 else:
                     result.append(relpath)
+            elif not include_fpaths and not ignored_lines:
+                # Keep empty / comments-only files as explicit metadata
+                # sources. This preserves stable extras such as ``optional``
+                # across regeneration without exposing pip-only directives.
+                result.append(relpath)
             for include_fpath in include_fpaths:
                 _visit(include_fpath)
         finally:
@@ -153,6 +158,28 @@ _SPDX_LICENSE_ALIASES = {
 def _coerce_spdx_license(value: str) -> str:
     """Coerce a configured license value into a valid SPDX expression."""
     return _SPDX_LICENSE_ALIASES.get(value, value)
+
+
+def _canonical_os_values(value):
+    """Canonicalize OS spellings for semantic config comparisons."""
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        value = [value]
+    parts = []
+    for item in value:
+        parts.extend(p.strip() for p in str(item).split(','))
+    aliases = {
+        'windows': 'win',
+        'win32': 'win',
+        'darwin': 'osx',
+        'apple': 'osx',
+    }
+    result = {aliases.get(part, part) for part in parts if part}
+    if 'all' in result:
+        result.remove('all')
+        result.update({'linux', 'osx', 'win'})
+    return result
 
 
 def _build_xcookie_tool_config(self, pyproj_config):
@@ -230,7 +257,15 @@ def _build_xcookie_tool_config(self, pyproj_config):
         elif key == 'rel_mod_parent_dpath':
             should_save = should_save or value not in {'.', ''}
         elif key == 'os':
-            os_values = set(value) if not isinstance(value, str) else {value}
+            os_values = _canonical_os_values(value)
+            existing_os = existing_tool.get('os')
+            if (
+                key in existing_keys
+                and _canonical_os_values(existing_os) == os_values
+            ):
+                # Preserve user spelling/order (e.g. ``windows`` instead of
+                # canonical ``win``) when regeneration is semantically equal.
+                value = existing_os
             should_save = should_save or os_values != default_os
         elif key == 'version':
             # Do not introduce the resolver's placeholder version.  If a
@@ -585,17 +620,31 @@ def build_pyproject(self):
                 if name not in DEV_EXTRAS and name != 'all'
             ]
             if all_extra_names:
-                optional_dynamic['all'] = {
-                    'file': list(
-                        ub.oset(
-                            relpath
-                            for name in all_extra_names
-                            for relpath in _dynamic_requirement_relpaths(
-                                self, name
-                            )
+                all_files = list(
+                    ub.oset(
+                        relpath
+                        for name in all_extra_names
+                        for relpath in _dynamic_requirement_relpaths(
+                            self, name
                         )
                     )
-                }
+                )
+                previous_all = previous_optional_dynamic.get('all', {}) or {}
+                previous_all_files = previous_all.get('file', []) or []
+                if isinstance(previous_all_files, str):
+                    previous_all_files = [previous_all_files]
+                if previous_all_files:
+                    all_file_set = set(all_files)
+                    stable_prefix = [
+                        f for f in previous_all_files if f in all_file_set
+                    ]
+                    all_files = list(
+                        ub.oset(
+                            stable_prefix
+                            + [f for f in all_files if f not in stable_prefix]
+                        )
+                    )
+                optional_dynamic['all'] = {'file': all_files}
 
             setuptools_dynamic['optional-dependencies'] = optional_dynamic
 

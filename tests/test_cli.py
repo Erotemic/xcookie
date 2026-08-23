@@ -217,3 +217,56 @@ def test_bump_forwards_optional_branch(monkeypatch) -> None:
     )
 
     assert called == {'target': 'patch', 'branch': True}
+
+
+def test_modal_short_aliases_dispatch(monkeypatch) -> None:
+    from xcookie.cli import XCookieCLI
+    from xcookie.docs import DocsRefresher
+    from xcookie.main import XCookieConfig
+    from xcookie.secrets import SecretRotator
+    from xcookie.versioning import VersionBumper
+
+    generated = {}
+    bumped = {}
+    refreshed = {}
+    rotated = {}
+
+    def fake_generate(cls, argv=False, **kwargs):
+        generated.update(kwargs)
+        return 'generated'
+
+    def fake_bump(self, target='patch', *, branch=False):
+        bumped.update(target=target, branch=branch)
+
+    def fake_load(cls, argv=False, **kwargs):
+        return {'repodir': kwargs['repodir']}
+
+    def fake_refresh(self):
+        refreshed['repodir'] = str(self.repodir)
+
+    def fake_rotate(self):
+        rotated['repodir'] = str(self.repodir)
+
+    monkeypatch.setattr(XCookieConfig, 'main', classmethod(fake_generate))
+    monkeypatch.setattr(VersionBumper, 'bump', fake_bump)
+    monkeypatch.setattr(
+        XCookieConfig, 'load_from_cli_and_pyproject', classmethod(fake_load)
+    )
+    monkeypatch.setattr(DocsRefresher, 'refresh_docs', fake_refresh)
+    monkeypatch.setattr(SecretRotator, 'rotate_secrets', fake_rotate)
+
+    assert (
+        XCookieCLI.main(
+            argv=['g', 'demo-repo', '--interactive=False'],
+            autocomplete=False,
+        )
+        == 'generated'
+    )
+    XCookieCLI.main(argv=['b', 'minor', 'demo-repo'], autocomplete=False)
+    XCookieCLI.main(argv=['docs', 'demo-repo'], autocomplete=False)
+    XCookieCLI.main(argv=['secrets', 'demo-repo', '--yes'], autocomplete=False)
+
+    assert generated['repodir'] == 'demo-repo'
+    assert bumped == {'target': 'minor', 'branch': False}
+    assert refreshed == {'repodir': 'demo-repo'}
+    assert rotated == {'repodir': 'demo-repo'}
