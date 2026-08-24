@@ -255,7 +255,7 @@ def make_install_and_test_wheel_parts(
     if test_command == 'auto':
         test_command = [
             Yaml.CodeBlock(
-                'python -m pytest --verbose -p pytester -p no:doctest --xdoctest --cov-config ../pyproject.toml --cov-report term --durations=100 --cov="$MOD_NAME" "$MOD_DPATH" ../tests'
+                'python -m pytest --verbose --xdoctest --cov-config ../pyproject.toml --cov-report term --durations=100 --cov="$MOD_NAME" "$MOD_DPATH" ../tests'
             ),
             'echo "pytest command finished, moving the coverage file to the repo root"',
         ]
