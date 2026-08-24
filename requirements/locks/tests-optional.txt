@@ -62,7 +62,7 @@ jinja2==3.1.6
     #   myst-parser
     #   sphinx
     #   sphinx-autoapi
-kwconf==0.10.0
+kwconf==0.11.0
     # via xcookie
 kwutil==0.3.8
     # via xcookie
