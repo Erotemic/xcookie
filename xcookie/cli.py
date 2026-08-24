@@ -14,6 +14,19 @@ from xcookie.secrets import SecretRotator
 from xcookie.versioning import VersionBumper
 
 
+def _normalize_cli_argv(
+    argv: int | bool | str | Sequence[str] | None,
+) -> bool | str | Sequence[str] | None:
+    """Normalize the legacy integer argv sentinel for kwconf."""
+    if isinstance(argv, int) and not isinstance(argv, bool):
+        if argv != 0:
+            raise ValueError('integer argv values must be 0')
+        normalized: bool | str | Sequence[str] | None = False
+    else:
+        normalized = argv
+    return normalized
+
+
 class GenerateConfig(XCookieConfig):
     """Generate or update project boilerplate."""
 
@@ -67,7 +80,7 @@ class RefreshDocsConfig(kwconf.Config):
     ) -> DocsRefresher:
         """Load project settings and regenerate its API documentation."""
         command_config = cls.cli(
-            argv=argv,
+            argv=_normalize_cli_argv(argv),
             data=kwargs,
             strict=strict,
             autocomplete=autocomplete,
@@ -106,7 +119,7 @@ class RotateSecretsConfig(kwconf.Config):
     ) -> SecretRotator:
         """Load project settings and rotate its configured CI secrets."""
         command_config = cls.cli(
-            argv=argv,
+            argv=_normalize_cli_argv(argv),
             data=kwargs,
             strict=strict,
             autocomplete=autocomplete,
@@ -155,7 +168,7 @@ class BumpConfig(kwconf.Config):
     ) -> VersionBumper:
         """Bump the authoritative version source and roll the changelog."""
         command_config = cls.cli(
-            argv=argv,
+            argv=_normalize_cli_argv(argv),
             data=kwargs,
             strict=strict,
             autocomplete=autocomplete,

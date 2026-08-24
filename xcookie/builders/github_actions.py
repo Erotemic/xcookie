@@ -783,7 +783,7 @@ def build_ci_artifact_job(
     artifact: CIArtifact,
     *,
     release: bool = False,
-) -> Yaml.Dict:
+) -> JSON_MutableMapping:
     """Render one project-owned artifact build job."""
     steps: list[JSON_Mapping] = [Actions.checkout()]
     if artifact.python_version is not None:

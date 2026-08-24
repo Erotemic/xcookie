@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from xcookie.resolved_config import ResolvedXCookieConfig
 from xcookie.template_registry import TemplateContext, TemplateInfo
 from xcookie.staging import apply_template_context
@@ -249,7 +251,9 @@ def test_template_registry_uses_explicit_basic_builders(tmp_path):
     )
     applier = TemplateApplier(config)
     applier._build_template_registry()
-    infos = {str(info.fname): info for info in applier.template_infos}
+    infos = {
+        Path(info.fname).as_posix(): info for info in applier.template_infos
+    }
     assert infos['CHANGELOG.md'].builder is not None
     assert infos['tests/test_import.py'].builder is not None
     assert infos['demo/__init__.py'].builder is not None

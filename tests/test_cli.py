@@ -270,3 +270,18 @@ def test_modal_short_aliases_dispatch(monkeypatch) -> None:
     assert bumped == {'target': 'minor', 'branch': False}
     assert refreshed == {'repodir': 'demo-repo'}
     assert rotated == {'repodir': 'demo-repo'}
+
+
+def test_normalize_cli_argv_legacy_zero() -> None:
+    from xcookie.cli import _normalize_cli_argv
+
+    assert _normalize_cli_argv(0) is False
+
+
+def test_normalize_cli_argv_rejects_other_integers() -> None:
+    import pytest
+
+    from xcookie.cli import _normalize_cli_argv
+
+    with pytest.raises(ValueError, match='integer argv values must be 0'):
+        _normalize_cli_argv(1)

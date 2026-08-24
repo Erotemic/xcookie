@@ -129,8 +129,11 @@ def _parse_python_assignment(path: ub.Path, variable: str) -> str | None:
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
                 if isinstance(target, ast.Name) and target.id == variable:
+                    value_node = node.value
+                    if value_node is None:
+                        continue
                     try:
-                        value = ast.literal_eval(node.value)
+                        value = ast.literal_eval(value_node)
                     except (TypeError, ValueError):
                         return None
                     return value if isinstance(value, str) else None
@@ -225,7 +228,7 @@ def find_version_source(
             if required:
                 raise RuntimeError(
                     f'Version attr {attr!r} resolved to multiple files: '
-                    + ', '.join(map(str, ub.take_column(matches, 0)))
+                    + ', '.join(str(path) for path, _ in matches)
                 )
             return None
         if required:
@@ -254,7 +257,7 @@ def find_version_source(
             if required:
                 raise RuntimeError(
                     'Dynamic version file resolved to multiple candidates: '
-                    + ', '.join(map(str, ub.take_column(matches, 0)))
+                    + ', '.join(str(path) for path, _ in matches)
                 )
             return None
 

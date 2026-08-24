@@ -247,3 +247,24 @@ def test_shared_version_discovery_for_config_inference(tmp_path):
     assert source is not None
     assert source.version == '5.6.7'
     assert source.path == tmp_path / 'demo' / '__init__.py'
+
+
+def test_version_discovery_skips_valueless_annotation(tmp_path):
+    (tmp_path / 'demo').mkdir()
+    (tmp_path / 'demo' / '__init__.py').write_text(
+        "__version__: str\n__version__ = '7.8.9'\n"
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo"
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = {attr = "demo.__version__"}
+'''.lstrip()
+    )
+
+    source = find_version_source(tmp_path)
+    assert source is not None
+    assert source.version == '7.8.9'
