@@ -1,4 +1,17 @@
+from enum import Enum
 from typing import Dict, List
+
+
+class PrereleasePythonPolicy(str, Enum):
+    """Policy for unreleased CPython interpreter jobs in test CI."""
+
+    ALLOW_FAILURE = 'allow-failure'
+    STRICT = 'strict'
+    SKIP = 'skip'
+
+    def __str__(self) -> str:
+        return self.value
+
 
 KNOWN_PYTHON_VERSIONS: List[str] = [
     '2.7',

@@ -4,38 +4,132 @@ import tempfile
 import toml
 import ubelt as ub
 
+from xcookie.requirements_layout import RequirementsLayout
 from xcookie.util.util_metadata import coerce_author_entries
 
 
-# Default rolling window for the ``[tool.uv] exclude-newer`` supply-chain
-# guard. ``uv`` accepts ISO 8601 durations, so ``P7D`` means "ignore packages
-# published in the last 7 days" -- this keeps the guard from going stale the
-# way a hard-coded absolute date would.
-DEFAULT_UV_EXCLUDE_NEWER = 'P7D'
 
 
-def _resolve_uv_exclude_newer(self, pyproj_config):
-    """Decide the ``[tool.uv] exclude-newer`` value to write.
+_METADATA_IGNORED_PIP_OPTIONS = (
+    '--extra-index-url',
+    '--find-links',
+    '--index-url',
+    '--pre',
+    '--prefer-binary',
+    '--trusted-host',
+    '-f',
+    '-i',
+)
 
-    The supply-chain guard tells ``uv lock`` to ignore packages published
-    too recently. Behavior:
 
-    * ``False``/``None`` → disable (do not emit the setting).
-    * ``'auto'`` → preserve any existing value on disk; otherwise use the
-      relative default :data:`DEFAULT_UV_EXCLUDE_NEWER`.
-    * any other string → use verbatim (e.g. a relative ``'30 days'`` /
-      ``'P30D'`` window, or a fixed ``'2026-05-22'`` date).
+def _parse_requirement_file_for_metadata(fpath):
+    """Separate package requirements from pip-only composition/policy."""
+    fpath = ub.Path(fpath)
+    direct_lines = []
+    include_fpaths = []
+    ignored_lines = []
+    if not fpath.exists():
+        return direct_lines, include_fpaths, ignored_lines
+
+    for lineno, line in enumerate(fpath.read_text().splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+
+        include_target = None
+        if stripped.startswith('-r '):
+            include_target = stripped[3:].strip()
+        elif stripped.startswith('--requirement '):
+            include_target = stripped[len('--requirement '):].strip()
+        if include_target is not None:
+            include_fpaths.append(fpath.parent / include_target)
+            continue
+
+        if stripped.startswith(_METADATA_IGNORED_PIP_OPTIONS):
+            ignored_lines.append(stripped)
+            continue
+        if stripped.startswith('-'):
+            raise ValueError(
+                'cannot represent pip requirement directive in package '
+                f'metadata: {fpath}: line {lineno}: {stripped!r}'
+            )
+
+        # The legacy setup.py parser tolerated an inline find-links suffix.
+        # Keep that pip-facing syntax out of package metadata.
+        if ' --find-links ' in stripped:
+            stripped = stripped.split(' --find-links ', 1)[0].rstrip()
+            ignored_lines.append(line.strip())
+        direct_lines.append(stripped)
+
+    return direct_lines, include_fpaths, ignored_lines
+
+
+def _requirement_file_needs_metadata_copy(fpath):
+    """Whether a requirements file needs a companion for its local entries."""
+    direct_lines, include_fpaths, ignored_lines = (
+        _parse_requirement_file_for_metadata(fpath)
+    )
+    return bool(direct_lines and (include_fpaths or ignored_lines))
+
+
+def _build_setuptools_requirement_metadata_text(fpath):
+    """Build metadata for only the direct requirements in one pip file.
+
+    Recursive ``-r`` composition is represented by multiple paths in
+    ``tool.setuptools.dynamic`` instead of duplicating transitive requirements
+    into this companion file. Installer-only options are omitted.
     """
-    configured = self.config.get('uv_exclude_newer', 'auto')
-    if configured in (False, None, 'false', 'False', 'off'):
-        return None
+    direct_lines, _, _ = _parse_requirement_file_for_metadata(fpath)
+    return '\n'.join(direct_lines) + ('\n' if direct_lines else '')
 
-    existing = pyproj_config.get('tool', {}).get('uv', {}).get('exclude-newer')
-    if configured == 'auto':
-        if existing:
-            return existing
-        return DEFAULT_UV_EXCLUDE_NEWER
-    return str(configured)
+
+
+def _dynamic_requirement_relpaths(self, name):
+    """Resolve one pip requirements file into setuptools metadata sources."""
+    root_fpath = self.repodir / 'requirements' / f'{name}.txt'
+    if not root_fpath.exists():
+        # New projects may not have requirement files on disk until staging.
+        # Standard generated requirement files are metadata-safe.
+        return [f'requirements/{name}.txt']
+
+    result = []
+    stack = []
+
+    def _visit(fpath):
+        fpath = ub.Path(fpath)
+        if fpath in stack:
+            chain = ' -> '.join(map(str, stack + [fpath]))
+            raise ValueError(f'cyclic requirement include: {chain}')
+        if not fpath.exists():
+            raise ValueError(f'requirement include does not exist: {fpath}')
+
+        stack.append(fpath)
+        try:
+            direct_lines, include_fpaths, ignored_lines = (
+                _parse_requirement_file_for_metadata(fpath)
+            )
+            relpath = fpath.relative_to(self.repodir).as_posix()
+            if direct_lines:
+                if include_fpaths or ignored_lines:
+                    metadata_relpath = fpath.with_name(
+                        fpath.stem + '-metadata.txt'
+                    ).relative_to(self.repodir).as_posix()
+                    result.append(metadata_relpath)
+                else:
+                    result.append(relpath)
+            elif not include_fpaths and not ignored_lines:
+                # Keep empty / comments-only files as explicit metadata
+                # sources. This preserves stable extras such as ``optional``
+                # across regeneration without exposing pip-only directives.
+                result.append(relpath)
+            for include_fpath in include_fpaths:
+                _visit(include_fpath)
+        finally:
+            stack.pop()
+
+    _visit(root_fpath)
+    return list(ub.oset(result))
+
 
 
 def _autodictify(value):
@@ -64,6 +158,28 @@ _SPDX_LICENSE_ALIASES = {
 def _coerce_spdx_license(value: str) -> str:
     """Coerce a configured license value into a valid SPDX expression."""
     return _SPDX_LICENSE_ALIASES.get(value, value)
+
+
+def _canonical_os_values(value):
+    """Canonicalize OS spellings for semantic config comparisons."""
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        value = [value]
+    parts = []
+    for item in value:
+        parts.extend(p.strip() for p in str(item).split(','))
+    aliases = {
+        'windows': 'win',
+        'win32': 'win',
+        'darwin': 'osx',
+        'apple': 'osx',
+    }
+    result = {aliases.get(part, part) for part in parts if part}
+    if 'all' in result:
+        result.remove('all')
+        result.update({'linux', 'osx', 'win'})
+    return result
 
 
 def _build_xcookie_tool_config(self, pyproj_config):
@@ -96,16 +212,19 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'dev_status',
         'typed',
         'typecheck_extra_paths',
+        'ci_prerelease_python_policy',
+        'ci_artifacts',
         'remote_host',
         'remote_group',
         'use_setup_py',
         'use_pyproject_requirements',
+        'requirements_package',
     ]
     raw_config = ub.udict(ub.dict_subset(self.config, options_to_save))
 
     # Start with the explicit on-disk settings so nested user config such as
-    # entry_points, package_data, ci_blocklist, ci_allow_failure, and
-    # typecheck_extra_paths
+    # entry_points, package_data, ci_blocklist, ci_allow_failure, and other
+    # explicit CI customization
     # survive regeneration.
     config_to_save = ub.udict(existing_tool)
 
@@ -121,6 +240,8 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'typed',
         'use_setup_py',
         'use_pyproject_requirements',
+        'requirements_package',
+        'ci_artifacts',
     }
 
     default_os = {'linux', 'osx', 'win'}
@@ -138,7 +259,15 @@ def _build_xcookie_tool_config(self, pyproj_config):
         elif key == 'rel_mod_parent_dpath':
             should_save = should_save or value not in {'.', ''}
         elif key == 'os':
-            os_values = set(value) if not isinstance(value, str) else {value}
+            os_values = _canonical_os_values(value)
+            existing_os = existing_tool.get('os')
+            if (
+                key in existing_keys
+                and _canonical_os_values(existing_os) == os_values
+            ):
+                # Preserve user spelling/order (e.g. ``windows`` instead of
+                # canonical ``win``) when regeneration is semantically equal.
+                value = existing_os
             should_save = should_save or os_values != default_os
         elif key == 'version':
             # Do not introduce the resolver's placeholder version.  If a
@@ -156,6 +285,8 @@ def _build_xcookie_tool_config(self, pyproj_config):
             should_save = should_save or value != 'planning'
         elif key == 'typecheck_extra_paths':
             should_save = should_save or bool(value)
+        elif key == 'ci_prerelease_python_policy':
+            should_save = should_save or value != 'allow-failure'
         elif key in {'remote_host', 'remote_group'}:
             # These are usually inferred from the URL and need not be persisted
             # unless the user explicitly had them on disk already.
@@ -272,12 +403,6 @@ def build_pyproject(self):
             'build-backend', 'setuptools.build_meta'
         )
 
-    if self.config.get('use_uv'):
-        exclude_newer = _resolve_uv_exclude_newer(self, pyproj_config)
-        if exclude_newer:
-            tool_uv = pyproj_config['tool'].get('uv') or {}
-            tool_uv['exclude-newer'] = exclude_newer
-            pyproj_config['tool']['uv'] = tool_uv
 
     WITH_PYTEST_INI = 1
     if WITH_PYTEST_INI:
@@ -348,6 +473,9 @@ def build_pyproject(self):
         project_block['description'] = self.config['description']
         project_block['requires-python'] = f'>={self.config["min_python"]}'
         dynamic_entries = list(project_block.get('dynamic', []))
+        has_static_readme = 'readme' in project_block
+        if not has_static_readme:
+            dynamic_entries.append('readme')
         dynamic_entries.append('version')
         if not use_pyproject_requirements:
             dynamic_entries.extend(['dependencies', 'optional-dependencies'])
@@ -393,52 +521,92 @@ def build_pyproject(self):
             }
 
         package_data = setuptools_block['package-data']
-        package_data['*'] = ['requirements/*.txt']
+
+        def _merge_package_data(key, values):
+            existing = package_data.get(key, []) or []
+            if isinstance(existing, str):
+                existing = [existing]
+            if isinstance(values, str):
+                values = [values]
+            package_data[key] = list(ub.oset([*existing, *values]))
+
+        _merge_package_data('*', ['requirements/*.txt'])
+        requirements_layout = RequirementsLayout.from_config(self.config)
+        if requirements_layout.package is not None:
+            _merge_package_data(
+                requirements_layout.package,
+                requirements_layout.package_data_patterns,
+            )
         if self.config['typed']:
-            package_data[self.mod_name] = ['py.typed']
+            _merge_package_data(self.mod_name, ['py.typed'])
         for key, value in pyproject_settings.get('package_data', {}).items():
             normalized_key = '*' if key == '' else key
-            package_data[normalized_key] = value
+            _merge_package_data(normalized_key, value)
 
         setuptools_dynamic = setuptools_block['dynamic']
         setuptools_dynamic['version'] = {
             'attr': f'{self.config["mod_name"]}.__version__'
         }
-        readme_fpath = self._readme_fpath()
-        setuptools_dynamic['readme'] = {
-            'file': [readme_fpath.name],
-            'content-type': self._readme_content_type(),
-        }
+        if has_static_readme:
+            setuptools_dynamic.pop('readme', None)
+        else:
+            readme_fpath = self._readme_fpath()
+            setuptools_dynamic['readme'] = {
+                'file': [readme_fpath.name],
+                'content-type': self._readme_content_type(),
+            }
         if not use_pyproject_requirements:
+            runtime_req_relpaths = _dynamic_requirement_relpaths(
+                self, 'runtime'
+            )
             setuptools_dynamic['dependencies'] = {
-                'file': ['requirements/runtime.txt']
+                'file': runtime_req_relpaths
             }
 
+            previous_optional_dynamic = dict(
+                setuptools_dynamic.get('optional-dependencies', {}) or {}
+            )
             extras = ['tests', 'optional', 'docs']
+            extras.extend(
+                name for name in previous_optional_dynamic if name != 'all'
+            )
             if 'cv2' in self.tags:
                 extras.extend(['headless', 'graphics'])
             if 'postgresql' in self.tags:
                 extras.append('postgresql')
+            if 'gdal' in self.tags:
+                extras.append('gdal')
 
-            # Auto-discover any additional requirements/<name>.txt files so
-            # they become optional extras. Mirrors the legacy setup.py
-            # builder which exposed one extra per requirements file.
+            # Auto-discover additional standalone requirements files. Files
+            # used only as ``-r`` composition fragments are implementation
+            # details, not public install extras, unless the project already
+            # exposed them explicitly above.
             requirements_dpath = self.repodir / 'requirements'
             if requirements_dpath.exists():
-                discovered = sorted(
-                    f.stem for f in requirements_dpath.glob('*.txt')
-                )
-                # ``runtime`` is the install_requires source, not an extra.
-                extras = list(
-                    ub.oset(
-                        extras
-                        + [name for name in discovered if name != 'runtime']
+                discovered_fpaths = sorted(requirements_dpath.glob('*.txt'))
+                included_names = set()
+                for req_fpath in discovered_fpaths:
+                    if req_fpath.stem.endswith('-metadata'):
+                        continue
+                    _, include_fpaths, _ = _parse_requirement_file_for_metadata(
+                        req_fpath
                     )
-                )
+                    for include_fpath in include_fpaths:
+                        if include_fpath.parent == requirements_dpath:
+                            included_names.add(include_fpath.stem)
+                discovered = [
+                    f.stem
+                    for f in discovered_fpaths
+                    if not f.stem.endswith('-metadata')
+                    and f.stem != 'runtime'
+                    and f.stem not in included_names
+                ]
+                extras = list(ub.oset(extras + discovered))
 
             optional_dynamic = {}
             for name in extras:
-                optional_dynamic[name] = {'file': [f'requirements/{name}.txt']}
+                req_relpaths = _dynamic_requirement_relpaths(self, name)
+                optional_dynamic[name] = {'file': req_relpaths}
 
             # Recreate the legacy ``all`` convenience extra so users can run
             # ``pip install pkg[all]``. setuptools concatenates a list of
@@ -454,11 +622,31 @@ def build_pyproject(self):
                 if name not in DEV_EXTRAS and name != 'all'
             ]
             if all_extra_names:
-                optional_dynamic['all'] = {
-                    'file': [
-                        f'requirements/{name}.txt' for name in all_extra_names
+                all_files = list(
+                    ub.oset(
+                        relpath
+                        for name in all_extra_names
+                        for relpath in _dynamic_requirement_relpaths(
+                            self, name
+                        )
+                    )
+                )
+                previous_all = previous_optional_dynamic.get('all', {}) or {}
+                previous_all_files = previous_all.get('file', []) or []
+                if isinstance(previous_all_files, str):
+                    previous_all_files = [previous_all_files]
+                if previous_all_files:
+                    all_file_set = set(all_files)
+                    stable_prefix = [
+                        f for f in previous_all_files if f in all_file_set
                     ]
-                }
+                    all_files = list(
+                        ub.oset(
+                            stable_prefix
+                            + [f for f in all_files if f not in stable_prefix]
+                        )
+                    )
+                optional_dynamic['all'] = {'file': all_files}
 
             setuptools_dynamic['optional-dependencies'] = optional_dynamic
 
@@ -515,27 +703,13 @@ def build_pyproject(self):
         )
         text = temp_fpath.read_text()
 
-    # ``toml.dumps`` cannot emit comments, so re-inject the documentation for
-    # the supply-chain pin and normalize the package name in a single pass.
-    uv_exclude_newer_comment = [
-        '# Supply-chain guard: ignore packages published too recently.',
-        '# Accepts a relative window (e.g. "P7D" / "30 days") or a fixed date.',
-    ]
+    # Normalize the package name after serialization.
     project_name = pyproj_config.get('project', {}).get('name')
     section_name = None
     fixed_lines = []
     for line in text.splitlines():
         if line.startswith('[') and line.endswith(']'):
             section_name = line.strip()[1:-1]
-            fixed_lines.append(line)
-            continue
-        if section_name == 'tool.uv' and line.lstrip().startswith(
-            'exclude-newer = '
-        ):
-            indent = line[: len(line) - len(line.lstrip())]
-            fixed_lines.extend(
-                f'{indent}{comment}' for comment in uv_exclude_newer_comment
-            )
         if (
             project_name
             and section_name == 'project'

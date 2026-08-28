@@ -1,3 +1,4 @@
+from xcookie.builders import ci_model
 from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
 
@@ -11,6 +12,7 @@ def _make_applier(
     max_python=None,
     use_setup_py=False,
     ci_allow_failure=None,
+    ci_prerelease_python_policy=None,
     typecheck_extra_paths=None,
 ):
     kwargs = dict(
@@ -19,8 +21,6 @@ def _make_applier(
         mod_name='demo_pkg',
         tags=tags,
         interactive=False,
-        rotate_secrets=False,
-        refresh_docs=False,
         test_variants=['minimal-strict', 'full-loose'],
     )
     if min_python is not None:
@@ -36,6 +36,8 @@ def _make_applier(
     cfg['use_setup_py'] = use_setup_py
     if ci_allow_failure is not None:
         cfg['ci_allow_failure'] = ci_allow_failure
+    if ci_prerelease_python_policy is not None:
+        cfg['ci_prerelease_python_policy'] = ci_prerelease_python_policy
     if typecheck_extra_paths is not None:
         cfg['typecheck_extra_paths'] = typecheck_extra_paths
     self = TemplateApplier(cfg)
@@ -145,7 +147,8 @@ def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
     self = _make_applier(tmp_path, tags=['gitlab', 'purepy'], min_python='3.10')
     text = self.build_gitlab_ci()
     assert 'build/sdist:' in text
-    assert 'build/cp' in text
+    assert 'build/wheel:' in text
+    assert 'build/cp' not in text
     assert 'test/full-loose/cp' in text
     assert 'test/minimal-strict/cp' in text
     assert 'export INSTALL_EXTRAS="tests,optional"' in text
@@ -154,6 +157,35 @@ def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
     assert 'export LOCK_REQUIREMENTS="requirements/locks/tests.txt"' in text
     assert 'tests-strict' not in text
     assert 'runtime-strict' not in text
+    assert 'setuptools>=77' in text
+
+
+def test_gitlab_purepy_tests_share_one_wheel_build(tmp_path):
+    from xcookie.util_yaml import Yaml
+
+    self = _make_applier(tmp_path, tags=['gitlab', 'purepy'], min_python='3.10')
+    text = self.build_gitlab_ci()
+    body = Yaml.loads(text)
+
+    wheel_build_jobs = [
+        key
+        for key in body
+        if key.startswith('build/') and key != 'build/sdist'
+    ]
+    assert wheel_build_jobs == ['build/wheel']
+
+    wheel_test_jobs = {
+        key: job
+        for key, job in body.items()
+        if key.startswith('test/') and not key.startswith('test/sdist/')
+    }
+    artifact_test_cases = ci_model.make_artifact_test_cases(
+        self, provider='gitlab'
+    )
+    assert len(wheel_test_jobs) == len(artifact_test_cases)
+    assert all(
+        job['needs'] == ['build/wheel'] for job in wheel_test_jobs.values()
+    )
 
 
 def test_gitlab_binpy_render_uses_artifact_test_cases(tmp_path):
@@ -190,6 +222,7 @@ def test_gitlab_purepy_gdal_cases_select_strict_and_loose_requirement_files(
     assert 'requirements/gdal.txt' in text
     assert 'requirements/gdal-strict.txt' in text
     assert "sed 's/>=/==/'" in text
+    assert '--find-links https://girder.github.io/large_image_wheels' in text
 
 
 def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
@@ -315,6 +348,7 @@ def test_github_allow_failure_rules_normalize_experimental_steps(tmp_path):
         tmp_path,
         tags=['github', 'purepy'],
         ci_allow_failure=[{'python-version': '3.15'}],
+        ci_prerelease_python_policy='strict',
     )
     text = self.build_github_actions_tests()
     continue_expr = 'continue-on-error: ${{ matrix.experimental || false }}'
@@ -327,7 +361,11 @@ def test_github_allow_failure_rules_normalize_experimental_steps(tmp_path):
     assert "python-version: '3.15'" in text
     assert 'experimental: true' in text
 
-    stable_self = _make_applier(tmp_path, tags=['github', 'purepy'])
+    stable_self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        ci_prerelease_python_policy='strict',
+    )
     stable_text = stable_self.build_github_actions_tests()
     assert continue_expr not in stable_text
     assert 'Report experimental failure' not in stable_text
@@ -344,3 +382,60 @@ def test_github_typecheck_extra_paths_are_rendered(tmp_path):
     expected_targets = './demo_pkg ./tests/typecheck_consumer.py'
     assert f'mypy {expected_targets}' in text
     assert f'ty check {expected_targets}' in text
+
+
+def test_gitlab_prerelease_python_policy_defaults_to_allow_failure(tmp_path):
+    from xcookie.util_yaml import Yaml
+
+    self = _make_applier(tmp_path, tags=['gitlab', 'purepy'], min_python='3.10')
+    body = Yaml.loads(self.build_gitlab_ci())
+    prerelease_jobs = {
+        key: job
+        for key, job in body.items()
+        if key.startswith('test/') and '/cp315-' in key
+    }
+    stable_jobs = {
+        key: job
+        for key, job in body.items()
+        if key.startswith('test/')
+        and '/cp315-' not in key
+        and not key.startswith('test/sdist/')
+    }
+    assert prerelease_jobs
+    assert stable_jobs
+    assert all(
+        job.get('allow_failure') is True
+        for job in prerelease_jobs.values()
+    )
+    assert all('allow_failure' not in job for job in stable_jobs.values())
+
+
+def test_gitlab_prerelease_python_policy_strict(tmp_path):
+    from xcookie.util_yaml import Yaml
+
+    self = _make_applier(
+        tmp_path,
+        tags=['gitlab', 'purepy'],
+        min_python='3.10',
+        ci_prerelease_python_policy='strict',
+    )
+    body = Yaml.loads(self.build_gitlab_ci())
+    prerelease_jobs = {
+        key: job
+        for key, job in body.items()
+        if key.startswith('test/') and '/cp315-' in key
+    }
+    assert prerelease_jobs
+    assert all('allow_failure' not in job for job in prerelease_jobs.values())
+
+
+def test_gitlab_prerelease_python_policy_skip(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['gitlab', 'purepy'],
+        min_python='3.10',
+        ci_prerelease_python_policy='skip',
+    )
+    text = self.build_gitlab_ci()
+    assert '/cp315-' not in text
+    assert 'python:3.15-rc' not in text

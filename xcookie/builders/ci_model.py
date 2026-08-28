@@ -102,12 +102,20 @@ class ArtifactTestCase:
     def gitlab_special_install_lines(self, pip_install: str) -> list[str]:
         if self.gdal_requirement_txt is None:
             return []
+        find_links = (
+            '--find-links https://girder.github.io/large_image_wheels'
+        )
         if self.variant.is_strict:
+            strict_req_command = (
+                "sed 's/>=/==/' \"requirements/gdal.txt\" "
+                '> "requirements/gdal-strict.txt"'
+            )
             return [
-                'sed \'s/>=/==/\' "requirements/gdal.txt" > "requirements/gdal-strict.txt"',
-                f'{pip_install} -r requirements/gdal-strict.txt',
+                strict_req_command,
+                f'{pip_install} {find_links} -r requirements/gdal-strict.txt',
             ]
-        return [f'{pip_install} -r requirements/gdal.txt']
+        return [f'{pip_install} {find_links} -r requirements/gdal.txt']
+
 
 
 @dataclass(frozen=True)
@@ -262,6 +270,34 @@ def _matches_any_rule(
     return False
 
 
+def _apply_prerelease_python_policy(
+    self: Any, cases: list[ArtifactTestCase]
+) -> list[ArtifactTestCase]:
+    """Apply the configured policy for unreleased CPython test cases."""
+    from xcookie.constants import (
+        PrereleasePythonPolicy,
+        is_prerelease_python_version,
+    )
+
+    policy = PrereleasePythonPolicy(self.config['ci_prerelease_python_policy'])
+    if policy is PrereleasePythonPolicy.SKIP:
+        return [
+            case
+            for case in cases
+            if not is_prerelease_python_version(case.python_version)
+        ]
+    if policy is PrereleasePythonPolicy.ALLOW_FAILURE:
+        return [
+            replace(case, allow_failure=True)
+            if is_prerelease_python_version(case.python_version)
+            else case
+            for case in cases
+        ]
+    if policy is PrereleasePythonPolicy.STRICT:
+        return cases
+    raise AssertionError(f'Unhandled prerelease python policy: {policy!r}')
+
+
 def _dedupe_cases(cases: list[ArtifactTestCase]) -> list[ArtifactTestCase]:
     seen: set[str] = set()
     deduped = []
@@ -346,6 +382,8 @@ def make_artifact_test_cases(
         duplicates = ub.find_duplicates(map(lambda c: c.key, cases))
         assert not duplicates, duplicates
 
+    cases = _apply_prerelease_python_policy(self, cases)
+
     if provider == 'github':
         ci_blocklist = Yaml.coerce(self.config.ci_blocklist)
         compiled_blocklist = _compile_ci_rules(ci_blocklist)
@@ -412,7 +450,7 @@ def make_purepy_workflow_plan(
         sdist_job_key=sdist_job_key,
         wheel_build_job_key='build_purepy_wheels'
         if provider == 'github'
-        else 'build/{swenv_key}',
+        else 'build/wheel',
         artifact_test_job_key='test_purepy_wheels'
         if provider == 'github'
         else 'test/{variant_key}/{swenv_key}',
@@ -594,6 +632,11 @@ def make_release_plan(
             build_job_keys.append('build_purepy_wheels')
         else:
             build_job_keys.append('build_binpy_wheels')
+        build_job_keys.extend(
+            artifact.job_key
+            for artifact in ci_plan.load_ci_artifacts(self.config)
+            if artifact.release
+        )
 
         deploy_job_keys = []
         if deploy:
@@ -603,7 +646,7 @@ def make_release_plan(
         if package_kind == 'purepy':
             if 'nosrcdist' not in self.tags:
                 build_job_keys.append('build/sdist')
-            build_job_keys.append('build/{swenv_key}')
+            build_job_keys.append('build/wheel')
         else:
             build_job_keys.append('build/{swenv_key}')
 
@@ -619,6 +662,14 @@ def make_release_plan(
             self.config.get('ci_gpg_secret_transport', 'direct_ci')
         )
 
+    artifact_globs = list(
+        make_release_artifact_globs(self, wheelhouse_dpath)
+    )
+    if provider == 'github' and any(
+        artifact.release for artifact in ci_plan.load_ci_artifacts(self.config)
+    ):
+        artifact_globs.append('release_artifacts/**/*')
+
     return ReleasePlan(
         provider=provider,
         package_kind=package_kind,
@@ -627,5 +678,5 @@ def make_release_plan(
         publish_targets=make_publish_targets(self, provider=provider),
         signing_transport=signing_transport,
         distribution_globs=make_distribution_globs(self, wheelhouse_dpath),
-        artifact_globs=make_release_artifact_globs(self, wheelhouse_dpath),
+        artifact_globs=tuple(artifact_globs),
     )

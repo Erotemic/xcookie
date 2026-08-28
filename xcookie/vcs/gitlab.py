@@ -31,7 +31,7 @@ class GitlabRemote:
 
         ipy
 
-        from xcookie.vcs_remotes import *  # NOQA
+        from xcookie.vcs.gitlab import *  # NOQA
         self = GitlabRemote('geowatch', 'computer-vision', 'https://gitlab.kitware.com')
 
     """
@@ -85,7 +85,7 @@ class GitlabRemote:
     def new_project(self):
         """
         Ignore:
-            from xcookie.vcs_remotes import *  # NOQA
+            from xcookie.vcs.gitlab import *  # NOQA
             url = 'https://gitlab.kitware.com'
             proj_name = 'kwimage_ext'
             proj_group = 'computer-vision'

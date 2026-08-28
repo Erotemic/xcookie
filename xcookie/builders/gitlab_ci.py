@@ -281,9 +281,10 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         """
     )
 
-    artifact_test_cases = ci_model.make_artifact_test_cases(
+    workflow_plan = ci_model.make_purepy_workflow_plan(
         self, plan=plan, provider='gitlab'
     )
+    artifact_test_cases = list(workflow_plan.artifact_test_cases)
     install_extras = plan.active_install_extras()
     test_templates: dict[str, Any] = {}
     for case in ci_model.unique_variant_cases(artifact_test_cases):
@@ -363,27 +364,30 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         body.update(jobs)
 
     if enable_wheel:
-        # Construct the explicit build / test job pairs from the shared
-        # provider-neutral artifact test cases.  GitLab still renders one job
-        # per case, while GitHub renders the same cases as matrix entries.
+        # Under xcookie's purepy contract the wheel is interpreter/platform
+        # independent, so build it once on the main Python image and reuse that
+        # artifact across the full interpreter test matrix.  The tests still
+        # run once per case, preserving compatibility coverage without
+        # rebuilding identical wheels.
         jobs = {}
-        build_job_names = set()
-        for case in artifact_test_cases:
-            cpver = case.gitlab_cpver
-            if cpver not in KNOWN_CPYTHON_DOCKER_IMAGES:
-                continue
-            swenv_key = case.gitlab_swenv_key
-            build_name = f'build/{swenv_key}'
-            if build_name not in build_job_names:
-                build_names.append(build_name)
-                build_job = {
-                    'image': KNOWN_CPYTHON_DOCKER_IMAGES[cpver],
-                }
-                build_job = CommentedMap(build_job)
-                _add_yaml_merge(build_job, build_wheel_template)
-                jobs[build_name] = build_job
-                build_job_names.add(build_name)
+        supported_artifact_test_cases = [
+            case
+            for case in artifact_test_cases
+            if case.gitlab_cpver in KNOWN_CPYTHON_DOCKER_IMAGES
+        ]
+        build_name = workflow_plan.wheel_build_job_key
+        if supported_artifact_test_cases:
+            build_names.append(build_name)
+            build_job = {
+                'image': main_image,
+            }
+            build_job = CommentedMap(build_job)
+            _add_yaml_merge(build_job, build_wheel_template)
+            jobs[build_name] = build_job
 
+        for case in supported_artifact_test_cases:
+            cpver = case.gitlab_cpver
+            swenv_key = case.gitlab_swenv_key
             common_test_template = test_templates[case.variant.key]
             test_name = f'test/{case.variant.key}/{swenv_key}'
             test_job = {
@@ -394,6 +398,8 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
             }
             test_job = CommentedMap(test_job)
             _add_yaml_merge(test_job, common_test_template)
+            if case.allow_failure:
+                test_job['allow_failure'] = True
             jobs[test_name] = test_job
         body.update(jobs)
 
@@ -678,6 +684,8 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
             }
             build_job = CommentedMap(build_job)
             _add_yaml_merge(build_job, cibuildwheel_template)
+            if case.allow_failure:
+                build_job['allow_failure'] = True
             jobs[build_name] = build_job
             build_names.append(build_name)
             build_job_names.add(build_name)
@@ -693,6 +701,8 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
         }
         test_job = CommentedMap(test_job)
         _add_yaml_merge(test_job, common_test_template)
+        if case.allow_failure:
+            test_job['allow_failure'] = True
         if extra_environs:
             test_job['variables'] = extra_environs.copy()
         jobs[test_name] = test_job

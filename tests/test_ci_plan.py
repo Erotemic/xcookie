@@ -10,6 +10,7 @@ def _make_applier(
     min_python=None,
     use_setup_py=False,
     ci_allow_failure=None,
+    ci_prerelease_python_policy=None,
 ):
     if tags is None:
         tags = ['github', 'purepy']
@@ -19,8 +20,6 @@ def _make_applier(
         mod_name='demo_pkg',
         tags=tags,
         interactive=False,
-        rotate_secrets=False,
-        refresh_docs=False,
         test_variants=[
             'minimal-loose',
             'full-loose',
@@ -37,6 +36,8 @@ def _make_applier(
     cfg['use_setup_py'] = use_setup_py
     if ci_allow_failure is not None:
         cfg['ci_allow_failure'] = ci_allow_failure
+    if ci_prerelease_python_policy is not None:
+        cfg['ci_prerelease_python_policy'] = ci_prerelease_python_policy
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -196,6 +197,21 @@ def test_gitlab_binpy_workflow_plan_has_template_job_keys(tmp_path):
     assert workflow_plan.artifact_test_cases
 
 
+def test_gitlab_purepy_workflow_plan_builds_one_reusable_wheel(tmp_path):
+    self = _make_applier(tmp_path, tags=['gitlab', 'purepy'])
+    plan = ci_plan.make_ci_plan(self)
+    workflow_plan = ci_model.make_test_workflow_plan(
+        self, plan=plan, provider='gitlab'
+    )
+    assert workflow_plan.package_kind == 'purepy'
+    assert workflow_plan.sdist_job_key == 'build/sdist'
+    assert workflow_plan.wheel_build_job_key == 'build/wheel'
+    assert (
+        workflow_plan.artifact_test_job_key == 'test/{variant_key}/{swenv_key}'
+    )
+    assert workflow_plan.artifact_test_cases
+
+
 def test_auto_setup_py_mode_preserves_existing_legacy_ci_contract(tmp_path):
     (tmp_path / '.git').mkdir()
     (tmp_path / 'setup.py').write_text('from setuptools import setup\n')
@@ -228,6 +244,7 @@ def test_github_allow_failure_rules_mark_matching_cases_experimental(tmp_path):
         tmp_path,
         tags=['github', 'purepy'],
         ci_allow_failure=[{'python-version': '3.15'}],
+        ci_prerelease_python_policy='strict',
     )
     cases = ci_model.make_artifact_test_cases(self, provider='github')
     prerelease_cases = [
@@ -242,3 +259,41 @@ def test_github_allow_failure_rules_mark_matching_cases_experimental(tmp_path):
         case.github_matrix_item()['experimental'] is True
         for case in prerelease_cases
     )
+
+
+def test_prerelease_python_policy_defaults_to_allow_failure(tmp_path):
+    self = _make_applier(tmp_path, tags=['github', 'purepy'])
+    cases = ci_model.make_artifact_test_cases(self, provider='github')
+    prerelease_cases = [
+        case for case in cases if case.python_version == '3.15'
+    ]
+    stable_cases = [case for case in cases if case.python_version != '3.15']
+    assert prerelease_cases
+    assert stable_cases
+    assert all(case.allow_failure for case in prerelease_cases)
+    assert all(not case.allow_failure for case in stable_cases)
+
+
+def test_prerelease_python_policy_strict_is_blocking(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        ci_prerelease_python_policy='strict',
+    )
+    cases = ci_model.make_artifact_test_cases(self, provider='github')
+    prerelease_cases = [
+        case for case in cases if case.python_version == '3.15'
+    ]
+    assert prerelease_cases
+    assert all(not case.allow_failure for case in prerelease_cases)
+
+
+def test_prerelease_python_policy_skip_omits_prerelease_cases(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        ci_prerelease_python_policy='skip',
+    )
+    cases = ci_model.make_artifact_test_cases(self, provider='github')
+    assert cases
+    assert all(case.python_version != '3.15' for case in cases)

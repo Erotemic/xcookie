@@ -18,10 +18,6 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
-[options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
-exclude-newer-span = "P1D"
-
 [[package]]
 name = "alabaster"
 version = "1.0.0"
@@ -479,11 +475,11 @@ wheels = [
 
 [[package]]
 name = "kwconf"
-version = "0.10.0"
+version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a8/60/8c9001edf2683355343806382c2606890c3ccb6373ee17b821e7f1b3141e/kwconf-0.10.0.tar.gz", hash = "sha256:eb4bd0586fc2fd015d5738d65231163a81840815235fc588d13dcc139a843239", size = 118990, upload-time = "2026-06-19T17:39:19.744Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/77/20ce9cf65bc20e769db9a506e72e291f7a38ee766393110858a15e93ea1b/kwconf-0.11.0.tar.gz", hash = "sha256:cd8e9192a3c0e54750368980f9bf6b02676f75b76ac3830b656e977cc55f988f", size = 172077, upload-time = "2026-08-07T15:25:34.385Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/84/19e8037d5d99896a48bf94d85199edba4f331c92a82a2d3ccbb35c431ebd/kwconf-0.10.0-py3-none-any.whl", hash = "sha256:f4ef2dd871748acdf565de61bfbcca028b9736de37ff2d6483757a114bdbde49", size = 92221, upload-time = "2026-06-19T17:39:17.929Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/7a/4b4a1c503cc621eb2256e5d18385ccfb546f536008cdb4db0189426f5e77/kwconf-0.11.0-py3-none-any.whl", hash = "sha256:4691afdf7173ca0d42302a2cf17910917ac3bd02729e0b2f2cb2aa1e3b2ee18b", size = 110488, upload-time = "2026-08-07T15:25:32.964Z" },
 ]
 
 [[package]]
@@ -1684,7 +1680,7 @@ requires-dist = [
     { name = "coverage", marker = "python_full_version >= '3.14' and python_full_version < '4' and extra == 'tests'", specifier = ">=7.10.0" },
     { name = "docutils", marker = "extra == 'docs'", specifier = ">=0.20.1" },
     { name = "git-python", specifier = ">=1.0.0" },
-    { name = "kwconf", specifier = ">=0.10.0" },
+    { name = "kwconf", specifier = ">=0.11.0" },
     { name = "kwutil", specifier = ">=0.3.8" },
     { name = "myst-parser", specifier = ">=0.18.0" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=0.18.0" },

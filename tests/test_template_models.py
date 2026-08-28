@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from xcookie.resolved_config import ResolvedXCookieConfig
 from xcookie.template_registry import TemplateContext, TemplateInfo
 from xcookie.staging import apply_template_context
@@ -83,8 +85,6 @@ def test_resolved_config_apply_to_config(tmp_path):
         'tags': 'github,purepy',
         'os': 'all',
         'is_new': 'auto',
-        'rotate_secrets': 'auto',
-        'refresh_docs': 'auto',
         'author': 'Example Author',
         'author_email': 'author@example.com',
         'license': None,
@@ -124,8 +124,6 @@ def _resolve_pypy(
         'tags': tags,
         'os': 'linux',
         'is_new': 'auto',
-        'rotate_secrets': 'auto',
-        'refresh_docs': 'auto',
         'author': 'Example Author',
         'author_email': 'author@example.com',
         'license': None,
@@ -187,8 +185,6 @@ def _base_resolved_config(tmp_path, **overrides):
         'tags': 'github,purepy',
         'os': 'linux',
         'is_new': 'auto',
-        'rotate_secrets': False,
-        'refresh_docs': False,
         'author': 'Example Author',
         'author_email': 'author@example.com',
         'license': None,
@@ -235,3 +231,55 @@ def test_use_setup_py_auto_new_repo_defaults_to_pep621(tmp_path):
         _base_resolved_config(tmp_path)
     )
     assert resolved.use_setup_py is False
+
+
+
+def test_template_registry_uses_explicit_basic_builders(tmp_path):
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    config = XCookieConfig(
+        repodir=tmp_path,
+        repo_name='demo',
+        mod_name='demo',
+        tags=['github', 'purepy'],
+        interactive=False,
+        use_vcs=False,
+        author='Example Author',
+        author_email='author@example.com',
+        version='2.3.4',
+        url='https://github.com/example/demo',
+    )
+    applier = TemplateApplier(config)
+    applier._build_template_registry()
+    infos = {
+        Path(info.fname).as_posix(): info for info in applier.template_infos
+    }
+    assert infos['CHANGELOG.md'].builder is not None
+    assert infos['tests/test_import.py'].builder is not None
+    assert infos['demo/__init__.py'].builder is not None
+    assert not any(info.source == 'dynamic' for info in applier.template_infos)
+
+
+def test_explicit_builder_is_staged(tmp_path):
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    config = XCookieConfig(
+        repodir=tmp_path,
+        repo_name='demo',
+        mod_name='demo',
+        tags=['github', 'purepy'],
+        interactive=False,
+        use_vcs=False,
+        author='Example Author',
+        author_email='author@example.com',
+        version='2.3.4',
+        url='https://github.com/example/demo',
+    )
+    applier = TemplateApplier(config)
+    applier._build_template_registry()
+    info = next(
+        info for info in applier.template_infos if info.fname == 'CHANGELOG.md'
+    )
+    staged = applier._stage_file(info)
+    text = staged.stage_fpath.read_text()
+    assert '## Version 2.3.4 - Unreleased' in text

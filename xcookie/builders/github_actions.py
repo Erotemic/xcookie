@@ -14,7 +14,7 @@ import ubelt as ub
 
 from xcookie.builders import ci_model, common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
-from xcookie.builders.ci_plan import CIPlan
+from xcookie.builders.ci_plan import CIArtifact, CIPlan
 from xcookie.util_yaml import Yaml
 
 # Type alias for json / yaml data structure
@@ -82,15 +82,26 @@ class GitHubActionsRenderer:
             self.applier, self.plan
         )
 
+        release_artifacts = tuple(
+            artifact for artifact in self.plan.ci_artifacts if artifact.release
+        )
         if self.applier.config['deploy']:
             jobs['test_deploy'] = build_deploy(
-                self.applier, mode='test', needs=release_build_needs
+                self.applier,
+                mode='test',
+                needs=release_build_needs,
+                release_artifacts=release_artifacts,
             )
             jobs['live_deploy'] = build_deploy(
-                self.applier, mode='live', needs=release_build_needs
+                self.applier,
+                mode='live',
+                needs=release_build_needs,
+                release_artifacts=release_artifacts,
             )
             jobs['release'] = build_github_release(
-                self.applier, needs=['live_deploy']
+                self.applier,
+                needs=['live_deploy'],
+                release_artifacts=release_artifacts,
             )
 
         # Only refs that can actually deploy trigger the release workflow:
@@ -767,6 +778,73 @@ def _build_github_footer(self):
     return footer
 
 
+def build_ci_artifact_job(
+    self,
+    artifact: CIArtifact,
+    *,
+    release: bool = False,
+) -> JSON_MutableMapping:
+    """Render one project-owned artifact build job."""
+    steps: list[JSON_Mapping] = [Actions.checkout()]
+    if artifact.python_version is not None:
+        steps.append(
+            Actions.setup_python(
+                {
+                    'with': {
+                        'python-version': artifact.python_version,
+                    }
+                }
+            )
+        )
+    if artifact.setup_commands:
+        steps.append(
+            {
+                'name': f'Set up {artifact.name} build',
+                'shell': artifact.shell,
+                'run': '\n'.join(artifact.setup_commands),
+            }
+        )
+    steps.append(
+        {
+            'name': f'Build {artifact.name}',
+            'shell': artifact.shell,
+            'run': '\n'.join(artifact.build_commands),
+        }
+    )
+    if artifact.post_build_commands:
+        steps.append(
+            {
+                'name': f'Inspect {artifact.name} outputs',
+                'shell': artifact.shell,
+                'run': '\n'.join(artifact.post_build_commands),
+            }
+        )
+
+    paths = artifact.release_paths if release else artifact.artifact_paths
+    artifact_name = (
+        artifact.release_artifact_name if release else artifact.artifact_name
+    )
+    steps.append(
+        Actions.upload_artifact(
+            {
+                'name': f'Upload {artifact.name} artifact',
+                'with': {
+                    'name': artifact_name,
+                    'if-no-files-found': 'error',
+                    'path': '\n'.join(paths),
+                },
+            }
+        )
+    )
+    return Yaml.Dict(
+        {
+            'name': f'Build {artifact.name}',
+            'runs-on': artifact.runner,
+            'steps': steps,
+        }
+    )
+
+
 def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
     if plan is None:
         plan = common_ci.make_ci_plan(self)
@@ -904,6 +982,12 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
     else:
         raise Exception('Need to specify binpy or purepy in tags')
 
+    for artifact in plan.ci_artifacts:
+        if artifact.test:
+            jobs[artifact.job_key] = build_ci_artifact_job(
+                self, artifact, release=False
+            )
+
     return name, jobs
 
 
@@ -978,6 +1062,13 @@ def _collect_release_jobs(self, plan: CIPlan | None = None):
         release_build_needs.append('build_binpy_wheels')
     else:
         raise Exception('Need to specify binpy or purepy in tags')
+
+    for artifact in plan.ci_artifacts:
+        if artifact.release:
+            jobs[artifact.job_key] = build_ci_artifact_job(
+                self, artifact, release=True
+            )
+            release_build_needs.append(artifact.job_key)
 
     return name, jobs, release_build_needs
 
@@ -2099,7 +2190,12 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     return job
 
 
-def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
+def build_deploy(
+    self,
+    mode='live',
+    needs=None,
+    release_artifacts: Sequence[CIArtifact] = (),
+) -> dict[str, JSON]:
     """
     CommandLine:
         xdoctest -m /home/joncrall/code/xcookie/xcookie/builders/github_actions.py build_deploy
@@ -2213,6 +2309,7 @@ def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
     # single source of truth.
     wheelhouse_dpath = 'wheelhouse'
     publish_dist_dpath = 'publish_wheelhouse'
+    release_artifacts_dpath = 'release_artifacts'
 
     artifact_globs = [
         f'{wheelhouse_dpath}/*.whl',
@@ -2304,6 +2401,28 @@ def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
             .split('\n')
         )
 
+        if release_artifacts:
+            run.extend(
+                [
+                    'EXTRA_DIST_PATHS=()',
+                    'EXTRA_SIGNATURE_PATHS=()',
+                    f'if [[ -d {release_artifacts_dpath} ]]; then',
+                    "    while IFS= read -r -d '' EXTRA_PATH",
+                    '    do',
+                    '        EXTRA_DIST_PATHS+=("$EXTRA_PATH")',
+                    f'    done < <(find {release_artifacts_dpath} -type f -print0)',
+                    'fi',
+                    'for EXTRA_PATH in "${EXTRA_DIST_PATHS[@]}"',
+                    'do',
+                    '    echo "------"',
+                    '    echo "EXTRA_PATH = $EXTRA_PATH"',
+                    '    $GPG_SIGN_CMD --output "$EXTRA_PATH.asc" "$EXTRA_PATH"',
+                    '    $GPG_EXECUTABLE --verify "$EXTRA_PATH.asc" "$EXTRA_PATH"',
+                    '    EXTRA_SIGNATURE_PATHS+=("$EXTRA_PATH.asc")',
+                    'done',
+                ]
+            )
+
         artifact_globs.append(f'{wheelhouse_dpath}/*.asc')
 
         enable_otc = True
@@ -2311,9 +2430,18 @@ def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
             run += [
                 f'{self.SYSTEM_PIP_INSTALL} opentimestamps-client',
                 f'ots stamp {dist_pattern} {wheelhouse_dpath}/*.asc',
-                'ls -la wheelhouse',
             ]
+            if release_artifacts:
+                run.extend(
+                    [
+                        'if (( ${#EXTRA_DIST_PATHS[@]} )); then',
+                        '    ots stamp "${EXTRA_DIST_PATHS[@]}" "${EXTRA_SIGNATURE_PATHS[@]}"',
+                        'fi',
+                    ]
+                )
+            run.append('ls -la wheelhouse')
             artifact_globs.append(f'{wheelhouse_dpath}/*.ots')
+
 
         if self.config['deploy_pypi'] and not use_trusted_publishing:
             run += [
@@ -2362,11 +2490,28 @@ def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
         ),
     ]
     deploy_steps += sdist_wheel_steps
+    for artifact in release_artifacts:
+        deploy_steps.append(
+            Actions.download_artifact(
+                {
+                    'name': f'Download {artifact.name}',
+                    'with': {
+                        'name': artifact.release_artifact_name,
+                        'path': f'{release_artifacts_dpath}/{artifact.key}',
+                    },
+                }
+            )
+        )
+    show_commands = [f'ls -la {wheelhouse_dpath}']
+    if release_artifacts:
+        show_commands.append(
+            f'find {release_artifacts_dpath} -maxdepth 3 -type f -print'
+        )
     deploy_steps += [
         {
             'name': 'Show files to upload',
             'shell': 'bash',
-            'run': f'ls -la {wheelhouse_dpath}',
+            'run': '\n'.join(show_commands),
         }
     ]
 
@@ -2433,6 +2578,19 @@ def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
             }
         )
     ]
+    if release_artifacts:
+        deploy_steps.append(
+            Actions.upload_artifact(
+                {
+                    'name': 'Upload extra release artifacts',
+                    'with': {
+                        'name': 'deploy_extra_artifacts',
+                        'if-no-files-found': 'error',
+                        'path': f'{release_artifacts_dpath}/**/*',
+                    },
+                }
+            )
+        )
 
     job: dict[str, JSON] = {
         'name': f'Deploy {mode.capitalize()}',
@@ -2478,7 +2636,11 @@ def build_deploy(self, mode='live', needs=None) -> dict[str, JSON]:
 #     return job
 
 
-def build_github_release(self, needs=None):
+def build_github_release(
+    self,
+    needs=None,
+    release_artifacts: Sequence[CIArtifact] = (),
+):
     """
     References:
         https://github.com/marketplace/actions/create-a-release-in-a-github-action
@@ -2502,6 +2664,8 @@ def build_github_release(self, needs=None):
         f'{wheelhouse_dpath}/*.zip',
         f'{wheelhouse_dpath}/*.tar.gz',
     ]
+    if release_artifacts:
+        artifact_globs.append('release_artifacts/**/*')
 
     release_meta_action = {
         'name': 'Resolve Release Tag',
@@ -2582,10 +2746,30 @@ def build_github_release(self, needs=None):
                     'with': {'name': 'deploy_artifacts', 'path': 'wheelhouse'},
                 }
             ),
+            *(
+                [
+                    Actions.download_artifact(
+                        {
+                            'name': 'Download extra release artifacts',
+                            'with': {
+                                'name': 'deploy_extra_artifacts',
+                                'path': 'release_artifacts',
+                            },
+                        }
+                    )
+                ]
+                if release_artifacts
+                else []
+            ),
             {
                 'name': 'Show files to release',
                 'shell': 'bash',
-                'run': 'ls -la wheelhouse',
+                'run': (
+                    'ls -la wheelhouse\n'
+                    'find release_artifacts -maxdepth 3 -type f -print'
+                    if release_artifacts
+                    else 'ls -la wheelhouse'
+                ),
             },
             write_release_notes_action,
             release_meta_action,

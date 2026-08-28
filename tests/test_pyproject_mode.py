@@ -16,7 +16,6 @@ def test_use_setup_py_false_generates_pep621(tmp_path) -> None:
         mod_name='demo_mod',
         repo_name='demo_mod',
         tags=['github', 'purepy'],
-        rotate_secrets=False,
         init_new_remotes=False,
         interactive=False,
         use_setup_py=False,
@@ -35,6 +34,7 @@ def test_use_setup_py_false_generates_pep621(tmp_path) -> None:
     project_block = pyproject_data['project']
     assert project_block['name'] == config['pkg_name']
     assert 'dependencies' in project_block['dynamic']
+    assert 'readme' in project_block['dynamic']
     assert (
         pyproject_data['build-system']['build-backend']
         == 'setuptools.build_meta'
@@ -63,7 +63,6 @@ def test_typed_package_data_uses_inline_annotations(tmp_path) -> None:
         repo_name='demo_mod',
         tags=['github', 'purepy'],
         typed=True,
-        rotate_secrets=False,
         init_new_remotes=False,
         interactive=False,
         use_setup_py=False,
@@ -102,7 +101,6 @@ def test_all_extra_aggregates_runtime_optional_requirements(tmp_path) -> None:
         mod_name='demo_mod',
         repo_name='demo_mod',
         tags=['github', 'purepy'],
-        rotate_secrets=False,
         init_new_remotes=False,
         interactive=False,
         use_setup_py=False,
@@ -193,7 +191,6 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -211,7 +208,10 @@ def test_existing_pyproject_metadata_is_inferred_and_preserved(
     pyproject_data = toml.loads(pyproject_text)
 
     assert pyproject_data['project']['authors'][0]['name'] == 'Existing Author'
-    assert pyproject_data['project']['dynamic'] == ['version']
+    assert set(pyproject_data['project']['dynamic']) == {
+        'readme',
+        'version',
+    }
     assert pyproject_data['project']['dependencies'] == [
         'package-a>=1.0',
         'package-b>=2.0',
@@ -285,7 +285,6 @@ def test_pyproject_requirements_mode_preserves_project_dependencies(
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -314,7 +313,10 @@ def test_pyproject_requirements_mode_preserves_project_dependencies(
         'coverage>=7.0',
         'pytest>=8.0',
     ]
-    assert project_block['dynamic'] == ['version']
+    assert set(project_block['dynamic']) == {
+        'readme',
+        'version',
+    }
     assert 'dependencies' not in pyproject_data['tool']['setuptools']['dynamic']
     assert (
         'optional-dependencies'
@@ -359,7 +361,6 @@ def test_markdown_readme_is_preserved_and_reflected_in_metadata(
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -390,6 +391,54 @@ def test_markdown_readme_is_preserved_and_reflected_in_metadata(
     setup_text = applier.build_setup()
     assert 'get_readme_fpath()' in setup_text
     assert 'text/markdown' in setup_text
+
+
+def test_static_project_readme_is_preserved(tmp_path) -> None:
+    """Preserve a static PEP 621 readme instead of duplicating it."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'src' / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (repodir / 'README.md').write_text('# Demo\n')
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-pkg',
+                    'readme': 'README.md',
+                    'version': '1.2.3',
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'rel_mod_parent_dpath': 'src',
+                    }
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+    project = pyproject_data['project']
+    assert project['readme'] == 'README.md'
+    assert 'readme' not in project['dynamic']
+    assert 'readme' not in pyproject_data['tool']['setuptools']['dynamic']
 
 
 def test_xcookie_tags_are_not_written_as_project_keywords(tmp_path) -> None:
@@ -429,7 +478,6 @@ def test_xcookie_tags_are_not_written_as_project_keywords(tmp_path) -> None:
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -495,7 +543,6 @@ def test_sdist_install_step_omits_empty_extras_brackets(tmp_path) -> None:
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -566,7 +613,6 @@ def test_dynamic_pyproject_extras_are_available_to_ci(tmp_path) -> None:
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -605,7 +651,6 @@ def test_sdist_install_step_uses_tests_extra_when_available(tmp_path) -> None:
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -639,7 +684,6 @@ def test_test_matrix_install_extras_are_filtered_to_existing(tmp_path) -> None:
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -677,7 +721,6 @@ def test_gitlab_test_matrix_install_extras_are_filtered_to_existing(
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -713,7 +756,6 @@ def test_wheel_install_command_omits_empty_extra_brackets(tmp_path) -> None:
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -781,7 +823,6 @@ def test_legacy_comma_author_metadata_generates_valid_files(tmp_path) -> None:
         argv=False,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -832,12 +873,9 @@ def test_xcookie_help_does_not_emit_scriptconfig_transition_warnings() -> None:
     assert 'description' not in proc.stderr
 
 
-def test_uv_exclude_newer_is_stamped_on_fresh_repo(tmp_path) -> None:
-    """A fresh uv-using repo should get a relative [tool.uv] exclude-newer."""
-    from xcookie.builders.pyproject import (
-        DEFAULT_UV_EXCLUDE_NEWER,
-        build_pyproject,
-    )
+def test_uv_exclude_newer_is_not_generated(tmp_path) -> None:
+    """xcookie should leave uv freshness policy to the repository owner."""
+    from xcookie.builders.pyproject import build_pyproject
     from xcookie.main import TemplateApplier, XCookieConfig
 
     repodir = tmp_path / 'demo'
@@ -847,7 +885,6 @@ def test_uv_exclude_newer_is_stamped_on_fresh_repo(tmp_path) -> None:
         mod_name='demo_mod',
         repo_name='demo_mod',
         tags=['github', 'purepy'],
-        rotate_secrets=False,
         init_new_remotes=False,
         interactive=False,
         use_setup_py=False,
@@ -861,22 +898,12 @@ def test_uv_exclude_newer_is_stamped_on_fresh_repo(tmp_path) -> None:
         if isinstance(pyproject_text, str)
         else pyproject_text
     )
-    # The default is a relative window so the value does not go stale the
-    # way a hard-coded absolute date would.
-    assert pyproject_data['tool']['uv']['exclude-newer'] == (
-        DEFAULT_UV_EXCLUDE_NEWER
-    )
-    # ``toml.dumps`` cannot emit comments, so the supply-chain rationale is
-    # re-injected as a comment above the pin and the file ends with a newline.
-    assert (
-        '# Supply-chain guard: ignore packages published too recently.'
-        in pyproject_text
-    )
-    assert pyproject_text.endswith('\n')
+    assert 'uv' not in pyproject_data.get('tool', {})
+    assert 'exclude-newer' not in pyproject_text
 
 
-def test_uv_exclude_newer_preserves_existing_value(tmp_path) -> None:
-    """Regen must not bump a user's chosen exclude-newer date."""
+def test_uv_exclude_newer_user_value_is_preserved(tmp_path) -> None:
+    """Existing user-owned [tool.uv] settings should survive regeneration."""
     from xcookie.builders.pyproject import build_pyproject
     from xcookie.main import TemplateApplier, XCookieConfig
 
@@ -901,7 +928,6 @@ def test_uv_exclude_newer_preserves_existing_value(tmp_path) -> None:
         mod_name='demo_mod',
         repo_name='demo_mod',
         tags=['github', 'purepy'],
-        rotate_secrets=False,
         init_new_remotes=False,
         interactive=False,
         use_setup_py=False,
@@ -916,36 +942,6 @@ def test_uv_exclude_newer_preserves_existing_value(tmp_path) -> None:
         else pyproject_text
     )
     assert pyproject_data['tool']['uv']['exclude-newer'] == '2024-01-15'
-
-
-def test_uv_exclude_newer_disabled_by_config(tmp_path) -> None:
-    """Setting uv_exclude_newer=False should omit the setting entirely."""
-    from xcookie.builders.pyproject import build_pyproject
-    from xcookie.main import TemplateApplier, XCookieConfig
-
-    repodir = tmp_path / 'demo'
-    repodir.mkdir()
-    config = XCookieConfig(
-        repodir=repodir,
-        mod_name='demo_mod',
-        repo_name='demo_mod',
-        tags=['github', 'purepy'],
-        rotate_secrets=False,
-        init_new_remotes=False,
-        interactive=False,
-        use_setup_py=False,
-        use_vcs=False,
-        use_uv=True,
-        uv_exclude_newer=False,
-    )
-    applier = TemplateApplier(config)
-    pyproject_text = build_pyproject(applier)
-    pyproject_data = (
-        toml.loads(pyproject_text)
-        if isinstance(pyproject_text, str)
-        else pyproject_text
-    )
-    assert 'exclude-newer' not in pyproject_data.get('tool', {}).get('uv', {})
 
 
 def test_explicit_packages_list_is_converted_to_find_dict(tmp_path) -> None:
@@ -989,7 +985,6 @@ def test_explicit_packages_list_is_converted_to_find_dict(tmp_path) -> None:
         mod_name='demo_mod',
         repo_name='demo_mod',
         tags=['github', 'purepy'],
-        rotate_secrets=False,
         init_new_remotes=False,
         interactive=False,
         use_setup_py=False,
@@ -1010,3 +1005,273 @@ def test_explicit_packages_list_is_converted_to_find_dict(tmp_path) -> None:
     assert 'find' in packages
     assert 'where' in packages['find']
     assert 'include' in packages['find']
+
+
+def test_gdal_numpy2_compatible_floor_for_modern_python(tmp_path) -> None:
+    """Avoid old GDAL wheels built against the NumPy 1 C API."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['gitlab', 'purepy', 'gdal'],
+        init_new_remotes=False,
+        interactive=False,
+        min_python='3.11',
+        max_python='3.13',
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+        use_vcs=False,
+    )
+    applier = TemplateApplier(config)
+    text = applier.build_gdal_requirements_txt()
+
+    assert (
+        "GDAL>=3.10.0 ; python_version < '3.14' "
+        "and python_version >= '3.11'"
+    ) in text
+    assert 'GDAL>=3.5.2' not in text
+    assert 'GDAL>=3.7.2' not in text
+
+
+def test_gdal_dynamic_metadata_uses_pep508_only_file(tmp_path) -> None:
+    """Keep GDAL requirement metadata PEP 508-only."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['gitlab', 'purepy', 'gdal'],
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+        use_vcs=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+    optional = pyproject_data['tool']['setuptools']['dynamic'][
+        'optional-dependencies'
+    ]
+    assert optional['gdal']['file'] == ['requirements/gdal.txt']
+    assert 'requirements/gdal.txt' in optional['all']['file']
+
+    pip_text = applier.build_gdal_requirements_txt()
+    assert '--find-links' not in pip_text
+    assert 'GDAL' in pip_text
+
+
+def test_dynamic_metadata_splits_pip_requirements(tmp_path) -> None:
+    """Split pip composition into metadata-safe setuptools file lists."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    reqdir = repodir / 'requirements'
+    reqdir.mkdir(parents=True)
+    (reqdir / 'base.txt').write_text('ubelt>=1.3.0\n')
+    (reqdir / 'docs-core.txt').write_text('sphinx>=5.0.1\n')
+    (reqdir / 'docs.txt').write_text(
+        'sphinx-autobuild>=2021.3.14\n'
+        '-r docs-core.txt\n'
+        '-r base.txt\n'
+    )
+    (reqdir / 'runtime.txt').write_text(
+        '--extra-index-url https://example.com/simple\n'
+        '-r base.txt\n'
+        'packaging>=21.0\n'
+    )
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='demo_mod',
+        repo_name='demo_mod',
+        tags=['github', 'purepy'],
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+        use_vcs=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+    dynamic = pyproject_data['tool']['setuptools']['dynamic']
+    assert dynamic['dependencies']['file'] == [
+        'requirements/runtime-metadata.txt',
+        'requirements/base.txt',
+    ]
+    assert dynamic['optional-dependencies']['docs']['file'] == [
+        'requirements/docs-metadata.txt',
+        'requirements/docs-core.txt',
+        'requirements/base.txt',
+    ]
+    assert 'docs-core' not in dynamic['optional-dependencies']
+    assert 'base' not in dynamic['optional-dependencies']
+    metadata_text = (
+        applier.staging_dpath / 'requirements/runtime-metadata.txt'
+    ).read_text()
+    assert 'ubelt>=1.3.0' not in metadata_text
+    assert 'packaging>=21.0' in metadata_text
+    assert '--extra-index-url' not in metadata_text
+    assert '-r base.txt' not in metadata_text
+
+    docs_metadata_text = (
+        applier.staging_dpath / 'requirements/docs-metadata.txt'
+    ).read_text()
+    assert 'sphinx-autobuild>=2021.3.14' in docs_metadata_text
+    assert 'sphinx>=5.0.1' not in docs_metadata_text
+    assert 'ubelt>=1.3.0' not in docs_metadata_text
+    assert '-r ' not in docs_metadata_text
+
+
+def test_existing_setuptools_package_data_is_merged(tmp_path) -> None:
+    """Generated defaults must not erase project-specific package data."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '1.0.0'\n")
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-mod',
+                    'dynamic': ['version'],
+                },
+                'tool': {
+                    'xcookie': {
+                        'mod_name': 'demo_mod',
+                        'repo_name': 'demo_mod',
+                        'typed': True,
+                        'use_setup_py': False,
+                        'use_pyproject_requirements': False,
+                    },
+                    'setuptools': {
+                        'package-data': {
+                            'demo_mod': ['coco_schema.json'],
+                        }
+                    },
+                },
+            }
+        )
+    )
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+    data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
+    package_data = data['tool']['setuptools']['package-data']
+    assert package_data['demo_mod'] == ['coco_schema.json', 'py.typed']
+
+
+def test_dynamic_comments_only_extra_and_all_order_are_preserved(tmp_path):
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    reqdir = repodir / 'requirements'
+    pkgdir.mkdir(parents=True)
+    reqdir.mkdir()
+    (pkgdir / '__init__.py').write_text("__version__ = '1.2.3'\n")
+    (reqdir / 'runtime.txt').write_text('ubelt>=1.3.3\n')
+    (reqdir / 'tests.txt').write_text('pytest>=8\n')
+    (reqdir / 'docs.txt').write_text('sphinx>=8\n')
+    (reqdir / 'optional.txt').write_text('# No optional requirements yet\n')
+    (reqdir / 'headless.txt').write_text('opencv-python-headless>=4.5.4.58\n')
+    (reqdir / 'graphics.txt').write_text('opencv-python>=4.5.4.58\n')
+    (reqdir / 'build.txt').write_text('build>=1\n')
+    all_files = [
+        'requirements/optional.txt',
+        'requirements/headless.txt',
+        'requirements/graphics.txt',
+        'requirements/build.txt',
+    ]
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo_mod',
+                    'description': 'Demo module',
+                    'requires-python': '>=3.10',
+                    'dynamic': [
+                        'dependencies',
+                        'optional-dependencies',
+                        'version',
+                    ],
+                },
+                'tool': {
+                    'xcookie': {
+                        'tags': ['github', 'purepy', 'cv2'],
+                        'mod_name': 'demo_mod',
+                        'repo_name': 'demo_mod',
+                        'description': 'Demo module',
+                        'min_python': '3.10',
+                        'os': ['linux', 'windows', 'osx'],
+                    },
+                    'setuptools': {
+                        'dynamic': {
+                            'dependencies': {
+                                'file': ['requirements/runtime.txt']
+                            },
+                            'optional-dependencies': {
+                                'all': {'file': all_files},
+                                'build': {
+                                    'file': ['requirements/build.txt']
+                                },
+                                'docs': {'file': ['requirements/docs.txt']},
+                                'graphics': {
+                                    'file': ['requirements/graphics.txt']
+                                },
+                                'headless': {
+                                    'file': ['requirements/headless.txt']
+                                },
+                                'optional': {
+                                    'file': ['requirements/optional.txt']
+                                },
+                                'tests': {'file': ['requirements/tests.txt']},
+                            },
+                        }
+                    },
+                },
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+    optional = pyproject_data['tool']['setuptools']['dynamic'][
+        'optional-dependencies'
+    ]
+
+    assert optional['optional']['file'] == ['requirements/optional.txt']
+    assert optional['all']['file'] == all_files

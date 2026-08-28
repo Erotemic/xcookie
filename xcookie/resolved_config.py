@@ -6,6 +6,9 @@ from typing import Any
 import ubelt as ub
 from packaging.version import parse as Version
 
+from xcookie.constants import PrereleasePythonPolicy
+from xcookie.requirements_layout import resolve_requirements_package
+
 
 @dataclass(frozen=True)
 class ResolvedXCookieConfig:
@@ -26,8 +29,6 @@ class ResolvedXCookieConfig:
     tags: tuple[str, ...]
     os: tuple[str, ...]
     is_new: bool
-    rotate_secrets: bool
-    refresh_docs: bool
     # Author metadata may be a single string or a list of names/emails.
     # It must round-trip unflattened: str() on a list produces its Python
     # repr, which leaks into generated files (e.g. invalid docs/conf.py).
@@ -39,8 +40,10 @@ class ResolvedXCookieConfig:
     supported_python_versions: tuple[str, ...]
     ci_cpython_versions: tuple[str, ...]
     ci_pypy_versions: tuple[str, ...]
+    ci_prerelease_python_policy: PrereleasePythonPolicy
     use_uv: bool
     use_setup_py: bool
+    requirements_package: str | None
 
     @classmethod
     def from_config(cls, config: Any) -> ResolvedXCookieConfig:
@@ -65,16 +68,6 @@ class ResolvedXCookieConfig:
         if is_new == 'auto':
             is_new = not (repodir / '.git').exists()
         is_new = bool(is_new)
-
-        rotate_secrets = config['rotate_secrets']
-        if rotate_secrets == 'auto':
-            rotate_secrets = is_new
-        rotate_secrets = bool(rotate_secrets)
-
-        refresh_docs = config['refresh_docs']
-        if refresh_docs == 'auto':
-            refresh_docs = is_new
-        refresh_docs = bool(refresh_docs)
 
         author = config['author']
         if author is None:
@@ -131,6 +124,10 @@ class ResolvedXCookieConfig:
             )
         ci_pypy_versions = _coerce_tuple(ci_pypy_versions)
 
+        ci_prerelease_python_policy = _coerce_ci_prerelease_python_policy(
+            config.get('ci_prerelease_python_policy', 'allow-failure')
+        )
+
         use_uv = config['use_uv']
         if use_uv == 'auto':
             # Can only use uv if the min python >= 3.8
@@ -143,6 +140,13 @@ class ResolvedXCookieConfig:
             use_setup_py = _infer_use_setup_py(repodir, is_new=is_new)
         use_setup_py = bool(use_setup_py)
 
+        requirements_package = resolve_requirements_package(
+            config,
+            repodir=repodir,
+            mod_name=str(mod_name),
+            rel_mod_parent_dpath=str(config['rel_mod_parent_dpath']),
+        )
+
         return cls(
             repodir=repodir,
             repo_name=str(repo_name),
@@ -152,8 +156,6 @@ class ResolvedXCookieConfig:
             tags=tags,
             os=os_values,
             is_new=is_new,
-            rotate_secrets=rotate_secrets,
-            refresh_docs=refresh_docs,
             author=_coerce_meta_text(author),
             author_email=_coerce_meta_text(author_email),
             license=str(license_text),
@@ -162,8 +164,10 @@ class ResolvedXCookieConfig:
             supported_python_versions=supported_python_versions,
             ci_cpython_versions=ci_cpython_versions,
             ci_pypy_versions=ci_pypy_versions,
+            ci_prerelease_python_policy=ci_prerelease_python_policy,
             use_uv=use_uv,
             use_setup_py=use_setup_py,
+            requirements_package=requirements_package,
         )
 
     @property
@@ -184,8 +188,6 @@ class ResolvedXCookieConfig:
             'tags': list(self.tags),
             'os': list(self.os),
             'is_new': self.is_new,
-            'rotate_secrets': self.rotate_secrets,
-            'refresh_docs': self.refresh_docs,
             'author': self.author,
             'author_email': self.author_email,
             'license': self.license,
@@ -194,8 +196,12 @@ class ResolvedXCookieConfig:
             'supported_python_versions': list(self.supported_python_versions),
             'ci_cpython_versions': list(self.ci_cpython_versions),
             'ci_pypy_versions': list(self.ci_pypy_versions),
+            'ci_prerelease_python_policy': (
+                self.ci_prerelease_python_policy.value
+            ),
             'use_uv': self.use_uv,
             'use_setup_py': self.use_setup_py,
+            'requirements_package': self.requirements_package,
         }
         for key, value in updates.items():
             config[key] = value
@@ -206,6 +212,20 @@ def resolve_xcookie_config(config: Any) -> ResolvedXCookieConfig:
     resolved = ResolvedXCookieConfig.from_config(config)
     resolved.apply_to_config(config)
     return resolved
+
+
+def _coerce_ci_prerelease_python_policy(
+    value: Any,
+) -> PrereleasePythonPolicy:
+    """Validate the policy used for unreleased CPython CI jobs."""
+    try:
+        return PrereleasePythonPolicy(str(value))
+    except ValueError:
+        choices = ', '.join(policy.value for policy in PrereleasePythonPolicy)
+        raise ValueError(
+            f'Invalid ci_prerelease_python_policy={value!r}. '
+            f'Expected one of: {choices}'
+        ) from None
 
 
 def _infer_use_setup_py(repodir: ub.Path, *, is_new: bool) -> bool:

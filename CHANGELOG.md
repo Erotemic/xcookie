@@ -5,7 +5,48 @@ We are currently working on porting this changelog to the specifications in
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## Version 0.4.1 - Unreleased
+## Version 0.5.0 - Unreleased
+
+
+## Version 0.4.3 - Released 2026-08-28
+
+
+## Version 0.4.2 - Released 2026-08-28
+
+### Changed
+* Split template inventory, remote resolution, Git URL parsing, and new-repository initialization out of `xcookie.main` while preserving the generator entrypoints.
+* Initial changelogs now use the configured package version and an `Unreleased` heading, matching the contract used by `xcookie bump`.
+* Package-version inference and `xcookie bump` now share the same static version-source discovery.
+* Small generated files now use explicit builder functions instead of the `TemplateApplier.lut` fallback.
+* Removed unused generator plumbing for `deploy_gitlab`, the old docs quickstart scratchpad, and inactive TemplateApplier wrappers for disabled templates.
+* Added ``xcookie bump`` for package-version maintenance. It supports patch,
+  minor, major (plus ``micro`` as a patch alias), and explicit target versions;
+  it updates the authoritative static version source, marks the current
+  changelog section released, and inserts the next ``Unreleased`` section.
+* Secret rotation is now the separate `xcookie rotate-secrets` command instead
+  of a side effect of `xcookie generate`.
+* Sphinx API refresh is now the separate `xcookie refresh-docs` command instead
+  of a post-generation side effect.
+* xcookie no longer generates `[tool.uv] exclude-newer` or exposes an
+  `uv_exclude_newer` generator option. Existing user-owned `[tool.uv]` settings
+  are preserved during regeneration.
+* The console entrypoint is now a modal CLI. Existing project generation lives
+  under `xcookie generate`, leaving the root command namespace available for
+  maintenance subcommands. `python -m xcookie.main`
+  remains the direct generator entrypoint for compatibility.
+* Require `kwconf>=0.11.0` so modal commands preserve explicit child CLI
+  arguments during dispatch.
+* Unreleased CPython interpreter test jobs now default to non-blocking failures.
+  Projects can
+  set `tool.xcookie.ci_prerelease_python_policy` to `allow-failure`, `strict`,
+  or `skip` to control that behavior explicitly.
+
+### Fixed
+* Generated Sphinx configuration reads `ast.Constant.value`, restoring Python
+  3.14 compatibility after removal of the legacy `.s` alias.
+
+
+## Version 0.4.1 - Released 2026-07-30
 
 
 ## Version 0.4.0 - Released 2026-07-18

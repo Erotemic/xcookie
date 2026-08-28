@@ -35,7 +35,6 @@ def test_pyproject_regen_does_not_write_inferred_tool_xcookie_defaults(
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -66,6 +65,7 @@ def test_pyproject_regen_does_not_write_inferred_tool_xcookie_defaults(
     assert 'dev_status' not in xcookie_block
     assert 'remote_host' not in xcookie_block
     assert 'remote_group' not in xcookie_block
+    assert 'ci_prerelease_python_policy' not in xcookie_block
 
 
 def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
@@ -95,6 +95,7 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
                         'typecheck_extra_paths': [
                             'tests/typecheck_consumer.py'
                         ],
+                        'ci_prerelease_python_policy': 'strict',
                         'entry_points': {
                             'console_scripts': [
                                 'demo=demo_mod.__main__:main',
@@ -110,7 +111,6 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
         argv=0,
         repodir=repodir,
         interactive=False,
-        rotate_secrets=False,
         init_new_remotes=False,
         use_vcs=False,
         use_setup_py=False,
@@ -136,6 +136,118 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
     assert xcookie_block['typecheck_extra_paths'] == [
         'tests/typecheck_consumer.py'
     ]
+    assert xcookie_block['ci_prerelease_python_policy'] == 'strict'
     assert xcookie_block['entry_points']['console_scripts'] == [
         'demo=demo_mod.__main__:main',
     ]
+
+
+def test_pyproject_writes_nondefault_prerelease_policy(tmp_path):
+    import toml
+
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '2.0.0'\n")
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'tool': {
+                    'xcookie': {
+                        'tags': ['github', 'purepy'],
+                        'mod_name': 'demo_mod',
+                        'repo_name': 'demo_mod',
+                        'author': 'Existing Author',
+                        'author_email': 'author@example.com',
+                        'url': 'https://github.com/example/demo_mod',
+                        'description': 'Demo module',
+                        'min_python': '3.10',
+                    }
+                }
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+        ci_prerelease_python_policy='skip',
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+    assert (
+        pyproject_data['tool']['xcookie']['ci_prerelease_python_policy']
+        == 'skip'
+    )
+
+
+def test_invalid_prerelease_python_policy_is_rejected(tmp_path):
+    import pytest
+
+    from xcookie.main import XCookieConfig
+
+    with pytest.raises(ValueError, match='ci_prerelease_python_policy'):
+        XCookieConfig(
+            repodir=tmp_path,
+            repo_name='demo_pkg',
+            mod_name='demo_pkg',
+            tags=['github', 'purepy'],
+            interactive=False,
+            ci_prerelease_python_policy='maybe',
+        )
+
+
+def test_pyproject_regen_preserves_equivalent_os_spelling(tmp_path):
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '2.0.0'\n")
+    original_os = ['linux', 'windows', 'osx']
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'tool': {
+                    'xcookie': {
+                        'tags': ['github', 'purepy'],
+                        'mod_name': 'demo_mod',
+                        'repo_name': 'demo_mod',
+                        'author': 'Existing Author',
+                        'author_email': 'author@example.com',
+                        'url': 'https://github.com/example/demo_mod',
+                        'description': 'Demo module',
+                        'min_python': '3.10',
+                        'os': original_os,
+                    }
+                }
+            }
+        )
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+    pyproject_data = toml.loads(
+        (applier.staging_dpath / 'pyproject.toml').read_text()
+    )
+
+    assert pyproject_data['tool']['xcookie']['os'] == original_os
