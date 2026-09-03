@@ -14,6 +14,7 @@ def _make_applier(
     ci_allow_failure=None,
     ci_prerelease_python_policy=None,
     typecheck_extra_paths=None,
+    typecheck_install_extras=None,
 ):
     kwargs = dict(
         repodir=tmp_path,
@@ -40,6 +41,8 @@ def _make_applier(
         cfg['ci_prerelease_python_policy'] = ci_prerelease_python_policy
     if typecheck_extra_paths is not None:
         cfg['typecheck_extra_paths'] = typecheck_extra_paths
+    if typecheck_install_extras is not None:
+        cfg['typecheck_install_extras'] = typecheck_install_extras
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -369,6 +372,29 @@ def test_github_allow_failure_rules_normalize_experimental_steps(tmp_path):
     stable_text = stable_self.build_github_actions_tests()
     assert continue_expr not in stable_text
     assert 'Report experimental failure' not in stable_text
+
+
+def test_github_typecheck_install_extras_are_rendered(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        """
+[project]
+name = "demo-pkg"
+version = "0.0.0"
+
+[project.optional-dependencies]
+tests = []
+helm = []
+"""
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+        typecheck_install_extras=['tests', 'helm'],
+    )
+    self.config['linter'] = True
+    text = self.build_github_actions_tests()
+    assert 'pip install --prefer-binary -e ".[tests,helm]"' in text
 
 
 def test_github_typecheck_extra_paths_are_rendered(tmp_path):

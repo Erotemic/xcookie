@@ -11,6 +11,7 @@ def _make_applier(
     use_setup_py=False,
     ci_allow_failure=None,
     ci_prerelease_python_policy=None,
+    typecheck_install_extras=None,
 ):
     if tags is None:
         tags = ['github', 'purepy']
@@ -38,6 +39,8 @@ def _make_applier(
         cfg['ci_allow_failure'] = ci_allow_failure
     if ci_prerelease_python_policy is not None:
         cfg['ci_prerelease_python_policy'] = ci_prerelease_python_policy
+    if typecheck_install_extras is not None:
+        cfg['typecheck_install_extras'] = typecheck_install_extras
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -67,6 +70,28 @@ def test_lock_requirements_path_names_extras_cases():
         ci_plan.lock_requirements_path(['tests', 'optional'])
         == 'requirements/locks/tests-optional.txt'
     )
+
+
+def test_ci_plan_uses_configured_typecheck_install_extras(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        """
+[project]
+name = "demo-pkg"
+version = "0.0.0"
+
+[project.optional-dependencies]
+tests = []
+helm = []
+"""
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+        typecheck_install_extras=['tests', 'helm', 'missing'],
+    )
+    plan = ci_plan.make_ci_plan(self)
+    assert plan.typecheck_extras == ('tests', 'helm')
 
 
 def test_ci_plan_filters_pyproject_extras(tmp_path):

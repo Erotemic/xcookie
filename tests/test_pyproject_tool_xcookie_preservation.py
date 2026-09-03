@@ -95,6 +95,7 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
                         'typecheck_extra_paths': [
                             'tests/typecheck_consumer.py'
                         ],
+                        'typecheck_install_extras': ['tests', 'helm'],
                         'ci_prerelease_python_policy': 'strict',
                         'entry_points': {
                             'console_scripts': [
@@ -136,6 +137,7 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
     assert xcookie_block['typecheck_extra_paths'] == [
         'tests/typecheck_consumer.py'
     ]
+    assert xcookie_block['typecheck_install_extras'] == ['tests', 'helm']
     assert xcookie_block['ci_prerelease_python_policy'] == 'strict'
     assert xcookie_block['entry_points']['console_scripts'] == [
         'demo=demo_mod.__main__:main',

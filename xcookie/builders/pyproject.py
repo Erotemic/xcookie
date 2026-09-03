@@ -212,6 +212,7 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'dev_status',
         'typed',
         'typecheck_extra_paths',
+        'typecheck_install_extras',
         'ci_prerelease_python_policy',
         'ci_artifacts',
         'remote_host',
@@ -285,6 +286,9 @@ def _build_xcookie_tool_config(self, pyproj_config):
             should_save = should_save or value != 'planning'
         elif key == 'typecheck_extra_paths':
             should_save = should_save or bool(value)
+        elif key == 'typecheck_install_extras':
+            normalized = [value] if isinstance(value, str) else list(value)
+            should_save = should_save or normalized != ['tests']
         elif key == 'ci_prerelease_python_policy':
             should_save = should_save or value != 'allow-failure'
         elif key in {'remote_host', 'remote_group'}:

@@ -442,7 +442,9 @@ def make_ci_plan(self: Any) -> CIPlan:
     )
 
     if use_pyproject:
-        desired_typecheck_extras = ['tests']
+        desired_typecheck_extras = _as_list(
+            self.config.get('typecheck_install_extras', ['tests'])
+        )
         desired_sdist_extras = ['tests']
         if 'cv2' in self.tags:
             desired_sdist_extras.append('headless')

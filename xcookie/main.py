@@ -259,6 +259,18 @@ class XCookieConfig(kwconf.Config):
             """
             ),
         ),
+        'typecheck_install_extras': kwconf.Value(
+            ['tests'],
+            help=ub.paragraph(
+                """
+            Optional-dependency extras to install before running type checkers.
+            Values are filtered to extras declared by the target project's
+            [project.optional-dependencies] table. Use this when type-visible
+            modules import dependencies that are not part of the core runtime,
+            for example ["tests", "helm"].
+            """
+            ),
+        ),
         'ci_versions_minimal_strict': kwconf.Value('min', help='todo: sus out'),
         'ci_versions_full_strict': kwconf.Value('main'),
         'ci_versions_minimal_loose': kwconf.Value('main'),
