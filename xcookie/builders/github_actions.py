@@ -14,7 +14,7 @@ import ubelt as ub
 
 from xcookie.builders import ci_model, common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
-from xcookie.builders.ci_plan import CIArtifact, CIPlan
+from xcookie.builders.ci_plan import CIArtifact, CIPlan, WorkspaceMember
 from xcookie.util_yaml import Yaml
 
 # Type alias for json / yaml data structure
@@ -91,17 +91,20 @@ class GitHubActionsRenderer:
                 mode='test',
                 needs=release_build_needs,
                 release_artifacts=release_artifacts,
+                workspace_members=self.plan.workspace_members,
             )
             jobs['live_deploy'] = build_deploy(
                 self.applier,
                 mode='live',
                 needs=release_build_needs,
                 release_artifacts=release_artifacts,
+                workspace_members=self.plan.workspace_members,
             )
             jobs['release'] = build_github_release(
                 self.applier,
                 needs=['live_deploy'],
                 release_artifacts=release_artifacts,
+                workspace_members=self.plan.workspace_members,
             )
 
         # Only refs that can actually deploy trigger the release workflow:
@@ -670,6 +673,10 @@ def _build_github_footer(self):
                  Account publishing page:
                    https://pypi.org/manage/account/publishing/
 
+                 If workspace_members publishes additional distributions,
+                 register this same repository/workflow/environment tuple as a
+                 trusted publisher for each workspace PyPI project as well.
+
               3. In TestPyPI, add a trusted publisher for this project:
                    owner: {group}
                    repository: {repo_name}
@@ -845,6 +852,110 @@ def build_ci_artifact_job(
     )
 
 
+def build_workspace_member_job(
+    self,
+    member: WorkspaceMember,
+    *,
+    release: bool = False,
+) -> JSON_MutableMapping:
+    """Build and optionally test one Python workspace distribution."""
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    main_python_version = supported_platform_info['main_python_version']
+    outdir = f'workspace_wheelhouse/{member.key}'
+    build_commands = [
+        f'{self.UPDATE_PIP}',
+        f'{self.PIP_INSTALL} setuptools>=77 wheel build twine',
+        f'python -m build --sdist --wheel --outdir {outdir} ./{member.path}',
+        f'python -m twine check {outdir}/*',
+    ]
+    steps: list[JSON_Mapping] = [
+        Actions.checkout(),
+        Actions.setup_python(
+            {
+                'name': f'Set up Python {main_python_version}',
+                'with': _setup_python_inputs(main_python_version),
+            }
+        ),
+        {
+            'name': f'Build {member.pkg_name}',
+            'shell': 'bash',
+            'run': '\n'.join(build_commands),
+        },
+    ]
+
+    if not release:
+        test_commands = [
+            'python -m pip install pytest ty',
+            f'WHEEL_FPATH=$(ls {outdir}/{member.dist_prefix}*.whl | head -n 1)',
+            'test -n "$WHEEL_FPATH"',
+            'python -m pip install --prefer-binary "$WHEEL_FPATH"',
+            f'python -c "import {member.mod_name}; print({member.mod_name}.__file__)"',
+        ]
+        if member.dependency_free:
+            test_commands.extend(
+                [
+                    "python - <<'PY'",
+                    'import email',
+                    'import glob',
+                    'import zipfile',
+                    f"wheel = glob.glob('{outdir}/{member.dist_prefix}*.whl')[0]",
+                    "with zipfile.ZipFile(wheel) as zfile:",
+                    "    metadata_name = next(name for name in zfile.namelist() if name.endswith('.dist-info/METADATA'))",
+                    "    metadata = email.message_from_bytes(zfile.read(metadata_name))",
+                    "requires = metadata.get_all('Requires-Dist') or []",
+                    "if requires:",
+                    "    raise SystemExit(f'expected dependency-free wheel, found Requires-Dist: {requires}')",
+                    'PY',
+                ]
+            )
+        if member.typed:
+            targets = [member.rel_mod_dpath]
+            for extra in member.typecheck_extra_paths:
+                targets.append(f'{member.path}/{extra}')
+            target_text = ' '.join(targets)
+            test_commands.append(f'ty check {target_text}')
+        test_commands.extend(
+            [
+                f'if [[ -d {member.test_dpath} ]]; then',
+                (
+                    f'    python -m pytest -c ./{member.path}/pyproject.toml '
+                    f'{member.test_dpath}'
+                ),
+                'fi',
+            ]
+        )
+        steps.append(
+            {
+                'name': f'Test {member.pkg_name} in isolation',
+                'shell': 'bash',
+                'run': '\n'.join(test_commands),
+            }
+        )
+
+    artifact_name = (
+        member.release_artifact_name if release else member.artifact_name
+    )
+    steps.append(
+        Actions.upload_artifact(
+            {
+                'name': f'Upload {member.pkg_name} distributions',
+                'with': {
+                    'name': artifact_name,
+                    'if-no-files-found': 'error',
+                    'path': f'{outdir}/*',
+                },
+            }
+        )
+    )
+    return Yaml.Dict(
+        {
+            'name': f'Build {member.pkg_name}',
+            'runs-on': 'ubuntu-latest',
+            'steps': steps,
+        }
+    )
+
+
 def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
     if plan is None:
         plan = common_ci.make_ci_plan(self)
@@ -982,6 +1093,11 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
     else:
         raise Exception('Need to specify binpy or purepy in tags')
 
+    for member in plan.workspace_members:
+        jobs[f'workspace_{member.key}'] = build_workspace_member_job(
+            self, member, release=False
+        )
+
     for artifact in plan.ci_artifacts:
         if artifact.test:
             jobs[artifact.job_key] = build_ci_artifact_job(
@@ -1062,6 +1178,13 @@ def _collect_release_jobs(self, plan: CIPlan | None = None):
         release_build_needs.append('build_binpy_wheels')
     else:
         raise Exception('Need to specify binpy or purepy in tags')
+
+    for member in plan.workspace_members:
+        job_key = f'workspace_{member.key}'
+        jobs[job_key] = build_workspace_member_job(
+            self, member, release=True
+        )
+        release_build_needs.append(job_key)
 
     for artifact in plan.ci_artifacts:
         if artifact.release:
@@ -1161,9 +1284,17 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
         install_target = common_ci.format_pyproject_install_target(
             plan.sdist_test_extras, editable=True
         )
+        workspace_find_links = common_ci.make_workspace_find_links_args(
+            self, plan=plan
+        )
         pip_reqs_install_parts: list[str] = [
             f'{self.UPDATE_PIP}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} {install_target}',
+            *common_ci.make_workspace_wheel_parts(self, plan=plan),
+            common_ci.join_shell_parts(
+                self.PIP_INSTALL_PREFER_BINARY,
+                workspace_find_links,
+                install_target,
+            ),
         ]
     else:
         pip_reqs_install_parts = [
@@ -1212,7 +1343,12 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
                 'name': 'Install sdist',
                 'run': [
                     f'ls -al {wheelhouse_dpath}',
-                    f'{self.PIP_INSTALL_PREFER_BINARY} {wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz -v',
+                    common_ci.join_shell_parts(
+                        self.PIP_INSTALL_PREFER_BINARY,
+                        workspace_find_links,
+                        f'{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz',
+                        '-v',
+                    ),
                 ],
             },
             {
@@ -2011,6 +2147,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         workspace_dname,
         custom_before_test_lines=custom_before_test_lines,
         custom_after_test_commands=custom_after_test_commands,
+        plan=plan,
     )
     install_wheel_commands = install_and_test_wheel_parts[
         'install_wheel_commands'
@@ -2195,6 +2332,7 @@ def build_deploy(
     mode='live',
     needs=None,
     release_artifacts: Sequence[CIArtifact] = (),
+    workspace_members: Sequence[WorkspaceMember] = (),
 ) -> dict[str, JSON]:
     """
     CommandLine:
@@ -2217,6 +2355,18 @@ def build_deploy(
     use_trusted_publishing = self.config.get(
         'ci_pypi_trusted_publishing', False
     )
+    publishing_workspace_members = tuple(
+        member for member in workspace_members if member.publish
+    )
+    if (
+        publishing_workspace_members
+        and self.config['deploy_pypi']
+        and not use_trusted_publishing
+    ):
+        raise ValueError(
+            'workspace PyPI publishing requires trusted publishing; '
+            'set ci_pypi_trusted_publishing=true'
+        )
     ci_gpg_transport = self.config.get(
         'ci_gpg_secret_transport', 'encrypted_repo'
     )
@@ -2502,10 +2652,27 @@ def build_deploy(
                 }
             )
         )
+    workspace_release_dpath = 'workspace_release'
+    for member in workspace_members:
+        deploy_steps.append(
+            Actions.download_artifact(
+                {
+                    'name': f'Download {member.pkg_name}',
+                    'with': {
+                        'name': member.release_artifact_name,
+                        'path': f'{workspace_release_dpath}/{member.key}',
+                    },
+                }
+            )
+        )
     show_commands = [f'ls -la {wheelhouse_dpath}']
     if release_artifacts:
         show_commands.append(
             f'find {release_artifacts_dpath} -maxdepth 3 -type f -print'
+        )
+    if workspace_members:
+        show_commands.append(
+            f'find {workspace_release_dpath} -maxdepth 3 -type f -print'
         )
     deploy_steps += [
         {
@@ -2541,6 +2708,29 @@ def build_deploy(
         }
         if mode == 'test':
             publish_with['repository-url'] = 'https://test.pypi.org/legacy/'
+
+        for member in workspace_members:
+            if not member.publish:
+                continue
+            member_publish_with = {
+                'packages-dir': f'{workspace_release_dpath}/{member.key}',
+                'skip-existing': True,
+            }
+            if mode == 'test':
+                member_publish_with['repository-url'] = (
+                    'https://test.pypi.org/legacy/'
+                )
+            deploy_steps.append(
+                {
+                    'name': (
+                        f'Publish {member.pkg_name} to PyPI'
+                        if mode == 'live'
+                        else f'Publish {member.pkg_name} to TestPyPI'
+                    ),
+                    'uses': 'pypa/gh-action-pypi-publish@release/v1',
+                    'with': member_publish_with,
+                }
+            )
 
         deploy_steps += [
             {
@@ -2587,6 +2777,19 @@ def build_deploy(
                         'name': 'deploy_extra_artifacts',
                         'if-no-files-found': 'error',
                         'path': f'{release_artifacts_dpath}/**/*',
+                    },
+                }
+            )
+        )
+    if workspace_members:
+        deploy_steps.append(
+            Actions.upload_artifact(
+                {
+                    'name': 'Upload workspace distributions',
+                    'with': {
+                        'name': 'deploy_workspace_artifacts',
+                        'if-no-files-found': 'error',
+                        'path': f'{workspace_release_dpath}/**/*',
                     },
                 }
             )
@@ -2640,6 +2843,7 @@ def build_github_release(
     self,
     needs=None,
     release_artifacts: Sequence[CIArtifact] = (),
+    workspace_members: Sequence[WorkspaceMember] = (),
 ):
     """
     References:
@@ -2666,6 +2870,8 @@ def build_github_release(
     ]
     if release_artifacts:
         artifact_globs.append('release_artifacts/**/*')
+    if workspace_members:
+        artifact_globs.append('workspace_release/**/*')
 
     release_meta_action = {
         'name': 'Resolve Release Tag',
@@ -2761,14 +2967,38 @@ def build_github_release(
                 if release_artifacts
                 else []
             ),
+            *(
+                [
+                    Actions.download_artifact(
+                        {
+                            'name': 'Download workspace distributions',
+                            'with': {
+                                'name': 'deploy_workspace_artifacts',
+                                'path': 'workspace_release',
+                            },
+                        }
+                    )
+                ]
+                if workspace_members
+                else []
+            ),
             {
                 'name': 'Show files to release',
                 'shell': 'bash',
-                'run': (
-                    'ls -la wheelhouse\n'
-                    'find release_artifacts -maxdepth 3 -type f -print'
-                    if release_artifacts
-                    else 'ls -la wheelhouse'
+                'run': '\n'.join(
+                    [
+                        'ls -la wheelhouse',
+                        *(
+                            ['find release_artifacts -maxdepth 3 -type f -print']
+                            if release_artifacts
+                            else []
+                        ),
+                        *(
+                            ['find workspace_release -maxdepth 3 -type f -print']
+                            if workspace_members
+                            else []
+                        ),
+                    ]
                 ),
             },
             write_release_notes_action,

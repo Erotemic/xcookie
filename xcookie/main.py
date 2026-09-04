@@ -259,6 +259,40 @@ class XCookieConfig(kwconf.Config):
             """
             ),
         ),
+        'typecheck_install_extras': kwconf.Value(
+            ['tests'],
+            help=ub.paragraph(
+                """
+            Optional-dependency extras to install before running type checkers.
+            This is separate from typecheck_extra_paths: the latter selects
+            source targets, while this setting selects dependencies needed to
+            resolve imports while checking them.
+            """
+            ),
+        ),
+        'workspace_members': kwconf.Value(
+            [],
+            help=ub.paragraph(
+                """
+            Repository-relative directories containing additional Python
+            distributions that should participate in generated CI and release
+            workflows. Each member must contain a pyproject.toml with a
+            [project] table. Workspace generation currently requires the
+            GitHub xcookie tag.
+            """
+            ),
+        ),
+        'workspace_sync_versions': kwconf.Value(
+            False,
+            isflag=True,
+            help=ub.paragraph(
+                """
+            If true, ``xcookie bump`` keeps workspace member package versions
+            synchronized with the root package and updates exact root
+            dependency pins for those members.
+            """
+            ),
+        ),
         'ci_versions_minimal_strict': kwconf.Value('min', help='todo: sus out'),
         'ci_versions_full_strict': kwconf.Value('main'),
         'ci_versions_minimal_loose': kwconf.Value('main'),
@@ -1479,6 +1513,11 @@ class TemplateApplier:
             combos.append(key)
 
         export_blocks: list[str] = []
+        emit_flag = (
+            '--no-emit-workspace'
+            if plan.workspace_members
+            else '--no-emit-project'
+        )
         for extras in combos:
             out_path = ci_plan.lock_requirements_path(extras)
             label = ', '.join(extras) if extras else 'runtime'
@@ -1486,7 +1525,7 @@ class TemplateApplier:
             # regardless of how the surrounding script is dedented.
             lines = [
                 f'# Strict CI variant extras: {label}',
-                'uv export --frozen --no-emit-project --format requirements.txt --no-hashes \\',
+                f'uv export --frozen {emit_flag} --format requirements.txt --no-hashes \\',
             ]
             for extra in extras:
                 lines.append(f'    --extra {extra} \\')

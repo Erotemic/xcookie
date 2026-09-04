@@ -5,7 +5,30 @@ We are currently working on porting this changelog to the specifications in
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## Version 0.5.0 - Unreleased
+## Version 0.5.1 - Unreleased
+
+### Added
+* Added first-class Python workspace members for same-repository distributions.
+  GitHub CI builds and tests each member in isolation, root jobs install local
+  members before testing, and trusted-publishing release jobs publish member
+  distributions before the root distribution.
+* Added ``typecheck_install_extras`` so generated typecheck jobs can install
+  optional dependencies needed to resolve the source surface they check.
+* Added ``workspace_sync_versions`` so ``xcookie bump`` can keep workspace
+  package versions synchronized and update exact root dependency pins.
+
+### Fixed
+* Workspace root CI now builds member wheels and exposes them through
+  ``--find-links`` so exact synchronized dependencies resolve before the member
+  distribution has been published.
+* Workspace isolation tests now use each member's own ``pyproject.toml`` as the
+  pytest configuration, preventing root-only pytest plugins from leaking into
+  dependency-free member environments.
+* Version bumping now recognizes legacy changelog headings that use two dashes
+  before ``Released``.
+
+
+## Version 0.5.0 - Released 2026-08-28
 
 
 ## Version 0.4.3 - Released 2026-08-28

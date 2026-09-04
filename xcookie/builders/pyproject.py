@@ -212,6 +212,9 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'dev_status',
         'typed',
         'typecheck_extra_paths',
+        'typecheck_install_extras',
+        'workspace_members',
+        'workspace_sync_versions',
         'ci_prerelease_python_policy',
         'ci_artifacts',
         'remote_host',
@@ -242,6 +245,8 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'use_pyproject_requirements',
         'requirements_package',
         'ci_artifacts',
+        'workspace_members',
+        'workspace_sync_versions',
     }
 
     default_os = {'linux', 'osx', 'win'}
@@ -284,6 +289,13 @@ def _build_xcookie_tool_config(self, pyproj_config):
         elif key == 'dev_status':
             should_save = should_save or value != 'planning'
         elif key == 'typecheck_extra_paths':
+            should_save = should_save or bool(value)
+        elif key == 'typecheck_install_extras':
+            normalized = list(value) if not isinstance(value, str) else [value]
+            should_save = should_save or normalized != ['tests']
+        elif key == 'workspace_members':
+            should_save = should_save or bool(value)
+        elif key == 'workspace_sync_versions':
             should_save = should_save or bool(value)
         elif key == 'ci_prerelease_python_policy':
             should_save = should_save or value != 'allow-failure'

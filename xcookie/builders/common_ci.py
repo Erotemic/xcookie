@@ -45,6 +45,70 @@ def make_ci_plan(self):
     return ci_plan.make_ci_plan(self)
 
 
+def join_shell_parts(*parts: str) -> str:
+    """Join already-quoted shell command fragments without empty gaps."""
+    return ' '.join(part for part in parts if part)
+
+
+def make_workspace_install_parts(
+    self, plan: ci_plan.CIPlan | None = None
+) -> list[str]:
+    """Install local workspace distributions before the root project.
+
+    This helper is retained for callers that specifically want editable
+    workspace installs. Generated root-package CI uses built workspace wheels
+    and ``--find-links`` instead, so an exact unpublished workspace dependency
+    can participate in normal pip / uv resolution.
+    """
+    if plan is None:
+        plan = make_ci_plan(self)
+    commands = []
+    for member in plan.workspace_members:
+        target = format_pyproject_install_target(
+            [], target=f'./{member.path}', editable=True
+        )
+        commands.append(f'pip install --prefer-binary {target}')
+    return commands
+
+
+def workspace_member_wheelhouse(member: ci_plan.WorkspaceMember) -> str:
+    """Return the repository-relative wheelhouse for a workspace member."""
+    return f'workspace_wheelhouse/{member.key}'
+
+
+def make_workspace_wheel_parts(
+    self, plan: ci_plan.CIPlan | None = None
+) -> list[str]:
+    """Build local workspace wheels for root-package dependency resolution."""
+    if plan is None:
+        plan = make_ci_plan(self)
+    commands: list[str] = []
+    for member in plan.workspace_members:
+        outdir = workspace_member_wheelhouse(member)
+        commands.extend(
+            [
+                f'mkdir -p {shlex.quote(outdir)}',
+                'python -m pip wheel --no-deps '
+                f'--wheel-dir {shlex.quote(outdir)} '
+                f'./{shlex.quote(member.path)}',
+            ]
+        )
+    return commands
+
+
+def make_workspace_find_links_args(
+    self, plan: ci_plan.CIPlan | None = None
+) -> str:
+    """Return resolver flags pointing at locally built workspace wheels."""
+    if plan is None:
+        plan = make_ci_plan(self)
+    parts = []
+    for member in plan.workspace_members:
+        outdir = workspace_member_wheelhouse(member)
+        parts.extend(['--find-links', shlex.quote(outdir)])
+    return ' '.join(parts)
+
+
 def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     """
     Return a list of shell commands to run type checkers.
@@ -53,33 +117,31 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     returned value is a list of command strings so callers can adapt it to
     either GitHub Actions (`run` string) or GitLab CI (`script` list).
     """
-
-    # TODO: more control over which type checkers to use.
-    # right now we always enable ty unless notypes is on.
-    # but we should have more sane defaults.
-    checkers = None
-    if checkers is None:
-        checkers = ['ty']
-
+    checkers = ['ty']
     if 'mypy' in self.tags:
         checkers += ['mypy']
 
-    # Where to install runtime/type requirements from
-    type_requirement_files = [
-        # TODO: get this location from the config
-        'requirements/runtime.txt'
-    ]
+    type_requirement_files = ['requirements/runtime.txt']
     req_files_text = ' '.join(type_requirement_files)
 
+    if plan is None:
+        plan = make_ci_plan(self)
+
     if self.config['use_pyproject_requirements']:
-        if plan is None:
-            plan = make_ci_plan(self)
         target = format_pyproject_install_target(
             plan.typecheck_extras, editable=True
         )
-        pip_install_reqs = f'pip install --prefer-binary {target}'
+        workspace_find_links = make_workspace_find_links_args(self, plan=plan)
+        dependency_install_commands = [
+            *make_workspace_wheel_parts(self, plan=plan),
+            join_shell_parts(
+                'pip install --prefer-binary',
+                workspace_find_links,
+                target,
+            ),
+        ]
     else:
-        pip_install_reqs = f'pip install -r {req_files_text}'
+        dependency_install_commands = [f'pip install -r {req_files_text}']
 
     targets = [f'./{self.rel_mod_dpath}']
     extra_targets = self.config.get('typecheck_extra_paths', []) or []
@@ -93,26 +155,15 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     target_text = ' '.join(shlex.quote(target) for target in targets)
 
     commands = []
-
     if 'mypy' in checkers:
-        commands += [
-            'python -m pip install mypy',
-            pip_install_reqs,
-            # TODO; this likely needs to be replaced with some explicit
-            # registration of what typing requirements are for the library
-            # f'mypy --install-types --non-interactive {target_text}',
-            f'mypy {target_text}',
-        ]
-
+        commands.append('python -m pip install mypy')
     if 'ty' in checkers:
-        # Generic support for "ty". Install and run; users can customize
-        # behavior by changing `checkers` or adding config-specific steps.
-        commands += [
-            'python -m pip install ty',
-            pip_install_reqs,
-            f'ty check {target_text}',
-        ]
-
+        commands.append('python -m pip install ty')
+    commands.extend(dependency_install_commands)
+    if 'mypy' in checkers:
+        commands.append(f'mypy {target_text}')
+    if 'ty' in checkers:
+        commands.append(f'ty check {target_text}')
     return commands
 
 
@@ -155,6 +206,7 @@ def make_install_and_test_wheel_parts(
     workspace_dname,
     custom_before_test_lines=[],
     custom_after_test_commands=[],
+    plan: ci_plan.CIPlan | None = None,
 ):
     """
     Builds the YAML common between github actions and gitlab CI to install and
@@ -265,6 +317,11 @@ def make_install_and_test_wheel_parts(
 
     # export UV_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/cpu https://download.pytorch.org/whl/nightly/cu126"
 
+    if plan is None:
+        plan = make_ci_plan(self)
+    workspace_wheel_lines = make_workspace_wheel_parts(self, plan=plan)
+    workspace_find_links = make_workspace_find_links_args(self, plan=plan)
+
     use_lockfile_ci = ci_plan.uses_lockfile_ci(self)
     if use_lockfile_ci:
         install_helpers = [
@@ -291,6 +348,7 @@ def make_install_and_test_wheel_parts(
             *install_helpers,
             f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
             # f'export MOD_VERSION=$({get_mod_version_bash})',
+            *workspace_wheel_lines,
         ]
         + special_install_lines
         + [
@@ -336,11 +394,20 @@ def make_install_and_test_wheel_parts(
             # uv prefers binary wheels by default; the pip --prefer-binary
             # flag does not exist in ``uv pip install`` and was rejected at
             # runtime, so omit it here.
-            'python -m uv pip install --prerelease=allow "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"',
+            join_shell_parts(
+                'python -m uv pip install --prerelease=allow',
+                '"${LOCK_ARGS[@]}"',
+                workspace_find_links,
+                '"${INSTALL_TARGET}"',
+            ),
         ]
     else:
         install_wheel_commands += [
-            f'{self.PIP_INSTALL_PREFER_BINARY} "${{INSTALL_TARGET}}"',
+            join_shell_parts(
+                self.PIP_INSTALL_PREFER_BINARY,
+                workspace_find_links,
+                '"${INSTALL_TARGET}"',
+            ),
         ]
 
     install_wheel_commands += [
