@@ -520,14 +520,23 @@ def test_github_workspace_ci_installs_and_tests_member(tmp_path):
     assert 'Build demo-theory' in text
     assert 'Test demo-theory in isolation' in text
     assert (
-        'python -m pip wheel --no-deps '
-        '--wheel-dir workspace_wheelhouse/demo_theory '
+        'python -m build --sdist --wheel '
+        '--outdir workspace_wheelhouse/demo_theory '
         './packages/demo-theory'
     ) in text
     assert (
-        '--find-links workspace_wheelhouse/demo_theory -e ".[tests,helm]"'
-        in text
-    )
+        'pip install --prefer-binary -e ./packages/demo-theory '
+        '-e ".[tests,helm]"'
+    ) in text
+    assert (
+        'python -m pip install --prefer-binary ./packages/demo-theory '
+        'wheelhouse/demo_pkg*.tar.gz -v'
+    ) in text
+    assert (
+        'python -m pip install --prefer-binary '
+        './packages/demo-theory "${INSTALL_TARGET}"'
+    ) in text
+    assert '--find-links workspace_wheelhouse/demo_theory' not in text
     assert (
         'python -m pytest -c ./packages/demo-theory/pyproject.toml '
         'packages/demo-theory/tests'

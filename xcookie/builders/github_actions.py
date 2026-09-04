@@ -1284,15 +1284,14 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
         install_target = common_ci.format_pyproject_install_target(
             plan.sdist_test_extras, editable=True
         )
-        workspace_find_links = common_ci.make_workspace_find_links_args(
-            self, plan=plan
+        workspace_editable_sources = common_ci.make_workspace_source_args(
+            self, plan=plan, editable=True
         )
         pip_reqs_install_parts: list[str] = [
             f'{self.UPDATE_PIP}',
-            *common_ci.make_workspace_wheel_parts(self, plan=plan),
             common_ci.join_shell_parts(
                 self.PIP_INSTALL_PREFER_BINARY,
-                workspace_find_links,
+                workspace_editable_sources,
                 install_target,
             ),
         ]
@@ -1310,6 +1309,8 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
             pip_reqs_install_parts.append(
                 f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
             )
+
+    workspace_sources = common_ci.make_workspace_source_args(self, plan=plan)
 
     import kwutil
 
@@ -1345,7 +1346,7 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
                     f'ls -al {wheelhouse_dpath}',
                     common_ci.join_shell_parts(
                         self.PIP_INSTALL_PREFER_BINARY,
-                        workspace_find_links,
+                        workspace_sources,
                         f'{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz',
                         '-v',
                     ),

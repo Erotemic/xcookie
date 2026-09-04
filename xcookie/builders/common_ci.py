@@ -55,10 +55,9 @@ def make_workspace_install_parts(
 ) -> list[str]:
     """Install local workspace distributions before the root project.
 
-    This helper is retained for callers that specifically want editable
-    workspace installs. Generated root-package CI uses built workspace wheels
-    and ``--find-links`` instead, so an exact unpublished workspace dependency
-    can participate in normal pip / uv resolution.
+    This helper is retained for callers that specifically want separate
+    editable workspace installs. Generated root-package CI instead passes the
+    member source requirements and root requirement to one resolver invocation.
     """
     if plan is None:
         plan = make_ci_plan(self)
@@ -71,41 +70,30 @@ def make_workspace_install_parts(
     return commands
 
 
-def workspace_member_wheelhouse(member: ci_plan.WorkspaceMember) -> str:
-    """Return the repository-relative wheelhouse for a workspace member."""
-    return f'workspace_wheelhouse/{member.key}'
-
-
-def make_workspace_wheel_parts(
-    self, plan: ci_plan.CIPlan | None = None
-) -> list[str]:
-    """Build local workspace wheels for root-package dependency resolution."""
-    if plan is None:
-        plan = make_ci_plan(self)
-    commands: list[str] = []
-    for member in plan.workspace_members:
-        outdir = workspace_member_wheelhouse(member)
-        commands.extend(
-            [
-                f'mkdir -p {shlex.quote(outdir)}',
-                'python -m pip wheel --no-deps '
-                f'--wheel-dir {shlex.quote(outdir)} '
-                f'./{shlex.quote(member.path)}',
-            ]
-        )
-    return commands
-
-
-def make_workspace_find_links_args(
-    self, plan: ci_plan.CIPlan | None = None
+def make_workspace_source_args(
+    self,
+    plan: ci_plan.CIPlan | None = None,
+    *,
+    editable: bool = False,
 ) -> str:
-    """Return resolver flags pointing at locally built workspace wheels."""
+    """Return local source requirements for workspace members.
+
+    Root-package CI must resolve workspace dependencies from the checkout.
+    Development versions often do not exist on PyPI, and CI-only synchronized
+    versions may never be published.  Supplying every workspace member in the
+    same resolver invocation as the root project makes the local source tree
+    authoritative while still exercising the root package's normal dependency
+    metadata.
+    """
     if plan is None:
         plan = make_ci_plan(self)
-    parts = []
+    parts: list[str] = []
     for member in plan.workspace_members:
-        outdir = workspace_member_wheelhouse(member)
-        parts.extend(['--find-links', shlex.quote(outdir)])
+        target = shlex.quote(f'./{member.path}')
+        if editable:
+            parts.extend(['-e', target])
+        else:
+            parts.append(target)
     return ' '.join(parts)
 
 
@@ -131,12 +119,13 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
         target = format_pyproject_install_target(
             plan.typecheck_extras, editable=True
         )
-        workspace_find_links = make_workspace_find_links_args(self, plan=plan)
+        workspace_sources = make_workspace_source_args(
+            self, plan=plan, editable=True
+        )
         dependency_install_commands = [
-            *make_workspace_wheel_parts(self, plan=plan),
             join_shell_parts(
                 'pip install --prefer-binary',
-                workspace_find_links,
+                workspace_sources,
                 target,
             ),
         ]
@@ -319,8 +308,7 @@ def make_install_and_test_wheel_parts(
 
     if plan is None:
         plan = make_ci_plan(self)
-    workspace_wheel_lines = make_workspace_wheel_parts(self, plan=plan)
-    workspace_find_links = make_workspace_find_links_args(self, plan=plan)
+    workspace_sources = make_workspace_source_args(self, plan=plan)
 
     use_lockfile_ci = ci_plan.uses_lockfile_ci(self)
     if use_lockfile_ci:
@@ -348,7 +336,6 @@ def make_install_and_test_wheel_parts(
             *install_helpers,
             f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
             # f'export MOD_VERSION=$({get_mod_version_bash})',
-            *workspace_wheel_lines,
         ]
         + special_install_lines
         + [
@@ -397,7 +384,7 @@ def make_install_and_test_wheel_parts(
             join_shell_parts(
                 'python -m uv pip install --prerelease=allow',
                 '"${LOCK_ARGS[@]}"',
-                workspace_find_links,
+                workspace_sources,
                 '"${INSTALL_TARGET}"',
             ),
         ]
@@ -405,7 +392,7 @@ def make_install_and_test_wheel_parts(
         install_wheel_commands += [
             join_shell_parts(
                 self.PIP_INSTALL_PREFER_BINARY,
-                workspace_find_links,
+                workspace_sources,
                 '"${INSTALL_TARGET}"',
             ),
         ]
