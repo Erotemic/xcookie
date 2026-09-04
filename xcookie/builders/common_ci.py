@@ -45,10 +45,21 @@ def make_ci_plan(self):
     return ci_plan.make_ci_plan(self)
 
 
+def join_shell_parts(*parts: str) -> str:
+    """Join already-quoted shell command fragments without empty gaps."""
+    return ' '.join(part for part in parts if part)
+
+
 def make_workspace_install_parts(
     self, plan: ci_plan.CIPlan | None = None
 ) -> list[str]:
-    """Install local workspace distributions before the root project."""
+    """Install local workspace distributions before the root project.
+
+    This helper is retained for callers that specifically want editable
+    workspace installs. Generated root-package CI uses built workspace wheels
+    and ``--find-links`` instead, so an exact unpublished workspace dependency
+    can participate in normal pip / uv resolution.
+    """
     if plan is None:
         plan = make_ci_plan(self)
     commands = []
@@ -58,6 +69,44 @@ def make_workspace_install_parts(
         )
         commands.append(f'pip install --prefer-binary {target}')
     return commands
+
+
+def workspace_member_wheelhouse(member: ci_plan.WorkspaceMember) -> str:
+    """Return the repository-relative wheelhouse for a workspace member."""
+    return f'workspace_wheelhouse/{member.key}'
+
+
+def make_workspace_wheel_parts(
+    self, plan: ci_plan.CIPlan | None = None
+) -> list[str]:
+    """Build local workspace wheels for root-package dependency resolution."""
+    if plan is None:
+        plan = make_ci_plan(self)
+    commands: list[str] = []
+    for member in plan.workspace_members:
+        outdir = workspace_member_wheelhouse(member)
+        commands.extend(
+            [
+                f'mkdir -p {shlex.quote(outdir)}',
+                'python -m pip wheel --no-deps '
+                f'--wheel-dir {shlex.quote(outdir)} '
+                f'./{shlex.quote(member.path)}',
+            ]
+        )
+    return commands
+
+
+def make_workspace_find_links_args(
+    self, plan: ci_plan.CIPlan | None = None
+) -> str:
+    """Return resolver flags pointing at locally built workspace wheels."""
+    if plan is None:
+        plan = make_ci_plan(self)
+    parts = []
+    for member in plan.workspace_members:
+        outdir = workspace_member_wheelhouse(member)
+        parts.extend(['--find-links', shlex.quote(outdir)])
+    return ' '.join(parts)
 
 
 def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
@@ -82,9 +131,14 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
         target = format_pyproject_install_target(
             plan.typecheck_extras, editable=True
         )
+        workspace_find_links = make_workspace_find_links_args(self, plan=plan)
         dependency_install_commands = [
-            *make_workspace_install_parts(self, plan=plan),
-            f'pip install --prefer-binary {target}',
+            *make_workspace_wheel_parts(self, plan=plan),
+            join_shell_parts(
+                'pip install --prefer-binary',
+                workspace_find_links,
+                target,
+            ),
         ]
     else:
         dependency_install_commands = [f'pip install -r {req_files_text}']
@@ -265,7 +319,8 @@ def make_install_and_test_wheel_parts(
 
     if plan is None:
         plan = make_ci_plan(self)
-    workspace_install_lines = make_workspace_install_parts(self, plan=plan)
+    workspace_wheel_lines = make_workspace_wheel_parts(self, plan=plan)
+    workspace_find_links = make_workspace_find_links_args(self, plan=plan)
 
     use_lockfile_ci = ci_plan.uses_lockfile_ci(self)
     if use_lockfile_ci:
@@ -293,7 +348,7 @@ def make_install_and_test_wheel_parts(
             *install_helpers,
             f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
             # f'export MOD_VERSION=$({get_mod_version_bash})',
-            *workspace_install_lines,
+            *workspace_wheel_lines,
         ]
         + special_install_lines
         + [
@@ -339,11 +394,20 @@ def make_install_and_test_wheel_parts(
             # uv prefers binary wheels by default; the pip --prefer-binary
             # flag does not exist in ``uv pip install`` and was rejected at
             # runtime, so omit it here.
-            'python -m uv pip install --prerelease=allow "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"',
+            join_shell_parts(
+                'python -m uv pip install --prerelease=allow',
+                '"${LOCK_ARGS[@]}"',
+                workspace_find_links,
+                '"${INSTALL_TARGET}"',
+            ),
         ]
     else:
         install_wheel_commands += [
-            f'{self.PIP_INSTALL_PREFER_BINARY} "${{INSTALL_TARGET}}"',
+            join_shell_parts(
+                self.PIP_INSTALL_PREFER_BINARY,
+                workspace_find_links,
+                '"${INSTALL_TARGET}"',
+            ),
         ]
 
     install_wheel_commands += [

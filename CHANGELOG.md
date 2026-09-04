@@ -18,6 +18,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   package versions synchronized and update exact root dependency pins.
 
 ### Fixed
+* Workspace root CI now builds member wheels and exposes them through
+  ``--find-links`` so exact synchronized dependencies resolve before the member
+  distribution has been published.
+* Workspace isolation tests now use each member's own ``pyproject.toml`` as the
+  pytest configuration, preventing root-only pytest plugins from leaking into
+  dependency-free member environments.
 * Version bumping now recognizes legacy changelog headings that use two dashes
   before ``Released``.
 

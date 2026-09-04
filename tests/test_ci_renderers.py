@@ -519,8 +519,19 @@ def test_github_workspace_ci_installs_and_tests_member(tmp_path):
     assert 'workspace_demo_theory:' in text
     assert 'Build demo-theory' in text
     assert 'Test demo-theory in isolation' in text
-    assert '-e "./packages/demo-theory"' in text
-    assert '-e ".[tests,helm]"' in text
+    assert (
+        'python -m pip wheel --no-deps '
+        '--wheel-dir workspace_wheelhouse/demo_theory '
+        './packages/demo-theory'
+    ) in text
+    assert (
+        '--find-links workspace_wheelhouse/demo_theory -e ".[tests,helm]"'
+        in text
+    )
+    assert (
+        'python -m pytest -c ./packages/demo-theory/pyproject.toml '
+        'packages/demo-theory/tests'
+    ) in text
     assert 'expected dependency-free wheel' in text
 
 

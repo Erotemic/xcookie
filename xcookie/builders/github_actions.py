@@ -917,7 +917,10 @@ def build_workspace_member_job(
         test_commands.extend(
             [
                 f'if [[ -d {member.test_dpath} ]]; then',
-                f'    python -m pytest {member.test_dpath}',
+                (
+                    f'    python -m pytest -c ./{member.path}/pyproject.toml '
+                    f'{member.test_dpath}'
+                ),
                 'fi',
             ]
         )
@@ -1281,10 +1284,17 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
         install_target = common_ci.format_pyproject_install_target(
             plan.sdist_test_extras, editable=True
         )
+        workspace_find_links = common_ci.make_workspace_find_links_args(
+            self, plan=plan
+        )
         pip_reqs_install_parts: list[str] = [
             f'{self.UPDATE_PIP}',
-            *common_ci.make_workspace_install_parts(self, plan=plan),
-            f'{self.PIP_INSTALL_PREFER_BINARY} {install_target}',
+            *common_ci.make_workspace_wheel_parts(self, plan=plan),
+            common_ci.join_shell_parts(
+                self.PIP_INSTALL_PREFER_BINARY,
+                workspace_find_links,
+                install_target,
+            ),
         ]
     else:
         pip_reqs_install_parts = [
@@ -1333,7 +1343,12 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
                 'name': 'Install sdist',
                 'run': [
                     f'ls -al {wheelhouse_dpath}',
-                    f'{self.PIP_INSTALL_PREFER_BINARY} {wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz -v',
+                    common_ci.join_shell_parts(
+                        self.PIP_INSTALL_PREFER_BINARY,
+                        workspace_find_links,
+                        f'{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz',
+                        '-v',
+                    ),
                 ],
             },
             {
