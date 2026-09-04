@@ -14,7 +14,6 @@ def _make_applier(
     ci_allow_failure=None,
     ci_prerelease_python_policy=None,
     typecheck_extra_paths=None,
-    typecheck_install_extras=None,
 ):
     kwargs = dict(
         repodir=tmp_path,
@@ -41,8 +40,6 @@ def _make_applier(
         cfg['ci_prerelease_python_policy'] = ci_prerelease_python_policy
     if typecheck_extra_paths is not None:
         cfg['typecheck_extra_paths'] = typecheck_extra_paths
-    if typecheck_install_extras is not None:
-        cfg['typecheck_install_extras'] = typecheck_install_extras
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -374,29 +371,6 @@ def test_github_allow_failure_rules_normalize_experimental_steps(tmp_path):
     assert 'Report experimental failure' not in stable_text
 
 
-def test_github_typecheck_install_extras_are_rendered(tmp_path):
-    (tmp_path / 'pyproject.toml').write_text(
-        """
-[project]
-name = "demo-pkg"
-version = "0.0.0"
-
-[project.optional-dependencies]
-tests = []
-helm = []
-"""
-    )
-    self = _make_applier(
-        tmp_path,
-        tags=['github', 'purepy'],
-        use_pyproject_requirements=True,
-        typecheck_install_extras=['tests', 'helm'],
-    )
-    self.config['linter'] = True
-    text = self.build_github_actions_tests()
-    assert 'pip install --prefer-binary -e ".[tests,helm]"' in text
-
-
 def test_github_typecheck_extra_paths_are_rendered(tmp_path):
     self = _make_applier(
         tmp_path,
@@ -465,3 +439,123 @@ def test_gitlab_prerelease_python_policy_skip(tmp_path):
     text = self.build_gitlab_ci()
     assert '/cp315-' not in text
     assert 'python:3.15-rc' not in text
+
+
+def _write_workspace_demo(tmp_path):
+    (tmp_path / 'demo_pkg').mkdir(exist_ok=True)
+    (tmp_path / 'demo_pkg' / '__init__.py').write_text(
+        "__version__ = '1.2.3'\n"
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+dynamic = ["version"]
+dependencies = ["demo-theory==1.2.3"]
+
+[project.optional-dependencies]
+tests = []
+helm = []
+
+[tool.setuptools.dynamic]
+version = {attr = "demo_pkg.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["demo_pkg*"]
+
+[tool.xcookie]
+workspace_members = ["packages/demo-theory"]
+workspace_sync_versions = true
+typecheck_install_extras = ["tests", "helm"]
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-theory'
+    (member / 'src' / 'demo_theory').mkdir(parents=True)
+    (member / 'tests').mkdir()
+    (member / 'src' / 'demo_theory' / '__init__.py').write_text(
+        "__version__ = '1.2.3'\n"
+    )
+    (member / 'tests' / 'test_smoke.py').write_text(
+        'import demo_theory\n\ndef test_import():\n    assert demo_theory\n'
+    )
+    (member / 'pyproject.toml').write_text(
+        '''
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "demo-theory"
+dynamic = ["version"]
+dependencies = []
+
+[tool.setuptools.dynamic]
+version = {attr = "demo_theory.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["demo_theory*"]
+
+[tool.xcookie]
+mod_name = "demo_theory"
+rel_mod_parent_dpath = "src"
+typed = true
+'''.lstrip()
+    )
+
+
+def test_github_workspace_ci_installs_and_tests_member(tmp_path):
+    _write_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    self.config['typecheck_install_extras'] = ['tests', 'helm']
+    self.config['linter'] = True
+    text = self.build_github_actions_tests()
+    assert 'workspace_demo_theory:' in text
+    assert 'Build demo-theory' in text
+    assert 'Test demo-theory in isolation' in text
+    assert '-e "./packages/demo-theory"' in text
+    assert '-e ".[tests,helm]"' in text
+    assert 'expected dependency-free wheel' in text
+
+
+def test_github_workspace_release_builds_and_publishes_member(tmp_path):
+    _write_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    self.config['deploy'] = True
+    self.config['deploy_pypi'] = True
+    self.config['ci_pypi_trusted_publishing'] = True
+    text = self.build_github_actions_release()
+    assert 'workspace_demo_theory:' in text
+    assert 'workspace-demo-theory-release' in text
+    assert 'Publish demo-theory to PyPI' in text
+    assert 'packages-dir: workspace_release/demo_theory' in text
+    assert 'deploy_workspace_artifacts' in text
+    assert 'workspace_release/**/*' in text
+
+
+def test_github_workspace_publish_requires_trusted_publishing(tmp_path):
+    _write_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    self.config['deploy'] = True
+    self.config['deploy_pypi'] = True
+    self.config['ci_pypi_trusted_publishing'] = False
+    import pytest
+
+    with pytest.raises(ValueError, match='trusted publishing'):
+        self.build_github_actions_release()

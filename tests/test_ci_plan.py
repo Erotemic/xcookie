@@ -11,7 +11,6 @@ def _make_applier(
     use_setup_py=False,
     ci_allow_failure=None,
     ci_prerelease_python_policy=None,
-    typecheck_install_extras=None,
 ):
     if tags is None:
         tags = ['github', 'purepy']
@@ -39,8 +38,6 @@ def _make_applier(
         cfg['ci_allow_failure'] = ci_allow_failure
     if ci_prerelease_python_policy is not None:
         cfg['ci_prerelease_python_policy'] = ci_prerelease_python_policy
-    if typecheck_install_extras is not None:
-        cfg['typecheck_install_extras'] = typecheck_install_extras
     self = TemplateApplier(cfg)
     self._presetup()
     return self
@@ -70,28 +67,6 @@ def test_lock_requirements_path_names_extras_cases():
         ci_plan.lock_requirements_path(['tests', 'optional'])
         == 'requirements/locks/tests-optional.txt'
     )
-
-
-def test_ci_plan_uses_configured_typecheck_install_extras(tmp_path):
-    (tmp_path / 'pyproject.toml').write_text(
-        """
-[project]
-name = "demo-pkg"
-version = "0.0.0"
-
-[project.optional-dependencies]
-tests = []
-helm = []
-"""
-    )
-    self = _make_applier(
-        tmp_path,
-        tags=['github', 'purepy'],
-        use_pyproject_requirements=True,
-        typecheck_install_extras=['tests', 'helm', 'missing'],
-    )
-    plan = ci_plan.make_ci_plan(self)
-    assert plan.typecheck_extras == ('tests', 'helm')
 
 
 def test_ci_plan_filters_pyproject_extras(tmp_path):
@@ -322,3 +297,130 @@ def test_prerelease_python_policy_skip_omits_prerelease_cases(tmp_path):
     cases = ci_model.make_artifact_test_cases(self, provider='github')
     assert cases
     assert all(case.python_version != '3.15' for case in cases)
+
+
+def test_typecheck_install_extras_are_configurable(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+version = "0.0.0"
+
+[project.optional-dependencies]
+tests = []
+helm = []
+'''.lstrip()
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['typecheck_install_extras'] = ['tests', 'helm', 'missing']
+    plan = ci_plan.make_ci_plan(self)
+    assert plan.typecheck_extras == ('tests', 'helm')
+
+
+def test_ci_plan_loads_python_workspace_members(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+version = "1.2.3"
+
+[project.optional-dependencies]
+tests = []
+
+[tool.xcookie]
+workspace_members = ["packages/demo-theory"]
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-theory'
+    (member / 'src' / 'demo_theory').mkdir(parents=True)
+    (member / 'src' / 'demo_theory' / '__init__.py').write_text(
+        "__version__ = '1.2.3'\n"
+    )
+    (member / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-theory"
+dynamic = ["version"]
+dependencies = []
+
+[tool.setuptools.dynamic]
+version = {attr = "demo_theory.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["demo_theory*"]
+
+[tool.xcookie]
+mod_name = "demo_theory"
+rel_mod_parent_dpath = "src"
+typed = true
+'''.lstrip()
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    plan = ci_plan.make_ci_plan(self)
+    assert len(plan.workspace_members) == 1
+    item = plan.workspace_members[0]
+    assert item.pkg_name == 'demo-theory'
+    assert item.mod_name == 'demo_theory'
+    assert item.rel_mod_dpath == 'packages/demo-theory/src/demo_theory'
+    assert item.version == '1.2.3'
+    assert item.dependency_free is True
+
+
+def test_workspace_members_require_github_provider(tmp_path):
+    member = tmp_path / 'packages' / 'demo-theory'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '[project]\nname = "demo-theory"\nversion = "1.0.0"\n'
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['gitlab', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    import pytest
+
+    with pytest.raises(ValueError, match='github'):
+        ci_plan.make_ci_plan(self)
+
+
+def test_workspace_sync_rejects_version_drift(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+version = "1.2.3"
+dependencies = ["demo-theory==1.2.3"]
+
+[tool.xcookie]
+workspace_members = ["packages/demo-theory"]
+workspace_sync_versions = true
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-theory'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '[project]\nname = "demo-theory"\nversion = "1.2.4"\n'
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['version'] = '1.2.3'
+    self.config['workspace_members'] = ['packages/demo-theory']
+    self.config['workspace_sync_versions'] = True
+    import pytest
+
+    with pytest.raises(ValueError, match='does not match root version'):
+        ci_plan.make_ci_plan(self)

@@ -10,6 +10,8 @@ from typing import Literal
 
 import toml
 import ubelt as ub
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 
@@ -103,6 +105,14 @@ class VersionSource:
 
 
 @dataclasses.dataclass(frozen=True)
+class VersionTextEdit:
+    """One additional file edit coupled to a root version bump."""
+
+    path: ub.Path
+    text: str
+
+
+@dataclasses.dataclass(frozen=True)
 class VersionBumpPlan:
     """Resolved edits for one package-version bump."""
 
@@ -112,10 +122,13 @@ class VersionBumpPlan:
     changelog_path: ub.Path
     version_text: str
     changelog_text: str
+    additional_edits: tuple[VersionTextEdit, ...] = ()
 
     def apply(self) -> None:
         """Write the validated version and changelog edits."""
         self.version_source.path.write_text(self.version_text)
+        for edit in self.additional_edits:
+            edit.path.write_text(edit.text)
         self.changelog_path.write_text(self.changelog_text)
 
 
@@ -311,7 +324,7 @@ def update_changelog_for_bump(
         match = heading_pattern.match(line.rstrip('\r\n'))
         if match:
             tail = match.group('tail').strip()
-            status = tail[1:].strip() if tail.startswith('-') else tail
+            status = tail.lstrip('-').strip() if tail.startswith('-') else tail
             headings.append((index, match, status))
 
     if not headings:
@@ -374,6 +387,141 @@ def update_changelog_for_bump(
     new_heading = f'## Version {next_version} - Unreleased\n\n\n'
     lines.insert(current_index, new_heading)
     return ''.join(lines)
+
+
+def _load_workspace_sync_config(repodir: ub.Path) -> tuple[bool, list[str], dict]:
+    pyproject_path = repodir / 'pyproject.toml'
+    if not pyproject_path.exists():
+        return False, [], {}
+    data = toml.loads(pyproject_path.read_text())
+    xcookie = data.get('tool', {}).get('xcookie', {}) or {}
+    sync = bool(xcookie.get('workspace_sync_versions', False))
+    members = xcookie.get('workspace_members', []) or []
+    if isinstance(members, str):
+        members = [members]
+    return sync, [str(item) for item in members], data
+
+
+def _replace_exact_dependency_pin(
+    text: str,
+    project_data: dict,
+    pkg_name: str,
+    current_version: str,
+    next_version: str,
+) -> str:
+    dependencies = project_data.get('project', {}).get('dependencies', []) or []
+    target_name = canonicalize_name(pkg_name)
+    matching_entries = []
+    for entry in dependencies:
+        if not isinstance(entry, str):
+            continue
+        try:
+            req = Requirement(entry)
+        except Exception:
+            continue
+        if canonicalize_name(req.name) != target_name:
+            continue
+        if str(req.specifier) == f'=={current_version}' and not req.marker:
+            matching_entries.append(entry)
+    if len(matching_entries) != 1:
+        raise RuntimeError(
+            f'workspace_sync_versions requires exactly one root dependency '
+            f'pin {pkg_name}=={current_version}; found {matching_entries!r}'
+        )
+    old_entry = matching_entries[0]
+    new_entry = re.sub(
+        rf'=={re.escape(current_version)}$',
+        f'=={next_version}',
+        old_entry,
+    )
+    pattern = re.compile(
+        r'(?P<quote>[\"\'])' + re.escape(old_entry) + r'(?P=quote)'
+    )
+    matches = list(pattern.finditer(text))
+    if len(matches) != 1:
+        raise RuntimeError(
+            f'Expected exactly one textual dependency {old_entry!r} in '
+            f'pyproject.toml, found {len(matches)}'
+        )
+    match = matches[0]
+    quote = match.group('quote')
+    return text[: match.start()] + quote + new_entry + quote + text[match.end() :]
+
+
+def _plan_workspace_version_edits(
+    repodir: ub.Path,
+    source: VersionSource,
+    next_version: str,
+    version_text: str,
+) -> tuple[str, tuple[VersionTextEdit, ...]]:
+    sync, member_paths, root_data = _load_workspace_sync_config(repodir)
+    if not sync:
+        return version_text, tuple()
+    if not member_paths:
+        raise RuntimeError(
+            'workspace_sync_versions=true requires at least one workspace member'
+        )
+
+    root_pyproject_path = repodir / 'pyproject.toml'
+    root_pyproject_text = (
+        version_text
+        if source.path.resolve() == root_pyproject_path.resolve()
+        else root_pyproject_path.read_text()
+    )
+    additional: list[VersionTextEdit] = []
+    seen_paths: set[ub.Path] = set()
+    for relpath in member_paths:
+        member_dpath = (repodir / relpath).resolve()
+        member_pyproject = member_dpath / 'pyproject.toml'
+        if not member_pyproject.exists():
+            raise RuntimeError(
+                f'workspace member {relpath!r} has no pyproject.toml'
+            )
+        member_data = toml.loads(member_pyproject.read_text())
+        member_project = member_data.get('project', {}) or {}
+        member_pkg_name = member_project.get('name')
+        if not isinstance(member_pkg_name, str):
+            raise RuntimeError(
+                f'workspace member {relpath!r} requires [project].name'
+            )
+        member_source = find_version_source(
+            member_dpath, data=member_data, required=True
+        )
+        assert member_source is not None
+        if member_source.version != source.version:
+            raise RuntimeError(
+                f'workspace member {member_pkg_name!r} version '
+                f'{member_source.version} does not match root version '
+                f'{source.version}'
+            )
+        member_edit = VersionTextEdit(
+            path=member_source.path,
+            text=member_source.updated_text(next_version),
+        )
+        if member_edit.path.resolve() in seen_paths:
+            raise RuntimeError(
+                f'duplicate workspace version source: {member_edit.path}'
+            )
+        seen_paths.add(member_edit.path.resolve())
+        additional.append(member_edit)
+        root_pyproject_text = _replace_exact_dependency_pin(
+            root_pyproject_text,
+            root_data,
+            member_pkg_name,
+            source.version,
+            next_version,
+        )
+
+    if source.path.resolve() == root_pyproject_path.resolve():
+        version_text = root_pyproject_text
+    else:
+        additional.append(
+            VersionTextEdit(
+                path=root_pyproject_path,
+                text=root_pyproject_text,
+            )
+        )
+    return version_text, tuple(additional)
 
 
 class VersionBumper:
@@ -455,6 +603,9 @@ class VersionBumper:
         if release_date is None:
             release_date = datetime_mod.date.today()
         version_text = source.updated_text(next_version)
+        version_text, additional_edits = _plan_workspace_version_edits(
+            self.repodir, source, next_version, version_text
+        )
         changelog_text = update_changelog_for_bump(
             changelog_path.read_text(),
             source.version,
@@ -468,6 +619,7 @@ class VersionBumper:
             changelog_path=changelog_path,
             version_text=version_text,
             changelog_text=changelog_text,
+            additional_edits=additional_edits,
         )
 
     def bump(
@@ -486,5 +638,7 @@ class VersionBumper:
         plan.apply()
         print(f'Bumped version {plan.current_version} -> {plan.next_version}')
         print(f'Updated {plan.version_source.path}')
+        for edit in plan.additional_edits:
+            print(f'Updated {edit.path}')
         print(f'Updated {plan.changelog_path}')
         return plan

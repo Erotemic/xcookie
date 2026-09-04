@@ -45,6 +45,21 @@ def make_ci_plan(self):
     return ci_plan.make_ci_plan(self)
 
 
+def make_workspace_install_parts(
+    self, plan: ci_plan.CIPlan | None = None
+) -> list[str]:
+    """Install local workspace distributions before the root project."""
+    if plan is None:
+        plan = make_ci_plan(self)
+    commands = []
+    for member in plan.workspace_members:
+        target = format_pyproject_install_target(
+            [], target=f'./{member.path}', editable=True
+        )
+        commands.append(f'pip install --prefer-binary {target}')
+    return commands
+
+
 def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     """
     Return a list of shell commands to run type checkers.
@@ -53,33 +68,26 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     returned value is a list of command strings so callers can adapt it to
     either GitHub Actions (`run` string) or GitLab CI (`script` list).
     """
-
-    # TODO: more control over which type checkers to use.
-    # right now we always enable ty unless notypes is on.
-    # but we should have more sane defaults.
-    checkers = None
-    if checkers is None:
-        checkers = ['ty']
-
+    checkers = ['ty']
     if 'mypy' in self.tags:
         checkers += ['mypy']
 
-    # Where to install runtime/type requirements from
-    type_requirement_files = [
-        # TODO: get this location from the config
-        'requirements/runtime.txt'
-    ]
+    type_requirement_files = ['requirements/runtime.txt']
     req_files_text = ' '.join(type_requirement_files)
 
+    if plan is None:
+        plan = make_ci_plan(self)
+
     if self.config['use_pyproject_requirements']:
-        if plan is None:
-            plan = make_ci_plan(self)
         target = format_pyproject_install_target(
             plan.typecheck_extras, editable=True
         )
-        pip_install_reqs = f'pip install --prefer-binary {target}'
+        dependency_install_commands = [
+            *make_workspace_install_parts(self, plan=plan),
+            f'pip install --prefer-binary {target}',
+        ]
     else:
-        pip_install_reqs = f'pip install -r {req_files_text}'
+        dependency_install_commands = [f'pip install -r {req_files_text}']
 
     targets = [f'./{self.rel_mod_dpath}']
     extra_targets = self.config.get('typecheck_extra_paths', []) or []
@@ -93,26 +101,15 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     target_text = ' '.join(shlex.quote(target) for target in targets)
 
     commands = []
-
     if 'mypy' in checkers:
-        commands += [
-            'python -m pip install mypy',
-            pip_install_reqs,
-            # TODO; this likely needs to be replaced with some explicit
-            # registration of what typing requirements are for the library
-            # f'mypy --install-types --non-interactive {target_text}',
-            f'mypy {target_text}',
-        ]
-
+        commands.append('python -m pip install mypy')
     if 'ty' in checkers:
-        # Generic support for "ty". Install and run; users can customize
-        # behavior by changing `checkers` or adding config-specific steps.
-        commands += [
-            'python -m pip install ty',
-            pip_install_reqs,
-            f'ty check {target_text}',
-        ]
-
+        commands.append('python -m pip install ty')
+    commands.extend(dependency_install_commands)
+    if 'mypy' in checkers:
+        commands.append(f'mypy {target_text}')
+    if 'ty' in checkers:
+        commands.append(f'ty check {target_text}')
     return commands
 
 
@@ -155,6 +152,7 @@ def make_install_and_test_wheel_parts(
     workspace_dname,
     custom_before_test_lines=[],
     custom_after_test_commands=[],
+    plan: ci_plan.CIPlan | None = None,
 ):
     """
     Builds the YAML common between github actions and gitlab CI to install and
@@ -265,6 +263,10 @@ def make_install_and_test_wheel_parts(
 
     # export UV_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/cpu https://download.pytorch.org/whl/nightly/cu126"
 
+    if plan is None:
+        plan = make_ci_plan(self)
+    workspace_install_lines = make_workspace_install_parts(self, plan=plan)
+
     use_lockfile_ci = ci_plan.uses_lockfile_ci(self)
     if use_lockfile_ci:
         install_helpers = [
@@ -291,6 +293,7 @@ def make_install_and_test_wheel_parts(
             *install_helpers,
             f'export WHEEL_FPATH=$({get_wheel_fpath_bash})',
             # f'export MOD_VERSION=$({get_mod_version_bash})',
+            *workspace_install_lines,
         ]
         + special_install_lines
         + [

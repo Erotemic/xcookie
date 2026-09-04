@@ -1,13 +1,25 @@
 # Changelog
 
-* Add ``typecheck_install_extras`` configuration so generated CI can install project-specific optional dependencies before type checking.
-
 We are currently working on porting this changelog to the specifications in
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 ## Version 0.5.1 - Unreleased
+
+### Added
+* Added first-class Python workspace members for same-repository distributions.
+  GitHub CI builds and tests each member in isolation, root jobs install local
+  members before testing, and trusted-publishing release jobs publish member
+  distributions before the root distribution.
+* Added ``typecheck_install_extras`` so generated typecheck jobs can install
+  optional dependencies needed to resolve the source surface they check.
+* Added ``workspace_sync_versions`` so ``xcookie bump`` can keep workspace
+  package versions synchronized and update exact root dependency pins.
+
+### Fixed
+* Version bumping now recognizes legacy changelog headings that use two dashes
+  before ``Released``.
 
 
 ## Version 0.5.0 - Released 2026-08-28

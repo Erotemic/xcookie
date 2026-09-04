@@ -10,7 +10,12 @@ shape and provider syntax.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import re
 from typing import Any, Iterable, Literal, Mapping
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from xcookie.requirements_layout import DEFAULT_LOCKS_RELPATH
 
@@ -95,6 +100,239 @@ class CIArtifact:
 
 
 @dataclass(frozen=True)
+class WorkspaceMember:
+    """One additional Python distribution maintained in the repository."""
+
+    key: str
+    path: str
+    pkg_name: str
+    mod_name: str
+    rel_mod_parent_dpath: str
+    version: str | None
+    dependencies: tuple[str, ...]
+    optional_dependency_keys: frozenset[str]
+    typecheck_extra_paths: tuple[str, ...]
+    typed: bool
+    publish: bool
+
+    @property
+    def rel_mod_dpath(self) -> str:
+        parent = self.rel_mod_parent_dpath.strip('./')
+        if parent:
+            return f'{self.path}/{parent}/{self.mod_name}'
+        return f'{self.path}/{self.mod_name}'
+
+    @property
+    def test_dpath(self) -> str:
+        return f'{self.path}/tests'
+
+    @property
+    def artifact_name(self) -> str:
+        return f'workspace-{self.key.replace("_", "-")}'
+
+    @property
+    def release_artifact_name(self) -> str:
+        return f'{self.artifact_name}-release'
+
+    @property
+    def dist_prefix(self) -> str:
+        return re.sub(r'[-.]+', '_', self.pkg_name)
+
+    @property
+    def dependency_free(self) -> bool:
+        return not self.dependencies
+
+    @property
+    def test_extras(self) -> tuple[str, ...]:
+        if 'tests' in self.optional_dependency_keys:
+            return ('tests',)
+        return tuple()
+
+
+def _coerce_string_list(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return tuple()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(str(item) for item in value)
+
+
+def _infer_member_module_metadata(
+    data: Mapping[str, Any], pkg_name: str
+) -> tuple[str, str]:
+    tool = data.get('tool', {}) or {}
+    xcookie = tool.get('xcookie', {}) or {}
+    mod_name = xcookie.get('mod_name')
+    rel_parent = xcookie.get('rel_mod_parent_dpath')
+
+    setuptools = tool.get('setuptools', {}) or {}
+    packages = setuptools.get('packages', {}) or {}
+    find_config = packages.get('find', {}) if isinstance(packages, Mapping) else {}
+    if rel_parent is None and isinstance(find_config, Mapping):
+        where = find_config.get('where', []) or []
+        if isinstance(where, str):
+            where = [where]
+        if where:
+            rel_parent = str(where[0])
+
+    if mod_name is None and isinstance(find_config, Mapping):
+        include = find_config.get('include', []) or []
+        if isinstance(include, str):
+            include = [include]
+        if len(include) == 1:
+            candidate = str(include[0]).rstrip('*').rstrip('.')
+            if candidate and '/' not in candidate and '\\' not in candidate:
+                mod_name = candidate
+
+    if mod_name is None:
+        mod_name = pkg_name.replace('-', '_').replace('.', '_')
+    if rel_parent is None:
+        rel_parent = '.'
+    return str(mod_name), str(rel_parent)
+
+
+def load_workspace_members(config: Mapping[str, Any]) -> tuple[WorkspaceMember, ...]:
+    """Load additional distributions declared by ``workspace_members``."""
+    raw_members = config.get('workspace_members') or []
+    if isinstance(raw_members, str):
+        raw_members = [raw_members]
+    if not raw_members:
+        return tuple()
+
+    tags = config.get('tags', []) or []
+    if isinstance(tags, str):
+        tags = [tags]
+    if 'github' not in tags:
+        raise ValueError(
+            'workspace_members currently requires the github xcookie tag'
+        )
+
+    repodir = Path(config['repodir']).resolve()
+    members: list[WorkspaceMember] = []
+    seen_keys: set[str] = set()
+    seen_packages: set[str] = set()
+    for raw_path in raw_members:
+        relpath = Path(str(raw_path))
+        if relpath.is_absolute():
+            raise ValueError(
+                f'workspace member paths must be repository-relative: {raw_path!r}'
+            )
+        member_dpath = (repodir / relpath).resolve()
+        try:
+            normalized_relpath = member_dpath.relative_to(repodir).as_posix()
+        except ValueError as ex:
+            raise ValueError(
+                f'workspace member escapes repository root: {raw_path!r}'
+            ) from ex
+
+        pyproject_fpath = member_dpath / 'pyproject.toml'
+        if not pyproject_fpath.exists():
+            raise ValueError(
+                f'workspace member {normalized_relpath!r} has no pyproject.toml'
+            )
+        import toml
+
+        data = toml.loads(pyproject_fpath.read_text())
+        project = data.get('project', {}) or {}
+        pkg_name = project.get('name')
+        if not isinstance(pkg_name, str) or not pkg_name:
+            raise ValueError(
+                f'workspace member {normalized_relpath!r} requires [project].name'
+            )
+        normalized_pkg = re.sub(r'[-_.]+', '-', pkg_name).lower()
+        key = re.sub(r'[^a-zA-Z0-9_]+', '_', normalized_pkg.replace('-', '_'))
+        if key in seen_keys or normalized_pkg in seen_packages:
+            raise ValueError(f'duplicate workspace package {pkg_name!r}')
+        seen_keys.add(key)
+        seen_packages.add(normalized_pkg)
+
+        mod_name, rel_parent = _infer_member_module_metadata(data, pkg_name)
+        dependencies = _coerce_string_list(project.get('dependencies'))
+        optional = project.get('optional-dependencies', {}) or {}
+        if not isinstance(optional, Mapping):
+            optional = {}
+
+        tool = data.get('tool', {}) or {}
+        xcookie = tool.get('xcookie', {}) or {}
+        typecheck_extra_paths = _coerce_string_list(
+            xcookie.get('typecheck_extra_paths')
+        )
+        typed_value = xcookie.get('typed', True)
+        typed = typed_value not in {False, None, 'false', 'none', 'off'}
+        publish = bool(xcookie.get('deploy_pypi', True))
+
+        from xcookie.versioning import find_version_source
+
+        version_source = find_version_source(
+            member_dpath, data=data, required=False
+        )
+        version = None if version_source is None else version_source.version
+        members.append(
+            WorkspaceMember(
+                key=key,
+                path=normalized_relpath,
+                pkg_name=pkg_name,
+                mod_name=mod_name,
+                rel_mod_parent_dpath=rel_parent,
+                version=version,
+                dependencies=dependencies,
+                optional_dependency_keys=frozenset(str(k) for k in optional),
+                typecheck_extra_paths=typecheck_extra_paths,
+                typed=typed,
+                publish=publish,
+            )
+        )
+    return tuple(members)
+
+
+
+def validate_workspace_sync(
+    self: Any, members: tuple[WorkspaceMember, ...]
+) -> None:
+    """Reject a workspace whose synchronized package versions have drifted."""
+    if not members or not self.config.get('workspace_sync_versions', False):
+        return
+
+    root_version = str(self.config.get('version') or '')
+    if not root_version:
+        raise ValueError(
+            'workspace_sync_versions requires a resolved root package version'
+        )
+
+    pyproject = self.config._load_pyproject_config() or {}
+    dependencies = pyproject.get('project', {}).get('dependencies', []) or []
+    parsed_requirements = []
+    for item in dependencies:
+        if not isinstance(item, str):
+            continue
+        try:
+            parsed_requirements.append(Requirement(item))
+        except Exception:
+            continue
+
+    for member in members:
+        if member.version != root_version:
+            raise ValueError(
+                f'workspace member {member.pkg_name!r} version '
+                f'{member.version!r} does not match root version '
+                f'{root_version!r}'
+            )
+        member_name = canonicalize_name(member.pkg_name)
+        matching = [
+            req
+            for req in parsed_requirements
+            if canonicalize_name(req.name) == member_name
+            and str(req.specifier) == f'=={root_version}'
+            and req.marker is None
+        ]
+        if len(matching) != 1:
+            raise ValueError(
+                'workspace_sync_versions requires exactly one root dependency '
+                f'pin {member.pkg_name}=={root_version}'
+            )
+
+
+@dataclass(frozen=True)
 class CIPlan:
     """Provider-neutral CI decisions shared by GitHub and GitLab renderers."""
 
@@ -104,6 +342,7 @@ class CIPlan:
     typecheck_extras: tuple[str, ...]
     sdist_test_extras: tuple[str, ...]
     ci_artifacts: tuple[CIArtifact, ...]
+    workspace_members: tuple[WorkspaceMember, ...]
 
     def variants_by_key(self) -> dict[VariantKey, TestVariant]:
         return {variant.key: variant for variant in self.test_variants}
@@ -442,9 +681,10 @@ def make_ci_plan(self: Any) -> CIPlan:
     )
 
     if use_pyproject:
-        desired_typecheck_extras = _as_list(
-            self.config.get('typecheck_install_extras', ['tests'])
+        configured_typecheck_extras = self.config.get(
+            'typecheck_install_extras', ['tests']
         )
+        desired_typecheck_extras = _as_list(configured_typecheck_extras)
         desired_sdist_extras = ['tests']
         if 'cv2' in self.tags:
             desired_sdist_extras.append('headless')
@@ -458,6 +698,9 @@ def make_ci_plan(self: Any) -> CIPlan:
         typecheck_extras = tuple()
         sdist_test_extras = tuple()
 
+    workspace_members = load_workspace_members(self.config)
+    validate_workspace_sync(self, workspace_members)
+
     return CIPlan(
         optional_dependency_keys=frozenset(
             get_pyproject_optional_dependency_keys(self)
@@ -467,4 +710,5 @@ def make_ci_plan(self: Any) -> CIPlan:
         typecheck_extras=tuple(typecheck_extras),
         sdist_test_extras=tuple(sdist_test_extras),
         ci_artifacts=load_ci_artifacts(self.config),
+        workspace_members=workspace_members,
     )

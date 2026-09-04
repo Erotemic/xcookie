@@ -95,7 +95,6 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
                         'typecheck_extra_paths': [
                             'tests/typecheck_consumer.py'
                         ],
-                        'typecheck_install_extras': ['tests', 'helm'],
                         'ci_prerelease_python_policy': 'strict',
                         'entry_points': {
                             'console_scripts': [
@@ -137,7 +136,6 @@ def test_pyproject_regen_preserves_explicit_tool_xcookie_values(tmp_path):
     assert xcookie_block['typecheck_extra_paths'] == [
         'tests/typecheck_consumer.py'
     ]
-    assert xcookie_block['typecheck_install_extras'] == ['tests', 'helm']
     assert xcookie_block['ci_prerelease_python_policy'] == 'strict'
     assert xcookie_block['entry_points']['console_scripts'] == [
         'demo=demo_mod.__main__:main',
@@ -253,3 +251,64 @@ def test_pyproject_regen_preserves_equivalent_os_spelling(tmp_path):
     )
 
     assert pyproject_data['tool']['xcookie']['os'] == original_os
+
+
+def test_pyproject_preserves_workspace_and_typecheck_settings(tmp_path):
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    pkgdir = repodir / 'demo_mod'
+    pkgdir.mkdir(parents=True)
+    (pkgdir / '__init__.py').write_text("__version__ = '2.0.0'\n")
+    (repodir / 'pyproject.toml').write_text(
+        toml.dumps(
+            {
+                'project': {
+                    'name': 'demo-mod',
+                    'dynamic': ['version'],
+                    'dependencies': ['demo-theory==2.0.0'],
+                },
+                'tool': {
+                    'xcookie': {
+                        'tags': ['github', 'purepy'],
+                        'mod_name': 'demo_mod',
+                        'repo_name': 'demo_mod',
+                        'min_python': '3.11',
+                        'typecheck_install_extras': ['tests', 'helm'],
+                        'workspace_members': ['packages/demo-theory'],
+                        'workspace_sync_versions': True,
+                    }
+                }
+            }
+        )
+    )
+    member = repodir / 'packages' / 'demo-theory'
+    (member / 'src' / 'demo_theory').mkdir(parents=True)
+    (member / 'src' / 'demo_theory' / '__init__.py').write_text(
+        "__version__ = '2.0.0'\n"
+    )
+    (member / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-theory"
+version = "2.0.0"
+'''.lstrip()
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+    )
+    config['version'] = '2.0.0'
+    applier = TemplateApplier(config)
+    applier.setup()
+    data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
+    block = data['tool']['xcookie']
+    assert block['typecheck_install_extras'] == ['tests', 'helm']
+    assert block['workspace_members'] == ['packages/demo-theory']
+    assert block['workspace_sync_versions'] is True
