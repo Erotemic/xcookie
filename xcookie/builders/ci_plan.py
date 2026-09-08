@@ -17,7 +17,10 @@ from typing import Any, Iterable, Literal, Mapping
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from xcookie.requirements_layout import DEFAULT_LOCKS_RELPATH
+from xcookie.requirements_layout import (
+    DEFAULT_LOCKS_RELPATH,
+    DEFAULT_REQUIREMENTS_RELPATH,
+)
 
 VariantKey = Literal[
     'minimal-loose',
@@ -264,7 +267,7 @@ def load_workspace_members(config: Mapping[str, Any]) -> tuple[WorkspaceMember, 
         from xcookie.versioning import find_version_source
 
         version_source = find_version_source(
-            member_dpath, data=data, required=False
+            str(member_dpath), data=data, required=False
         )
         version = None if version_source is None else version_source.version
         members.append(
@@ -568,6 +571,25 @@ def filter_pyproject_extras(
     return tuple(extra for extra in desired if extra in available)
 
 
+def filter_requirement_groups(
+    self: Any, desired_groups: Iterable[str]
+) -> tuple[str, ...]:
+    """Filter desired groups to checked-in ``requirements/*.txt`` files."""
+    requirements_dpath = (
+        Path(self.repodir) / str(DEFAULT_REQUIREMENTS_RELPATH)
+    )
+    desired = _unique(str(group) for group in desired_groups)
+    if not requirements_dpath.exists():
+        # New repo path: nothing to filter against, trust the desired list.
+        return desired
+    available = {
+        path.stem
+        for path in requirements_dpath.glob('*.txt')
+        if path.is_file()
+    }
+    return tuple(group for group in desired if group in available)
+
+
 def format_pyproject_install_target(
     extras: Iterable[str], target: str = '.', editable: bool = False
 ) -> str:
@@ -655,8 +677,11 @@ def make_ci_plan(self: Any) -> CIPlan:
     variant_extras = _base_variant_extras(self)
     _apply_ci_extras(variant_extras, _load_ci_extras(self.config))
 
-    use_pyproject = uses_pyproject_dependency_mode(self)
-    if use_pyproject:
+    use_pyproject_dependencies = uses_pyproject_dependency_mode(self)
+    use_pyproject_requirements = bool(
+        self.config.get('use_pyproject_requirements')
+    )
+    if use_pyproject_dependencies:
         variant_extras = {
             key: list(filter_pyproject_extras(self, extras))
             for key, extras in variant_extras.items()
@@ -680,11 +705,11 @@ def make_ci_plan(self: Any) -> CIPlan:
         variant for variant in variants if variant.key in requested_set
     )
 
-    if use_pyproject:
-        configured_typecheck_extras = self.config.get(
-            'typecheck_install_extras', ['tests']
-        )
-        desired_typecheck_extras = _as_list(configured_typecheck_extras)
+    configured_typecheck_extras = self.config.get(
+        'typecheck_install_extras', ['tests']
+    )
+    desired_typecheck_extras = _as_list(configured_typecheck_extras)
+    if use_pyproject_requirements:
         desired_sdist_extras = ['tests']
         if 'cv2' in self.tags:
             desired_sdist_extras.append('headless')
@@ -695,7 +720,9 @@ def make_ci_plan(self: Any) -> CIPlan:
         )
         sdist_test_extras = filter_pyproject_extras(self, desired_sdist_extras)
     else:
-        typecheck_extras = tuple()
+        typecheck_extras = filter_requirement_groups(
+            self, desired_typecheck_extras
+        )
         sdist_test_extras = tuple()
 
     workspace_members = load_workspace_members(self.config)

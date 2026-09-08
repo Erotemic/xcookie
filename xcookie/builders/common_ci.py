@@ -9,6 +9,7 @@ import shlex
 import ubelt as ub
 
 from xcookie.builders import ci_plan
+from xcookie.requirements_layout import DEFAULT_REQUIREMENTS_RELPATH
 
 
 def get_pyproject_optional_dependency_keys(self):
@@ -109,9 +110,6 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     if 'mypy' in self.tags:
         checkers += ['mypy']
 
-    type_requirement_files = ['requirements/runtime.txt']
-    req_files_text = ' '.join(type_requirement_files)
-
     if plan is None:
         plan = make_ci_plan(self)
 
@@ -130,7 +128,17 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
             ),
         ]
     else:
-        dependency_install_commands = [f'pip install -r {req_files_text}']
+        requirements_relpath = str(DEFAULT_REQUIREMENTS_RELPATH)
+        requirement_files = [f'{requirements_relpath}/runtime.txt']
+        requirement_files.extend(
+            f'{requirements_relpath}/{extra}.txt'
+            for extra in plan.typecheck_extras
+        )
+        requirement_files = list(dict.fromkeys(requirement_files))
+        requirement_args = ' '.join(
+            f'-r {shlex.quote(path)}' for path in requirement_files
+        )
+        dependency_install_commands = [f'pip install {requirement_args}']
 
     targets = [f'./{self.rel_mod_dpath}']
     extra_targets = self.config.get('typecheck_extra_paths', []) or []

@@ -18,6 +18,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   package versions synchronized and update exact root dependency pins.
 
 ### Fixed
+* Legacy requirements-file projects now honor ``typecheck_install_extras``.
 * Workspace root CI now passes member source directories and the root package
   to the same resolver invocation. Exact synchronized development versions
   therefore resolve from the checkout even when they do not exist on PyPI.

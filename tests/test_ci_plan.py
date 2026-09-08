@@ -321,6 +321,24 @@ helm = []
     assert plan.typecheck_extras == ('tests', 'helm')
 
 
+def test_typecheck_install_extras_use_requirement_groups_in_legacy_mode(tmp_path):
+    requirements_dpath = tmp_path / 'requirements'
+    requirements_dpath.mkdir()
+    for name in ['runtime', 'types', 'optional']:
+        (requirements_dpath / f'{name}.txt').write_text(f'# {name}\n')
+
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=False,
+    )
+    self.config['typecheck_install_extras'] = [
+        'types', 'optional', 'missing'
+    ]
+    plan = ci_plan.make_ci_plan(self)
+    assert plan.typecheck_extras == ('types', 'optional')
+
+
 def test_ci_plan_loads_python_workspace_members(tmp_path):
     (tmp_path / 'pyproject.toml').write_text(
         '''

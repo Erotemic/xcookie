@@ -263,7 +263,9 @@ class XCookieConfig(kwconf.Config):
             ['tests'],
             help=ub.paragraph(
                 """
-            Optional-dependency extras to install before running type checkers.
+            Dependency groups to install before running type checkers. In
+            pyproject dependency mode these name optional-dependency extras;
+            in requirements-file mode they name requirements/<group>.txt files.
             This is separate from typecheck_extra_paths: the latter selects
             source targets, while this setting selects dependencies needed to
             resolve imports while checking them.

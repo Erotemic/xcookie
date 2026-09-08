@@ -1,4 +1,4 @@
-from xcookie.builders import ci_model
+from xcookie.builders import ci_model, common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
 
@@ -369,6 +369,30 @@ def test_github_allow_failure_rules_normalize_experimental_steps(tmp_path):
     stable_text = stable_self.build_github_actions_tests()
     assert continue_expr not in stable_text
     assert 'Report experimental failure' not in stable_text
+
+
+def test_legacy_typecheck_installs_configured_requirement_groups(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['gitlab', 'purepy'],
+        use_pyproject_requirements=False,
+    )
+    requirements_dpath = tmp_path / 'requirements'
+    requirements_dpath.mkdir(exist_ok=True)
+    for name in ['runtime', 'types', 'optional', 'headless']:
+        (requirements_dpath / f'{name}.txt').write_text(f'# {name}\n')
+    self.config['typecheck_install_extras'] = [
+        'types', 'optional', 'headless'
+    ]
+
+    plan = common_ci.make_ci_plan(self)
+    commands = common_ci.make_typecheck_parts(self, plan=plan)
+    assert (
+        'pip install -r requirements/runtime.txt '
+        '-r requirements/types.txt '
+        '-r requirements/optional.txt '
+        '-r requirements/headless.txt'
+    ) in commands
 
 
 def test_github_typecheck_extra_paths_are_rendered(tmp_path):
