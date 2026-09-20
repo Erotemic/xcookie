@@ -106,21 +106,25 @@ class GitHubActionsRenderer:
                 workspace_members=self.plan.workspace_members,
             )
 
-        # Only refs that can actually deploy trigger the release workflow:
-        # test_deploy fires on pushes to the default branch, and
-        # live_deploy/release fire on release branches and tags. An
-        # unfiltered `push:` would run the (expensive) sdist/wheel build
-        # jobs on every push to every branch and then deploy nothing.
-        defaultbranch = self.applier.config['defaultbranch']
-        release_branches = ub.oset([defaultbranch, 'main'])
-        release_branches_str = ', '.join(
-            list(release_branches) + ["'release*'"]
-        )
-        on_lines = f"""
+        # A live release is deliberately branch-driven and provider-neutral:
+        # `git push <remote> main:release` is the release operation whether
+        # <remote> is GitHub or GitLab. Tags are outputs of that operation,
+        # never alternate workflow entry points. Manual dispatch remains
+        # available for artifact builds and explicit TestPyPI probes without
+        # granting it authority to cut a live release.
+        on_lines = """
         push:
-          branches: [ {release_branches_str} ]
-          tags: [ '*' ]
+          branches: [ release ]
         workflow_dispatch:
+          inputs:
+            publish_target:
+              description: Optional non-production publish target
+              required: true
+              default: build-only
+              type: choice
+              options:
+                - build-only
+                - testpypi
         """
         footer = _build_github_footer(self.applier)
         return _render_workflow_text(name, on_lines, jobs, footer=footer)
@@ -680,17 +684,16 @@ def _build_github_footer(self):
 
                    - testpypi:
                        * environment name: testpypi
-                       * use for non-release pushes that publish to TestPyPI
+                       * use only for explicit workflow_dispatch TestPyPI probes
                        * usually no manual approval is needed
-                       * optionally restrict deployment branches if you only want
-                         TestPyPI publishes from selected branches
+                       * this environment is never part of a live release push
 
                    - pypi:
                        * environment name: pypi
                        * use for real releases only
                        * require manual approval / required reviewers
                        * prevent self-review if your org supports it
-                       * restrict deployments to release branches / version tags
+                       * restrict deployments to the exact release branch
 
                    - do not put TWINE_* secrets in these environments when using
                      trusted publishing
@@ -2042,7 +2045,16 @@ def build_binpy_wheels_release_job(self):
             ),
             indent=8,
         )
-    matrix['os'] = os_list
+    release_os_list = []
+    for os_name in os_list:
+        release_os_list.append(os_name)
+        if os_name.lower() == 'macos-latest':
+            # GitHub's macos-latest runner is Apple Silicon. Add the explicit
+            # Intel runner so release artifacts cover both native macOS
+            # architectures without cross-compiling either wheel.
+            release_os_list.append('macos-15-intel')
+    release_os_list = list(ub.oset(release_os_list))
+    matrix['os'] = release_os_list
     if not reusable_wheels:
         matrix['cibw_skip'] = [explicit_skips.strip()]
     matrix['arch'] = ['auto']
@@ -2054,7 +2066,7 @@ def build_binpy_wheels_release_job(self):
         ]
 
     vcpkg_pre_steps, vcpkg_post_steps, vcpkg_cibw_env = _vcpkg_build_support(
-        self, os_list
+        self, release_os_list
     )
 
     cibw_action = Actions.cibuildwheel(sensible=True)
@@ -2490,8 +2502,6 @@ def build_deploy(
     use_direct_gpg = ci_gpg_transport == 'direct_ci'
     live_pass_varname = self.config['ci_pypi_live_password_varname']
     test_pass_varname = self.config['ci_pypi_test_password_varname']
-    defaultbranch = self.config.get('defaultbranch', 'main')
-
     assert mode in {'live', 'test'}
     if mode == 'live':
         env = {}
@@ -2517,7 +2527,10 @@ def build_deploy(
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
-        condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
+        condition = (
+            "github.event_name == 'push' && "
+            "github.ref == 'refs/heads/release'"
+        )
 
     elif mode == 'test':
         env = {}
@@ -2543,10 +2556,9 @@ def build_deploy(
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
-        # condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
         condition = (
-            "github.event_name == 'push' && "
-            f"github.event.ref == 'refs/heads/{defaultbranch}'"
+            "github.event_name == 'workflow_dispatch' && "
+            "github.event.inputs.publish_target == 'testpypi'"
         )
     else:
         raise KeyError(mode)
@@ -2968,7 +2980,10 @@ def build_github_release(
         https://github.com/softprops/action-gh-release
         https://github.com/softprops/action-gh-release/issues/20#issuecomment-572245945
     """
-    condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
+    condition = (
+        "github.event_name == 'push' && "
+        "github.ref == 'refs/heads/release'"
+    )
     env = {
         'GITHUB_TOKEN': '${{ secrets.GITHUB_TOKEN }}',
     }
@@ -3000,19 +3015,13 @@ def build_github_release(
             echo "VERSION=$VERSION"
             test -n "$VERSION" || {{ echo "failed to parse version" ; exit 1; }}
             TAG="v$VERSION"
-            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-                EVENT_TAG="${{GITHUB_REF#refs/tags/}}"
-                TAG="$EVENT_TAG"
-            fi
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             """
         ),
     }
 
-    needs_tag_condition = "(startsWith(github.event.ref, 'refs/heads/release'))"
     tag_action = {
         'name': 'Tag Release Commit',
-        'if': needs_tag_condition,
         'shell': 'bash',
         'run': ub.codeblock(
             """
@@ -3049,7 +3058,7 @@ def build_github_release(
             'target_commitish': '${{ github.sha }}',
             'body': 'Automatic Release',
             'generate_release_notes': True,
-            'draft': True,  # Maybe keep as a draft until we determine this is ok?
+            'draft': False,
             'prerelease': False,
             'files': chr(10).join(artifact_globs),
         },

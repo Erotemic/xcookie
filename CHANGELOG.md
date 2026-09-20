@@ -44,6 +44,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   setup notes document the self-managed issuer onboarding requirement.
 
 ### Fixed
+* GitHub live releases now use the exact ``release`` branch as the production
+  entry point, matching GitLab's ``git push <remote> main:release`` release
+  contract. Tags are release outputs rather than alternate workflow triggers;
+  TestPyPI publishing is manual-only, and successful GitHub releases are
+  published rather than left as drafts. Binary release matrices also add the
+  native Intel macOS runner alongside Apple Silicon so both macOS wheel
+  families are built without changing normal test matrices.
 * ``xcookie bump`` now keeps recognized local package-version mirrors in sync
   when they matched before the bump: a package ``__version__`` assignment and
   the Rust ``[package].version`` selected by ``tool.maturin.manifest-path``.
