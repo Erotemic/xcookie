@@ -448,6 +448,133 @@ def _replace_exact_dependency_pin(
     return text[: match.start()] + quote + new_entry + quote + text[match.end() :]
 
 
+def _updated_toml_section_version_text(
+    path: ub.Path,
+    *,
+    section_name: str,
+    current_version: str,
+    next_version: str,
+) -> str:
+    """Update exactly one ``version`` key in a named TOML section."""
+    text = path.read_text()
+    lines = text.splitlines(keepends=True)
+    section = None
+    replaced = 0
+    pattern = re.compile(
+        rf"^(?P<prefix>\s*version\s*=\s*)"
+        rf"(?P<quote>['\"]){re.escape(current_version)}(?P=quote)"
+        r"(?P<suffix>\s*(?:#.*)?(?:\r?\n)?)$"
+    )
+    for index, line in enumerate(lines):
+        section_match = re.match(r'^\s*\[([^]]+)\]\s*$', line.strip())
+        if section_match:
+            section = section_match.group(1)
+            continue
+        if section == section_name:
+            match = pattern.match(line)
+            if match:
+                quote = match.group('quote')
+                lines[index] = (
+                    match.group('prefix')
+                    + quote
+                    + next_version
+                    + quote
+                    + match.group('suffix')
+                )
+                replaced += 1
+    if replaced != 1:
+        raise RuntimeError(
+            f'Expected exactly one [{section_name}] version assignment equal '
+            f'to {current_version!r} in {path}, found {replaced}'
+        )
+    return ''.join(lines)
+
+
+def _plan_local_version_mirror_edits(
+    repodir: ub.Path,
+    source: VersionSource,
+    next_version: str,
+) -> tuple[VersionTextEdit, ...]:
+    """Synchronize recognized local mirrors that matched before the bump.
+
+    Static PEP 621 projects often duplicate their distribution version in a
+    package ``__version__`` and, for Maturin projects, in the Rust crate
+    manifest.  Treat those locations as mirrors only when they already equal
+    the authoritative version.  A deliberately independent version therefore
+    remains untouched.
+    """
+    pyproject_path = repodir / 'pyproject.toml'
+    if not pyproject_path.exists():
+        return tuple()
+    data = toml.loads(pyproject_path.read_text())
+    project = data.get('project', {}) or {}
+    tool = data.get('tool', {}) or {}
+    xcookie_config = tool.get('xcookie', {}) or {}
+
+    additional: list[VersionTextEdit] = []
+    seen_paths: set[ub.Path] = {source.path.resolve()}
+
+    module_name = xcookie_config.get('mod_name')
+    if not isinstance(module_name, str) or not module_name:
+        project_name = project.get('name')
+        if isinstance(project_name, str) and project_name:
+            module_name = project_name.replace('-', '_')
+        else:
+            module_name = None
+
+    if module_name is not None:
+        python_mirrors = []
+        for path in _candidate_module_paths(repodir, data, module_name):
+            if not path.exists() or path.resolve() in seen_paths:
+                continue
+            version = _parse_python_assignment(path, '__version__')
+            if version == source.version:
+                python_mirrors.append(path)
+        if len(python_mirrors) > 1:
+            raise RuntimeError(
+                'Multiple package __version__ mirrors match the authoritative '
+                f'version: {python_mirrors!r}'
+            )
+        if python_mirrors:
+            path = python_mirrors[0]
+            mirror_source = VersionSource(
+                path=path,
+                kind='python',
+                version=source.version,
+                variable='__version__',
+            )
+            additional.append(
+                VersionTextEdit(
+                    path=path,
+                    text=mirror_source.updated_text(next_version),
+                )
+            )
+            seen_paths.add(path.resolve())
+
+    maturin = tool.get('maturin', {}) or {}
+    manifest_path = maturin.get('manifest-path')
+    if isinstance(manifest_path, str) and manifest_path:
+        cargo_path = (repodir / manifest_path).resolve()
+        if cargo_path.exists() and cargo_path not in seen_paths:
+            cargo_data = toml.loads(cargo_path.read_text())
+            cargo_version = (cargo_data.get('package', {}) or {}).get('version')
+            if cargo_version == source.version:
+                additional.append(
+                    VersionTextEdit(
+                        path=cargo_path,
+                        text=_updated_toml_section_version_text(
+                            cargo_path,
+                            section_name='package',
+                            current_version=source.version,
+                            next_version=next_version,
+                        ),
+                    )
+                )
+                seen_paths.add(cargo_path)
+
+    return tuple(additional)
+
+
 def _plan_workspace_version_edits(
     repodir: ub.Path,
     source: VersionSource,
@@ -592,7 +719,7 @@ class VersionBumper:
         *,
         release_date: datetime_mod.date | None = None,
     ) -> VersionBumpPlan:
-        """Validate and construct the two-file bump before writing either."""
+        """Validate and construct the coordinated bump before writing files."""
         source = self.find_version_source()
         next_version = self.resolve_next_version(source.version, target)
         changelog_path = self.repodir / 'CHANGELOG.md'
@@ -603,9 +730,18 @@ class VersionBumper:
         if release_date is None:
             release_date = datetime_mod.date.today()
         version_text = source.updated_text(next_version)
-        version_text, additional_edits = _plan_workspace_version_edits(
+        local_mirror_edits = _plan_local_version_mirror_edits(
+            self.repodir, source, next_version
+        )
+        version_text, workspace_edits = _plan_workspace_version_edits(
             self.repodir, source, next_version, version_text
         )
+        additional_edits = local_mirror_edits + workspace_edits
+        resolved_paths = [edit.path.resolve() for edit in additional_edits]
+        if len(resolved_paths) != len(set(resolved_paths)):
+            raise RuntimeError(
+                'A version bump planned multiple edits for the same file'
+            )
         changelog_text = update_changelog_for_bump(
             changelog_path.read_text(),
             source.version,

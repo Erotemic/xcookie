@@ -6,6 +6,7 @@ from typing import Any
 
 import ubelt as ub
 
+from xcookie.publishing import trusted_publishing_enabled
 from xcookie.util_command import make_command_queue
 
 
@@ -83,9 +84,6 @@ class SecretRotator:
         """Print the rotation plan, confirm it, then execute it."""
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
         enable_gpg = self.config['enable_gpg']
-        use_trusted_publishing = self.config.get(
-            'ci_pypi_trusted_publishing', False
-        )
         ci_gpg_transport = self.config.get(
             'ci_gpg_secret_transport', 'encrypted_repo'
         )
@@ -101,7 +99,11 @@ class SecretRotator:
             environ_export = backend['environ_export']
             upload_secret_cmd = backend['upload_secret_cmd']
             gpg_upload_cmd = backend['gpg_upload_cmd']
+            provider = backend['name']
             is_github = backend['is_github']
+            use_trusted_publishing = trusted_publishing_enabled(
+                self.config, provider
+            )
 
             script.sync().submit(
                 f'echo "===== Rotating secrets for {backend["name"]}'
@@ -130,9 +132,17 @@ class SecretRotator:
                     ' no additional CI secrets to upload."',
                     log=False,
                 )
-            elif use_trusted_publishing and is_github:
+            elif use_trusted_publishing:
+                if is_github:
+                    mode = 'trusted_publishing'
+                else:
+                    mode = (
+                        'trusted_publishing_direct_gpg'
+                        if use_direct_gpg or not enable_gpg
+                        else 'trusted_publishing_encrypted_gpg'
+                    )
                 script.sync().submit(
-                    f'{upload_secret_cmd} trusted_publishing', log=False
+                    f'{upload_secret_cmd} {mode}', log=False
                 )
             elif use_direct_gpg:
                 script.sync().submit(

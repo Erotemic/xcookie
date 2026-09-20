@@ -35,8 +35,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 * Generated binary-wheel helpers now clear stale wheelhouses, honor reusable
   wheel build selectors from ``[tool.cibuildwheel]``, and run configured
   post-build artifact validation commands.
+* PyPI Trusted Publishing can now be selected per CI provider. Legacy
+  ``true`` retains its historical GitHub-only meaning, while provider lists
+  such as ``["github", "gitlab"]`` opt GitLab into OIDC publishing.
+  GitLab emits a dedicated minimal PyPI publication job that requests a
+  ``pypi`` audience ID token, binds it to the ``pypi`` environment, and
+  publishes with Twine without long-lived PyPI credentials. Generated GitLab
+  setup notes document the self-managed issuer onboarding requirement.
 
 ### Fixed
+* ``xcookie bump`` now keeps recognized local package-version mirrors in sync
+  when they matched before the bump: a package ``__version__`` assignment and
+  the Rust ``[package].version`` selected by ``tool.maturin.manifest-path``.
+  Deliberately independent versions are left unchanged.
 * GitHub Actions PyPy jobs now test the minimal dependency surface instead of
   installing full optional extras. Optional binary/scientific dependencies
   remain covered by CPython full-loose jobs, avoiding unrelated PyPy source

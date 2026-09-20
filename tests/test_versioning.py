@@ -333,3 +333,98 @@ def test_bump_accepts_legacy_double_dash_release_heading(tmp_path):
     )
     assert '## Version 0.0.3 - Unreleased' in updated
     assert '## Version 0.0.2 -- Released 2026-05-08' in updated
+
+
+def test_bump_syncs_matching_python_and_maturin_version_mirrors(tmp_path):
+    (tmp_path / 'demo').mkdir()
+    (tmp_path / 'demo' / '__init__.py').write_text(
+        "__version__ = '4.5.6'\n"
+    )
+    (tmp_path / 'rust').mkdir()
+    (tmp_path / 'rust' / 'Cargo.toml').write_text(
+        '''
+[package]
+name = "demo-rust"
+version = "4.5.6"
+edition = "2021"
+'''.lstrip()
+    )
+    (tmp_path / 'Cargo.toml').write_text(
+        '''
+[package]
+name = "unrelated-root-crate"
+version = "0.1.0"
+'''.lstrip()
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo"
+version = "4.5.6"
+
+[tool.xcookie]
+mod_name = "demo"
+
+[tool.maturin]
+manifest-path = "rust/Cargo.toml"
+'''.lstrip()
+    )
+    (tmp_path / 'CHANGELOG.md').write_text(
+        '# Changelog\n\n## Version 4.5.6 - Unreleased\n'
+    )
+
+    plan = VersionBumper(tmp_path).bump(
+        'minor', release_date=datetime_mod.date(2026, 9, 20)
+    )
+
+    assert plan.next_version == '4.6.0'
+    assert 'version = "4.6.0"' in (tmp_path / 'pyproject.toml').read_text()
+    assert "__version__ = '4.6.0'" in (
+        tmp_path / 'demo' / '__init__.py'
+    ).read_text()
+    assert 'version = "4.6.0"' in (
+        tmp_path / 'rust' / 'Cargo.toml'
+    ).read_text()
+    assert 'version = "0.1.0"' in (tmp_path / 'Cargo.toml').read_text()
+
+
+def test_bump_leaves_mismatched_local_versions_independent(tmp_path):
+    (tmp_path / 'demo').mkdir()
+    (tmp_path / 'demo' / '__init__.py').write_text(
+        "__version__ = '9.9.9'\n"
+    )
+    (tmp_path / 'rust').mkdir()
+    (tmp_path / 'rust' / 'Cargo.toml').write_text(
+        '''
+[package]
+name = "demo-rust"
+version = "1.0.0"
+'''.lstrip()
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo"
+version = "4.5.6"
+
+[tool.xcookie]
+mod_name = "demo"
+
+[tool.maturin]
+manifest-path = "rust/Cargo.toml"
+'''.lstrip()
+    )
+    (tmp_path / 'CHANGELOG.md').write_text(
+        '# Changelog\n\n## Version 4.5.6 - Unreleased\n'
+    )
+
+    VersionBumper(tmp_path).bump(
+        'patch', release_date=datetime_mod.date(2026, 9, 20)
+    )
+
+    assert "__version__ = '9.9.9'" in (
+        tmp_path / 'demo' / '__init__.py'
+    ).read_text()
+    assert 'version = "1.0.0"' in (
+        tmp_path / 'rust' / 'Cargo.toml'
+    ).read_text()

@@ -604,7 +604,17 @@ upload_gitlab_repo_secrets(){
 
     local mode="${1:-legacy}"
     local SECRET_VARNAME_ARR
-    if [[ "$mode" == "direct_gpg" ]]; then
+    if [[ "$mode" == "trusted_publishing_direct_gpg" ]]; then
+        # PyPI credentials are replaced by OIDC. GPG material is uploaded
+        # separately, so GitLab only needs the repository push credential used
+        # by the release/tag step.
+        SECRET_VARNAME_ARR=(VARNAME_PUSH_TOKEN)
+    elif [[ "$mode" == "trusted_publishing_encrypted_gpg" ]]; then
+        # Trusted Publishing removes Twine credentials, but the legacy
+        # encrypted-repo signing transport still needs CI_SECRET and the
+        # release/tag step still needs the push credential.
+        SECRET_VARNAME_ARR=(VARNAME_CI_SECRET VARNAME_PUSH_TOKEN)
+    elif [[ "$mode" == "direct_gpg" ]]; then
         # GPG material is uploaded separately by upload_gitlab_gpg_secrets;
         # CI_SECRET isn't needed in this mode.
         SECRET_VARNAME_ARR=(VARNAME_TWINE_PASSWORD VARNAME_TEST_TWINE_PASSWORD VARNAME_TWINE_USERNAME VARNAME_TEST_TWINE_USERNAME VARNAME_PUSH_TOKEN)

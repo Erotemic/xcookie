@@ -20,6 +20,7 @@ from xcookie.builders.ci_plan import (
     CISourceCheck,
     WorkspaceMember,
 )
+from xcookie.publishing import trusted_publishing_enabled
 from xcookie.util_yaml import Yaml
 
 # Type alias for json / yaml data structure
@@ -600,8 +601,8 @@ def _matrix_needs_qemu(matrix: Mapping[str, JSON]) -> bool:
 
 
 def _build_github_footer(self):
-    use_trusted_publishing = self.config.get(
-        'ci_pypi_trusted_publishing', False
+    use_trusted_publishing = trusted_publishing_enabled(
+        self.config, 'github'
     )
     ci_gpg_transport = self.config.get(
         'ci_gpg_secret_transport', 'encrypted_repo'
@@ -2468,8 +2469,8 @@ def build_deploy(
 
     enable_gpg = self.config['enable_gpg']
 
-    use_trusted_publishing = self.config.get(
-        'ci_pypi_trusted_publishing', False
+    use_trusted_publishing = trusted_publishing_enabled(
+        self.config, 'github'
     )
     publishing_workspace_members = tuple(
         member for member in workspace_members if member.publish

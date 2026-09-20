@@ -384,7 +384,15 @@ class XCookieConfig(kwconf.Config):
         ),
         'ci_pypi_trusted_publishing': kwconf.Value(
             True,
-            help='if True, github deploy jobs use PyPI trusted publishing instead of twine password secrets',
+            help=ub.paragraph(
+                """
+                Controls which CI providers use PyPI Trusted Publishing
+                instead of long-lived Twine password secrets. For backward
+                compatibility, boolean true means GitHub only. Use a provider
+                list such as ["github", "gitlab"] (or "all") to opt
+                GitLab into trusted publishing explicitly.
+                """
+            ),
         ),
         'regen': kwconf.Value(
             None,

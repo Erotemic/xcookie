@@ -514,3 +514,208 @@ def test_yes_flag_answers_xcookie_prompts_without_stdin():
 
     assert cfg.prompt('apply?', ['yes', 'no'], default='yes') == 'yes'
     assert cfg.confirm('continue?', default=False) is False
+
+# ---------------------------------------------------------------------------
+# Provider-neutral Trusted Publishing policy / GitLab OIDC
+# ---------------------------------------------------------------------------
+
+
+def test_trusted_publishing_legacy_true_remains_github_only(tmp_path):
+    from xcookie.publishing import trusted_publishing_providers
+
+    self = _make_applier(
+        tmp_path,
+        trusted=True,
+        enable_gpg=False,
+        tags=['github', 'gitlab', 'erotemic', 'purepy'],
+    )
+    assert trusted_publishing_providers(self.config) == frozenset({'github'})
+
+    github_text = self.build_github_actions_release()
+    gitlab_text = self.build_gitlab_ci()
+    assert 'id-token: write' in github_text
+    assert 'PYPI_ID_TOKEN' not in gitlab_text
+    assert 'VARNAME_TWINE_PASSWORD' in gitlab_text
+
+
+def test_trusted_publishing_provider_list_enables_github_and_gitlab(tmp_path):
+    from xcookie.publishing import trusted_publishing_providers
+
+    self = _make_applier(
+        tmp_path,
+        trusted=['github', 'gitlab'],
+        enable_gpg=False,
+        tags=['github', 'gitlab', 'erotemic', 'purepy'],
+    )
+    assert trusted_publishing_providers(self.config) == frozenset(
+        {'github', 'gitlab'}
+    )
+
+    github_text = self.build_github_actions_release()
+    gitlab_text = self.build_gitlab_ci()
+    assert 'id-token: write' in github_text
+    assert 'PYPI_ID_TOKEN' in gitlab_text
+
+
+def test_trusted_publishing_gitlab_only_does_not_enable_github(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        trusted=['gitlab'],
+        enable_gpg=False,
+        tags=['github', 'gitlab', 'erotemic', 'purepy'],
+    )
+    github_text = self.build_github_actions_release()
+    gitlab_text = self.build_gitlab_ci()
+
+    assert 'pypa/gh-action-pypi-publish@release/v1' not in github_text
+    assert 'TWINE_PASSWORD' in github_text
+    assert 'PYPI_ID_TOKEN' in gitlab_text
+
+
+def test_gitlab_trusted_publishing_job_uses_oidc_without_twine_passwords(
+    tmp_path,
+):
+    from xcookie.util_yaml import Yaml
+
+    self = _make_applier(
+        tmp_path,
+        trusted=['gitlab'],
+        enable_gpg=False,
+        tags=['gitlab', 'kitware', 'purepy'],
+    )
+    text = self.build_gitlab_ci()
+    body = Yaml.loads(text)
+
+    publish = body['publish/pypi']
+    deploy = body['deploy/wheels']
+    assert publish['id_tokens']['PYPI_ID_TOKEN']['aud'] == 'pypi'
+    assert publish['environment']['name'] == 'pypi'
+    assert 'id_tokens' not in deploy
+    assert 'environment' not in deploy
+
+    publish_script = '\n'.join(map(str, publish['script']))
+    deploy_script = '\n'.join(map(str, deploy['script']))
+    assert 'twine upload --skip-existing "$WHEEL_PATH"' in publish_script
+    assert 'TWINE_PASSWORD=${!VARNAME_TWINE_PASSWORD}' not in publish_script
+    assert 'TWINE_USERNAME=${!VARNAME_TWINE_USERNAME}' not in publish_script
+    assert 'twine upload' not in deploy_script
+
+
+def test_gitlab_trusted_publishing_oidc_job_is_minimal_and_uses_signed_artifact(
+    tmp_path,
+):
+    from xcookie.util_yaml import Yaml
+
+    self = _make_applier(
+        tmp_path,
+        trusted=['gitlab'],
+        enable_gpg=True,
+        tags=['gitlab', 'kitware', 'purepy'],
+    )
+    body = Yaml.loads(self.build_gitlab_ci())
+    publish = body['publish/pypi']
+
+    assert publish['needs'] == [
+        {'job': 'gpgsign/wheels', 'artifacts': True}
+    ]
+    script = '\n'.join(map(str, publish['script']))
+    assert 'git tag' not in script
+    assert 'packages/generic' not in script
+    assert 'releases' not in script
+    assert 'source dev/secrets_configuration.sh' not in script
+
+
+def test_gitlab_trusted_publishing_footer_documents_self_managed_setup(
+    tmp_path,
+):
+    cfg = XCookieConfig(
+        repodir=tmp_path,
+        repo_name='demo_pkg',
+        tags=['kitware', 'gitlab', 'purepy'],
+        url='https://gitlab.kitware.com/computer-vision/demo_pkg',
+        interactive=False,
+        use_vcs=False,
+    )
+    cfg['ci_pypi_trusted_publishing'] = ['gitlab']
+    cfg['enable_gpg'] = False
+    self = TemplateApplier(cfg)
+    self._presetup()
+
+    text = self.build_gitlab_ci()
+    assert 'GitLab PyPI Trusted Publishing setup checklist' in text
+    assert 'GitLab instance: https://gitlab.kitware.com' in text
+    assert 'namespace: computer-vision' in text
+    assert 'repository: demo_pkg' in text
+    assert 'top-level pipeline: .gitlab-ci.yml' in text
+    assert 'environment: pypi' in text
+    assert 'support+orgs@pypi.org' in text
+    assert 'November 2025' in text
+
+
+def test_rotate_secrets_gitlab_trusted_direct_gpg_drops_twine_credentials(
+    monkeypatch, tmp_path
+):
+    _patch_command_queue(monkeypatch)
+
+    self = _make_direct_gpg_applier(
+        tmp_path,
+        trusted=['gitlab'],
+        tags=['gitlab', 'kitware', 'purepy'],
+    )
+    SecretRotator(self.config).rotate_secrets()
+
+    joined = '\n'.join(_FakeQueue.created[-1].commands)
+    assert 'upload_gitlab_gpg_secrets' in joined
+    assert (
+        'upload_gitlab_repo_secrets trusted_publishing_direct_gpg' in joined
+    )
+    assert 'upload_gitlab_repo_secrets direct_gpg' not in joined
+
+
+def test_rotate_secrets_gitlab_trusted_encrypted_gpg_keeps_ci_secret_mode(
+    monkeypatch, tmp_path
+):
+    _patch_command_queue(monkeypatch)
+
+    self = _make_applier(
+        tmp_path,
+        trusted=['gitlab'],
+        enable_gpg=True,
+        tags=['gitlab', 'kitware', 'purepy'],
+    )
+    self.config['ci_gpg_secret_transport'] = 'encrypted_repo'
+    SecretRotator(self.config).rotate_secrets()
+
+    joined = '\n'.join(_FakeQueue.created[-1].commands)
+    assert 'export_encrypted_code_signing_keys' in joined
+    assert (
+        'upload_gitlab_repo_secrets trusted_publishing_encrypted_gpg'
+        in joined
+    )
+
+
+def test_gitlab_secret_uploader_has_trusted_publishing_modes():
+    from pathlib import Path
+
+    import xcookie.rc as rc
+
+    text = Path(rc.resource_fpath('setup_secrets.sh.in')).read_text()
+    assert '"trusted_publishing_direct_gpg"' in text
+    assert 'SECRET_VARNAME_ARR=(VARNAME_PUSH_TOKEN)' in text
+    assert '"trusted_publishing_encrypted_gpg"' in text
+    assert 'SECRET_VARNAME_ARR=(VARNAME_CI_SECRET VARNAME_PUSH_TOKEN)' in text
+
+
+def test_gitlab_trusted_publishing_notes_absent_when_pypi_deploy_disabled(
+    tmp_path,
+):
+    self = _make_applier(
+        tmp_path,
+        trusted=['gitlab'],
+        enable_gpg=False,
+        tags=['gitlab', 'kitware', 'purepy'],
+    )
+    self.config['deploy_pypi'] = False
+    text = self.build_gitlab_ci()
+    assert 'publish/pypi:' not in text
+    assert 'GitLab PyPI Trusted Publishing setup checklist' not in text

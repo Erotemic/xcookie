@@ -7,6 +7,7 @@ import ubelt as ub
 from xcookie.builders import ci_model
 from xcookie.builders import common_ci
 from xcookie.builders.ci_plan import CIPlan
+from xcookie.publishing import trusted_publishing_enabled
 
 
 class GitLabCIRenderer:
@@ -21,8 +22,13 @@ class GitLabCIRenderer:
     def render(self) -> str:
         """Render the repository-root GitLab configuration."""
         if self.plan.ci_source_checks:
-            return self.render_manifest()
-        return self.render_main()
+            text = self.render_manifest()
+        else:
+            text = self.render_main()
+        footer = _build_gitlab_trusted_publishing_footer(self.applier)
+        if footer:
+            text = text.rstrip() + '\n\n' + footer.rstrip() + '\n'
+        return text
 
     def render_main(self) -> str:
         """Render the anchor-heavy primary pipeline as one self-contained file."""
@@ -55,6 +61,79 @@ class GitLabCIRenderer:
             """
         )
         return (header + '\n' + Yaml.dumps(body)).rstrip() + '\n'
+
+
+def _build_gitlab_trusted_publishing_footer(self) -> str:
+    """Render setup notes for the root GitLab Trusted Publisher pipeline."""
+    if (
+        not self.config.get('deploy_pypi', False)
+        or not trusted_publishing_enabled(self.config, 'gitlab')
+    ):
+        return ''
+
+    from urllib.parse import quote
+
+    from packaging.utils import canonicalize_name
+
+    host = str(self.remote_info.get('host', 'https://gitlab.com')).rstrip('/')
+    if not host.startswith(('http://', 'https://')):
+        host = 'https://' + host
+    group = self.remote_info.get('group', '<NAMESPACE>')
+    repo_name = self.remote_info.get('repo_name', self.repo_name)
+    repo_name = str(repo_name).removesuffix('.git')
+    repo_url = f'{host}/{group}/{repo_name}'
+    project_name = canonicalize_name(self.pkg_name)
+    project_name_quoted = quote(project_name, safe='')
+    pypi_project_url = (
+        f'https://pypi.org/manage/project/'
+        f'{project_name_quoted}/settings/publishing/'
+    )
+
+    footer_text = ub.codeblock(
+        f"""
+        GitLab PyPI Trusted Publishing setup checklist
+
+        This top-level pipeline:
+          .gitlab-ci.yml
+        Repository:
+          {repo_url}
+        OIDC issuer / GitLab instance:
+          {host}
+
+        Official references:
+          https://docs.pypi.org/trusted-publishers/
+          https://docs.pypi.org/trusted-publishers/using-a-publisher/
+          https://docs.pypi.org/trusted-publishers/security-model/
+          https://blog.pypi.org/posts/2025-11-10-trusted-publishers-coming-to-orgs/
+          https://docs.gitlab.com/ci/secrets/id_token_authentication/
+
+        PyPI publisher fields for this repository:
+          GitLab instance: {host}
+          namespace: {group}
+          repository: {repo_name}
+          top-level pipeline: .gitlab-ci.yml
+          environment: pypi
+        Project publishing page:
+          {pypi_project_url}
+
+        GitLab Self-Managed note:
+          PyPI announced self-managed GitLab Trusted Publishing as a beta in
+          November 2025. During the beta the issuer must be onboarded by PyPI
+          staff. If this GitLab instance is not offered by PyPI yet, contact
+          support+orgs@pypi.org and request onboarding for:
+            {host}
+          before the release pipeline is expected to publish successfully.
+
+        Security note:
+          PyPI trusts claims for the top-level .gitlab-ci.yml pipeline. Included
+          GitLab CI fragments run under that pipeline identity, so changes to
+          the top-level pipeline and its includes are security-sensitive.
+        """
+    )
+    return '\n'.join(
+        '# ' + line if line else '#'
+        for line in footer_text.splitlines()
+    )
 
 
 def _add_yaml_merge(target, referent):
@@ -515,6 +594,20 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         )
         body['stages'].append('deploy')
         body['deploy/wheels'] = deploy_job
+        if (
+            self.config['deploy_pypi']
+            and trusted_publishing_enabled(self.config, 'gitlab')
+        ):
+            artifact_needs = (
+                ['gpgsign/wheels'] if enable_gpg else build_names
+            )
+            body['publish/pypi'] = build_trusted_pypi_publish_job(
+                self,
+                common_template,
+                main_image,
+                wheelhouse_dpath,
+                artifact_needs,
+            )
 
     # 0.17.32
     # body_text = ruamel.yaml.round_trip_dump(body, Dumper=ruamel.yaml.RoundTripDumper)
@@ -835,6 +928,20 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
             self, common_template, main_image, wheelhouse_dpath
         )
         body['deploy/wheels'] = deploy_job
+        if (
+            self.config['deploy_pypi']
+            and trusted_publishing_enabled(self.config, 'gitlab')
+        ):
+            artifact_needs = (
+                ['gpgsign/wheels'] if enable_gpg else build_names
+            )
+            body['publish/pypi'] = build_trusted_pypi_publish_job(
+                self,
+                common_template,
+                main_image,
+                wheelhouse_dpath,
+                artifact_needs,
+            )
 
     body_text = Yaml.dumps(body)
     body = Yaml.loads(body_text)
@@ -1053,6 +1160,10 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
 
     from xcookie.util_yaml import Yaml
 
+    use_trusted_publishing = trusted_publishing_enabled(
+        self.config, 'gitlab'
+    )
+
     deploy_job = {}
     deploy_job.update(
         ub.udict(
@@ -1085,7 +1196,10 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
         _dist_patterns.append(wheelhouse_dpath + '/*.tar.gz')
     dist_pattern = ' '.join(_dist_patterns)
 
-    if self.config['deploy_pypi']:
+    # Trusted Publishing deliberately runs in its own minimal job so the
+    # OIDC token is not exposed to tag creation, package-registry uploads, or
+    # release-page orchestration. Legacy secret-based publishing remains here.
+    if self.config['deploy_pypi'] and not use_trusted_publishing:
         deploy_script += [
             Yaml.CodeBlock(
                 """
@@ -1100,8 +1214,8 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
                 echo "$WHEEL_PATHS_STR"
                 for WHEEL_PATH in "${WHEEL_PATHS[@]}"
                 do
-                    twine check $WHEEL_PATH
-                    twine upload --username $TWINE_USERNAME --password $TWINE_PASSWORD $WHEEL_PATH || echo "upload already exists"
+                    twine check "$WHEEL_PATH"
+                    twine upload --username "$TWINE_USERNAME" --password "$TWINE_PASSWORD" --skip-existing "$WHEEL_PATH"
                 done
                 """
             )
@@ -1282,3 +1396,60 @@ def build_deploy_job(self, common_template, deploy_image, wheelhouse_dpath):
     deploy_job = CommentedMap(deploy_job)
     _add_yaml_merge(deploy_job, common_template)
     return deploy_job
+
+
+def build_trusted_pypi_publish_job(
+    self, common_template, deploy_image, wheelhouse_dpath, artifact_needs
+):
+    """Build the minimal GitLab job that receives the PyPI OIDC token."""
+    from ruamel.yaml.comments import CommentedMap
+
+    from xcookie.util_yaml import Yaml
+
+    _dist_patterns = [wheelhouse_dpath + '/*.whl']
+    if 'nosrcdist' not in self.tags:
+        _dist_patterns.append(wheelhouse_dpath + '/*.tar.gz')
+    dist_pattern = ' '.join(_dist_patterns)
+
+    publish_job = {
+        'image': deploy_image,
+        'stage': 'deploy',
+        'only': {'refs': ['release']},
+        'needs': [
+            {'job': job_name, 'artifacts': True}
+            for job_name in artifact_needs
+        ],
+        'id_tokens': {
+            'PYPI_ID_TOKEN': {
+                'aud': 'pypi',
+            }
+        },
+        # Binding an environment gives PyPI one more claim to require and lets
+        # GitLab protected-environment policy gate the publishing job.
+        'environment': {'name': 'pypi'},
+        'script': [
+            f'{self.PIP_INSTALL} twine -U',
+            f'ls {wheelhouse_dpath}',
+            Yaml.CodeBlock(
+                """
+                set -e
+                WHEEL_PATHS=("""
+                + dist_pattern
+                + """)
+                WHEEL_PATHS_STR=$(printf '"%s" ' "${WHEEL_PATHS[@]}")
+                echo "$WHEEL_PATHS_STR"
+                for WHEEL_PATH in "${WHEEL_PATHS[@]}"
+                do
+                    twine check "$WHEEL_PATH"
+                    # PYPI_ID_TOKEN is supplied by GitLab's OIDC provider.
+                    # With no explicit username/password, Twine exchanges it
+                    # for a short-lived PyPI API token and performs the upload.
+                    twine upload --skip-existing "$WHEEL_PATH"
+                done
+                """
+            ),
+        ],
+    }
+    publish_job = CommentedMap(publish_job)
+    _add_yaml_merge(publish_job, common_template)
+    return publish_job
