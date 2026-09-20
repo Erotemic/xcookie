@@ -46,6 +46,7 @@ def _configure_reusable_ci(self):
                 './dev/check_backend_parity.sh',
             ],
             'env': {'DEMO_FORCE_BACKEND': '1'},
+            'allow_failure': True,
         }
     }
     # Rebuild the shared plan after mutating test configuration.
@@ -58,6 +59,7 @@ def test_reusable_wheel_contract_drives_github_ci(tmp_path):
     self._presetup()
 
     tests_text = self.build_github_actions_tests()
+    checks_text = self.build_github_actions_checks()
     release_text = self.build_github_actions_release()
 
     # Reusable wheels are selected by pyproject.toml instead of a per-python
@@ -81,13 +83,17 @@ def test_reusable_wheel_contract_drives_github_ci(tmp_path):
             in text
         )
 
-    # Source parity is normal CI evidence, not a release-time rerun.
-    assert 'check_backend_parity:' in tests_text
-    assert 'Backend parity' in tests_text
-    assert 'export DEMO_TOOLCHAIN=/tmp/demo-toolchain' in tests_text
-    assert 'test "$DEMO_TOOLCHAIN" = /tmp/demo-toolchain' in tests_text
-    assert './dev/check_backend_parity.sh' in tests_text
-    assert 'DEMO_FORCE_BACKEND: \'1\'' in tests_text
+    # Source parity is normal CI evidence, but it has its own workflow rather
+    # than being embedded in the expensive test matrix or release pipeline.
+    assert 'check_backend_parity:' not in tests_text
+    assert 'check_backend_parity:' in checks_text
+    assert 'Backend parity' in checks_text
+    assert 'export DEMO_TOOLCHAIN=/tmp/demo-toolchain' in checks_text
+    assert 'test "$DEMO_TOOLCHAIN" = /tmp/demo-toolchain' in checks_text
+    assert './dev/check_backend_parity.sh' in checks_text
+    assert 'DEMO_FORCE_BACKEND: \'1\'' in checks_text
+    assert 'continue-on-error: true' in checks_text
+    assert 'pull_request:' in checks_text
     assert 'check_backend_parity:' not in release_text
 
 
@@ -96,8 +102,17 @@ def test_reusable_wheel_contract_drives_gitlab_ci(tmp_path):
     self = _configure_reusable_ci(self)
     self._presetup()
 
-    text = self.build_gitlab_ci()
-    body = Yaml.loads(text)
+    manifest_text = self.build_gitlab_ci()
+    manifest = Yaml.loads(manifest_text)
+    main_text = self.build_gitlab_ci_main()
+    body = Yaml.loads(main_text)
+    checks_text = self.build_gitlab_ci_checks()
+    checks = Yaml.loads(checks_text)
+
+    assert manifest['include'] == [
+        {'local': '.gitlab/ci/main.yml'},
+        {'local': '.gitlab/ci/checks.yml'},
+    ]
 
     reusable_builds = [key for key in body if key.startswith('build/reusable-')]
     assert reusable_builds == ['build/reusable-linux-x86_64']
@@ -119,18 +134,21 @@ def test_reusable_wheel_contract_drives_gitlab_ci(tmp_path):
 
     # The selector stays in pyproject.toml; GitLab must not override it once
     # per test interpreter.
-    assert 'CIBW_BUILD:' not in text
+    assert 'CIBW_BUILD:' not in main_text
 
     assert (
         'python dev/check_wheel_artifact.py wheelhouse/demo_pkg*.whl'
         in body['.cibuildwheel_template']['script']
     )
-    parity = body['check/backend-parity']
+    assert 'check/backend-parity' not in body
+    parity = checks['check/backend-parity']
     assert parity['stage'] == 'test'
     assert parity['image'] == 'python:3.12'
+    assert 'python -m pip install -r requirements/tests.txt' in parity['script']
     assert './dev/check_backend_parity.sh' in parity['script']
     assert parity['variables']['DEMO_FORCE_BACKEND'] == '1'
     assert parity['except']['refs'] == ['release']
+    assert parity['allow_failure'] is True
 
     release_plan = ci_model.make_release_plan(self, provider='gitlab')
     assert release_plan.build_job_keys == ('build/reusable-linux-x86_64',)
@@ -149,6 +167,59 @@ def test_reusable_legacy_binpy_defaults_to_minimum_build_selector(tmp_path):
     text = self.build_pyproject()
     data = toml.loads(text)
     assert data['tool']['cibuildwheel']['build'] == 'cp310-*'
+
+
+def test_reusable_local_wheel_helper_honors_pyproject_selector(tmp_path):
+    self = _make_applier(tmp_path, tags=['github', 'binpy'])
+    self = _configure_reusable_ci(self)
+    self._presetup()
+
+    text = common_ci.build_wheels_script(self)
+    assert 'LOCAL_CP_VERSION=' not in text
+    assert 'CIBW_BUILD = <from pyproject.toml>' in text
+    assert 'rm -rf wheelhouse' in text
+    assert 'cibuildwheel --config-file pyproject.toml' in text
+    assert (
+        'python dev/check_wheel_artifact.py wheelhouse/demo_pkg*.whl' in text
+    )
+
+
+def test_nonreusable_local_wheel_helper_keeps_current_python_shortcut(tmp_path):
+    self = _make_applier(tmp_path, tags=['github', 'binpy'])
+    self._presetup()
+    text = common_ci.build_wheels_script(self)
+    assert 'LOCAL_CP_VERSION=' in text
+    assert 'CIBW_BUILD="${CIBW_BUILD:-${LOCAL_CP_VERSION}-*}"' in text
+    assert 'rm -rf wheelhouse' in text
+
+
+def test_source_check_split_also_works_for_purepy(tmp_path):
+    self = _make_applier(tmp_path, tags=['github', 'gitlab', 'purepy'])
+    self.config['ci_source_checks'] = {
+        'compile': {
+            'setup_commands': ['python -V'],
+            'commands': ['python -m compileall demo_pkg'],
+        }
+    }
+    self = TemplateApplier(self.config)
+    self._presetup()
+
+    github_tests = self.build_github_actions_tests()
+    github_checks = self.build_github_actions_checks()
+    assert 'check_compile:' not in github_tests
+    assert 'check_compile:' in github_checks
+    assert 'python -m compileall demo_pkg' in github_checks
+
+    gitlab_root = Yaml.loads(self.build_gitlab_ci())
+    assert gitlab_root['include'] == [
+        {'local': '.gitlab/ci/main.yml'},
+        {'local': '.gitlab/ci/checks.yml'},
+    ]
+    gitlab_main = Yaml.loads(self.build_gitlab_ci_main())
+    gitlab_checks = Yaml.loads(self.build_gitlab_ci_checks())
+    assert 'check/compile' not in gitlab_main
+    assert 'check/compile' in gitlab_checks
+    assert 'python -m compileall demo_pkg' in gitlab_checks['check/compile']['script']
 
 
 def test_maturin_binpy_backend_is_not_polluted_by_legacy_build_stack(tmp_path):

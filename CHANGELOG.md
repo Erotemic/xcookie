@@ -23,12 +23,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 * Added generic source-check and post-wheel-build validation hooks so projects
   can run backend parity checks in normal CI and inspect built wheel artifacts
   without hand-editing generated workflows.
+* Source checks now render as a dedicated GitHub ``checks.yml`` workflow and,
+  on GitLab, as a standalone local include beside the self-contained primary
+  pipeline. Repositories without source checks keep their existing CI layout.
 * GitLab binary test jobs now honor the existing ``test_env`` configuration,
   matching GitHub so backend-forcing and other runtime validation environment
   variables are generator-owned on both providers.
 * Binary projects with an explicit non-setuptools PEP 517 backend (for example
   maturin) now retain that backend and its cibuildwheel configuration instead
   of having xcookie reintroduce the legacy scikit-build/Cython/CMake stack.
+* Generated binary-wheel helpers now clear stale wheelhouses, honor reusable
+  wheel build selectors from ``[tool.cibuildwheel]``, and run configured
+  post-build artifact validation commands.
 
 ### Fixed
 * GitHub Actions PyPy jobs now test the minimal dependency surface instead of
@@ -44,6 +50,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   dependency-free member environments.
 * Version bumping now recognizes legacy changelog headings that use two dashes
   before ``Released``.
+* GitHub trusted-publisher setup instructions now honor an explicit
+  ``github_url`` when a project has a non-GitHub primary repository URL.
 
 
 ## Version 0.5.0 - Released 2026-08-28

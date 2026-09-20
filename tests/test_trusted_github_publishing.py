@@ -161,6 +161,32 @@ def test_release_workflow_trusted_footer_drops_twine_act_secrets(tmp_path):
     assert 'EROTEMIC_TEST_TWINE_PASSWORD' not in text
 
 
+def test_trusted_footer_prefers_explicit_github_mirror(tmp_path):
+    cfg = XCookieConfig(
+        repodir=tmp_path,
+        repo_name='demo_pkg',
+        tags=['kitware', 'gitlab', 'github', 'binpy'],
+        url='https://gitlab.kitware.com/computer-vision/demo_pkg',
+        github_url='https://github.com/Erotemic/demo_pkg',
+        min_python='3.10',
+        interactive=False,
+        use_vcs=False,
+    )
+    cfg['ci_pypi_trusted_publishing'] = True
+    cfg['enable_gpg'] = False
+    self = TemplateApplier(cfg)
+    self._presetup()
+
+    # The primary remote remains GitLab, but all GitHub-specific trusted
+    # publishing instructions must point at the configured mirror.
+    assert 'gitlab.kitware.com' in self.remote_info['host']
+    text = self.build_github_actions_release()
+    assert 'owner: Erotemic' in text
+    assert 'repository: demo_pkg' in text
+    assert 'https://github.com/Erotemic/demo_pkg/settings/environments' in text
+    assert 'gitlab.kitware.com/computer-vision/demo_pkg/actions/' not in text
+
+
 def test_release_workflow_legacy_footer_keeps_twine_act_secrets(tmp_path):
     text = _make_applier(
         tmp_path, trusted=False, enable_gpg=True

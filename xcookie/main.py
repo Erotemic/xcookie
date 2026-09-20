@@ -321,6 +321,19 @@ class XCookieConfig(kwconf.Config):
         'url': kwconf.Value(
             None, type=str, help='repo metadata: url for the project'
         ),
+        'github_url': kwconf.Value(
+            None,
+            type=str,
+            help=ub.paragraph(
+                """
+                Optional canonical GitHub mirror URL. This is useful for
+                repositories whose primary ``url`` is hosted elsewhere but
+                which also generate GitHub Actions workflows. GitHub-specific
+                release metadata, such as trusted-publisher setup links, uses
+                this URL when provided.
+                """
+            ),
+        ),
         # Note: these may be a string or a list of strings. kwconf only
         # applies the parser to CLI/env strings, so list-valued TOML
         # metadata passes through unmangled (scriptconfig's type=str cast
@@ -485,8 +498,9 @@ class XCookieConfig(kwconf.Config):
                 ``runner`` are GitHub-specific; ``gitlab_image`` is
                 GitLab-specific. Setup and validation commands share one shell
                 session so native-toolchain environment changes persist. These
-                checks run in normal test CI only; release workflows rely on
-                the reviewed main-branch CI result.
+                checks run as normal source validation, separated from the
+                generated test matrix and release workflow. Release workflows
+                rely on the reviewed main-branch CI result.
                 """
             ),
         ),
@@ -1510,6 +1524,12 @@ class TemplateApplier:
         self._setup_pip_commands()
         return github_actions.build_github_actions_tests(self)
 
+    def build_github_actions_checks(self):
+        from xcookie.builders import github_actions
+
+        self._setup_pip_commands()
+        return github_actions.build_github_actions_checks(self)
+
     def build_github_actions_release(self):
         from xcookie.builders import github_actions
 
@@ -1522,6 +1542,17 @@ class TemplateApplier:
         self._setup_pip_commands()  # Do we need this here?
         return gitlab_ci.build_gitlab_ci(self)
 
+    def build_gitlab_ci_main(self):
+        from xcookie.builders import gitlab_ci
+
+        self._setup_pip_commands()
+        return gitlab_ci.build_gitlab_ci_main(self)
+
+    def build_gitlab_ci_checks(self):
+        from xcookie.builders import gitlab_ci
+
+        self._setup_pip_commands()
+        return gitlab_ci.build_gitlab_ci_checks(self)
 
     def build_refresh_locks_sh(self):
         """Build ``dev/refresh_locks.sh``.
