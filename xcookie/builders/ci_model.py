@@ -376,6 +376,34 @@ def make_artifact_test_cases(
                     else:
                         cases.append(base_case)
 
+    if provider == 'github':
+        # PyPy is an interpreter-compatibility dimension, not a request to
+        # exercise every optional dependency under an alternate interpreter.
+        # In particular, optional scientific stacks often lack PyPy wheels on
+        # one or more GitHub runner platforms and then fall back to expensive
+        # or impossible source builds. Keep PyPy coverage focused on the
+        # package plus its test dependencies. CPython full-loose jobs continue
+        # to cover the project's optional extras.
+        pypy_versions = supported_platform_info['pypy_versions']
+        if pypy_versions:
+            pypy_variant = plan.variants_by_key()['minimal-loose']
+            for platform in platforms:
+                for pyver in pypy_versions:
+                    base_case = ArtifactTestCase(
+                        variant=pypy_variant,
+                        python_version=str(pyver),
+                        platform=platform,
+                        install_extras=pypy_variant.install_extras,
+                        use_lockfile=False,
+                        lock_requirements=None,
+                        gdal_requirement_txt=_variant_gdal_requirement(
+                            self, pypy_variant
+                        ),
+                    )
+                    github_case = _github_case_for_python(base_case)
+                    if github_case is not None:
+                        cases.append(github_case)
+
     if self.config['use_pyproject_requirements']:
         cases = _dedupe_cases(cases)
     else:

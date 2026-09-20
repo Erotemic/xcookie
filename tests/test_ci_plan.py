@@ -151,14 +151,51 @@ def test_artifact_test_cases_preserve_github_minimal_loose_platform_reduction(
     cases = ci_model.make_artifact_test_cases(
         self, plan=plan, provider='github'
     )
-    minimal_loose = [
-        case for case in cases if case.variant.key == 'minimal-loose'
+    minimal_loose_cpython = [
+        case
+        for case in cases
+        if case.variant.key == 'minimal-loose'
+        and not case.python_version.startswith('pypy-')
     ]
     full_loose = [case for case in cases if case.variant.key == 'full-loose']
-    assert len(full_loose) >= len(minimal_loose)
+    assert len(full_loose) >= len(minimal_loose_cpython)
     assert all(
-        case.platform.github_os != 'ubuntu-latest' for case in minimal_loose
+        case.platform.github_os != 'ubuntu-latest'
+        for case in minimal_loose_cpython
     )
+
+
+def test_github_pypy_cases_use_minimal_loose_extras(tmp_path):
+    self = _make_applier(
+        tmp_path, tags=['github', 'purepy'], min_python='3.10'
+    )
+    # Make this regression independent of whichever PyPy release ``auto``
+    # resolves to when the xcookie constants are next updated.
+    self.config['ci_pypy_versions'] = ['3.11']
+    plan = ci_plan.make_ci_plan(self)
+    cases = ci_model.make_artifact_test_cases(
+        self, plan=plan, provider='github'
+    )
+
+    pypy_cases = [
+        case for case in cases if case.python_version == 'pypy-3.11'
+    ]
+    assert pypy_cases
+    assert {case.variant.key for case in pypy_cases} == {'minimal-loose'}
+    assert {case.install_extras for case in pypy_cases} == {'tests'}
+    assert {case.platform.github_os for case in pypy_cases} == {
+        'ubuntu-latest',
+        'macOS-latest',
+        'windows-latest',
+    }
+
+    full_loose_pypy = [
+        case
+        for case in cases
+        if case.variant.key == 'full-loose'
+        and case.python_version.startswith('pypy-')
+    ]
+    assert not full_loose_pypy
 
 
 def test_ci_platform_mapping_adds_gitlab_linux_platform(tmp_path):

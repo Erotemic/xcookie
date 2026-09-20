@@ -18,6 +18,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   package versions synchronized and update exact root dependency pins.
 
 ### Fixed
+* GitHub Actions PyPy jobs now test the minimal dependency surface instead of
+  installing full optional extras. Optional binary/scientific dependencies
+  remain covered by CPython full-loose jobs, avoiding unrelated PyPy source
+  build failures when third-party wheels are unavailable.
 * Legacy requirements-file projects now honor ``typecheck_install_extras``.
 * Workspace root CI now passes member source directories and the root package
   to the same resolver invocation. Exact synchronized development versions

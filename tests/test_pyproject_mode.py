@@ -630,6 +630,41 @@ def test_dynamic_pyproject_extras_are_available_to_ci(tmp_path) -> None:
     assert "install-extras: ''" not in text
 
 
+def test_pypy_matrix_uses_tests_without_optional_extras(tmp_path) -> None:
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    _write_pyproject_with_extras(
+        repodir,
+        optional_dependencies={
+            'tests': ['pytest>=8.0'],
+            'optional': ['pandas', 'kwplot'],
+        },
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier._presetup()
+    applier.config['ci_pypy_versions'] = ['3.11']
+    text = applier.build_github_actions_tests()
+
+    assert 'python-version: pypy-3.11' in text
+    pypy_blocks = text.split('python-version: pypy-3.11')[1:]
+    assert pypy_blocks
+    for block in pypy_blocks:
+        matrix_item = block.split('- python-version:', 1)[0]
+        assert 'install-extras: tests\n' in matrix_item
+        assert 'install-extras: tests,optional' not in matrix_item
+
+
 def test_sdist_install_step_uses_tests_extra_when_available(tmp_path) -> None:
     """
     When the project's pyproject.toml declares a ``tests`` extra, the sdist

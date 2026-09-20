@@ -607,7 +607,12 @@ def get_supported_platform_info(self):
         elif v == 'main':
             v = [main_python_version]
         elif v == '*':
-            v = cpython_versions_non34 + pypy_versions
+            # The normal dependency-variant matrix is a CPython matrix. PyPy
+            # compatibility is scheduled separately by ci_model using the
+            # minimal-loose dependency surface. This prevents optional binary
+            # stacks from turning a core PyPy compatibility check into a
+            # source-build test of unrelated third-party packages.
+            v = cpython_versions_non34
         else:
             raise KeyError(v)
         extras_versions[k] = v
