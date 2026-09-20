@@ -167,6 +167,7 @@ def test_reusable_legacy_binpy_defaults_to_minimum_build_selector(tmp_path):
     text = self.build_pyproject()
     data = toml.loads(text)
     assert data['tool']['cibuildwheel']['build'] == 'cp310-*'
+    assert data['tool']['cibuildwheel']['archs'] == ['auto64']
 
 
 def test_reusable_local_wheel_helper_honors_pyproject_selector(tmp_path):
@@ -288,6 +289,7 @@ def test_maturin_binpy_backend_is_not_polluted_by_legacy_build_stack(tmp_path):
     assert rendered['tool']['maturin'] == pyproject['tool']['maturin']
     assert 'setuptools' not in rendered['tool']
     assert rendered['tool']['cibuildwheel']['build'] == 'cp310-*'
+    assert rendered['tool']['cibuildwheel']['archs'] == ['auto64']
     assert 'build-frontend' not in rendered['tool']['cibuildwheel']
     assert 'test-command' not in rendered['tool']['cibuildwheel']
     assert (
@@ -311,3 +313,49 @@ def test_maturin_binpy_backend_is_not_polluted_by_legacy_build_stack(tmp_path):
         'setup_commands': ['export RUSTUP_HOME=/tmp/rustup'],
         'commands': ['./dev/check_backend_parity.sh'],
     }
+
+
+def test_reusable_binpy_preserves_explicit_arch_policy(tmp_path):
+    pyproject = {
+        'build-system': {
+            'requires': ['maturin>=1.7,<2.0'],
+            'build-backend': 'maturin',
+        },
+        'project': {
+            'name': 'demo-pkg',
+            'version': '1.2.3',
+            'requires-python': '>=3.10',
+        },
+        'tool': {
+            'xcookie': {
+                'tags': ['github', 'binpy'],
+                'mod_name': 'demo_pkg',
+                'repo_name': 'demo_pkg',
+                'min_python': '3.10',
+                'ci_reusable_wheels': True,
+            },
+            'maturin': {
+                'manifest-path': 'rust/Cargo.toml',
+                'module-name': 'demo_pkg._rust',
+            },
+            'cibuildwheel': {
+                'build': 'cp310-*',
+                'archs': ['AMD64', 'x86'],
+            },
+        },
+    }
+    (tmp_path / 'pyproject.toml').write_text(toml.dumps(pyproject))
+
+    cfg = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=tmp_path,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+    )
+    self = TemplateApplier(cfg)
+    self._presetup()
+    rendered = toml.loads(self.build_pyproject())
+
+    assert rendered['tool']['cibuildwheel']['archs'] == ['AMD64', 'x86']

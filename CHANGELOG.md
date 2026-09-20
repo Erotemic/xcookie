@@ -44,6 +44,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   setup notes document the self-managed issuer onboarding requirement.
 
 ### Fixed
+* Reusable binary-wheel projects now normalize cibuildwheel's implicit
+  ``auto`` architecture policy to ``auto64``. On 64-bit Windows runners,
+  ``auto`` currently expands to both AMD64 and x86, which violates the
+  one-native-artifact reusable-wheel contract and breaks x64 artifact
+  validation. Explicit project architecture policies remain authoritative.
 * GitHub live releases now use the exact ``release`` branch as the production
   entry point, matching GitLab's ``git push <remote> main:release`` release
   contract. Tags are release outputs rather than alternate workflow triggers;

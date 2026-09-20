@@ -399,6 +399,18 @@ def build_pyproject(self):
             if not cibw.get('build'):
                 cibw['build'] = supported_cp_version[0] + '-*'
 
+            # cibuildwheel's ``auto`` architecture policy currently expands
+            # to both AMD64 and x86 on a 64-bit Windows runner.  That violates
+            # the reusable-wheel contract of one native artifact per runner
+            # and also makes host-side artifact validation try to install an
+            # x86 wheel into an x64 interpreter.  Prefer 64-bit auto selection
+            # unless the project explicitly names a different architecture
+            # policy.  Projects that still publish 32-bit Windows wheels can
+            # request x86 explicitly.
+            archs = cibw.get('archs')
+            if archs is None or archs == 'auto' or archs == ['auto']:
+                cibw['archs'] = ['auto64']
+
         if not foreign_binpy_backend:
             test_extras = ['tests-strict', 'runtime-strict']
             if 'cv2' in self.config['tags']:
