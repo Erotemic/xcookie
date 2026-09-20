@@ -313,7 +313,7 @@ class XCookieConfig(kwconf.Config):
         ),
         'test_env': kwconf.Value(
             None,
-            help='A YAML coercible dictionary of environment variables to use in test stages. (TOTO',
+            help='A YAML-coercible mapping of environment variables used by generated test stages.',
         ),
         'version': kwconf.Value(
             None, help='repo metadata: url for the project'
@@ -438,18 +438,55 @@ class XCookieConfig(kwconf.Config):
             ['full-loose', 'full-strict', 'minimal-loose', 'minimal-strict'],
             help='A list of which CI loose / strict / minimal / full variants to use',
         ),
+        'ci_reusable_wheels': kwconf.Value(
+            False,
+            isflag=True,
+            help=ub.paragraph(
+                """
+                If True, one binary wheel per platform is expected to be
+                compatible with every configured CPython test version. This
+                covers both truly version-independent wheels (e.g. py3-none)
+                and stable-ABI wheels (e.g. cp310-abi3). The concrete
+                cibuildwheel build selector remains project packaging policy
+                in [tool.cibuildwheel].build.
+                """
+            ),
+        ),
         'ci_versionless_wheels': kwconf.Value(
             False,
             isflag=True,
             help=ub.paragraph(
                 """
-                If True, the project's binary wheels are python-version
-                independent (e.g. py3-none tags from pure ctypes bindings),
-                so CI builds a single wheel per platform instead of one per
-                CPython version. The interpreter that performs the build is
-                pinned in the [tool.cibuildwheel] section of pyproject.toml.
-                The default (False) keeps per-python-version builds, which
-                repos that link against the CPython C API require.
+                Backwards-compatible spelling for ci_reusable_wheels. Prefer
+                ci_reusable_wheels for new configuration because reusable
+                wheels may still carry an ABI baseline such as cp310-abi3.
+                """
+            ),
+        ),
+        'ci_wheel_build_post_commands': kwconf.Value(
+            [],
+            help=ub.paragraph(
+                """
+                Commands to run after cibuildwheel has produced binary wheel
+                artifacts but before xcookie uploads them. Use this for
+                project-owned artifact validation such as checking wheel tags
+                or binary contents. The commands run in both test and release
+                wheel build jobs.
+                """
+            ),
+        ),
+        'ci_source_checks': kwconf.Value(
+            None,
+            help=ub.paragraph(
+                """
+                Mapping of independent source-level CI checks. Each check may
+                specify name, python_version, setup_commands, commands, env,
+                runner, gitlab_image, shell, and allow_failure. ``shell`` and
+                ``runner`` are GitHub-specific; ``gitlab_image`` is
+                GitLab-specific. Setup and validation commands share one shell
+                session so native-toolchain environment changes persist. These
+                checks run in normal test CI only; release workflows rely on
+                the reviewed main-branch CI result.
                 """
             ),
         ),

@@ -73,6 +73,26 @@ class TestVariant:
 
 
 @dataclass(frozen=True)
+class CISourceCheck:
+    """A project-owned source-level validation job rendered by xcookie."""
+
+    key: str
+    name: str
+    shell: str
+    python_version: str | None
+    runner: str
+    gitlab_image: str | None
+    setup_commands: tuple[str, ...]
+    commands: tuple[str, ...]
+    env: Mapping[str, str]
+    allow_failure: bool
+
+    @property
+    def job_key(self) -> str:
+        return f'check_{self.key.replace("-", "_")}'
+
+
+@dataclass(frozen=True)
 class CIArtifact:
     """A project-owned artifact that xcookie should build and carry through CI."""
 
@@ -345,6 +365,7 @@ class CIPlan:
     typecheck_extras: tuple[str, ...]
     sdist_test_extras: tuple[str, ...]
     ci_artifacts: tuple[CIArtifact, ...]
+    ci_source_checks: tuple[CISourceCheck, ...]
     workspace_members: tuple[WorkspaceMember, ...]
 
     def variants_by_key(self) -> dict[VariantKey, TestVariant]:
@@ -454,18 +475,86 @@ def _as_commands(value: Any) -> tuple[str, ...]:
     return tuple(str(item) for item in value)
 
 
-def _validate_artifact_key(key: str) -> None:
+def _validate_ci_key(key: str, *, field_name: str) -> None:
     if not key:
-        raise ValueError('ci_artifacts keys must be non-empty')
+        raise ValueError(f'{field_name} keys must be non-empty')
     if not (key[0].isalpha() or key[0] == '_'):
         raise ValueError(
-            f'ci_artifacts key must start with a letter or underscore: {key!r}'
+            f'{field_name} key must start with a letter or underscore: {key!r}'
         )
     invalid = [c for c in key if not (c.isalnum() or c in {'_', '-'})]
     if invalid:
         raise ValueError(
-            f'ci_artifacts key contains unsupported characters: {key!r}'
+            f'{field_name} key contains unsupported characters: {key!r}'
         )
+
+
+def _validate_artifact_key(key: str) -> None:
+    _validate_ci_key(key, field_name='ci_artifacts')
+
+
+def load_ci_source_checks(
+    config: Mapping[str, Any],
+) -> tuple[CISourceCheck, ...]:
+    """Normalize independent source-check declarations."""
+    raw = config.get('ci_source_checks')
+    if not raw:
+        return tuple()
+    if isinstance(raw, str):
+        from xcookie.util_yaml import Yaml
+
+        raw = Yaml.loads(raw)
+    if not isinstance(raw, Mapping):
+        raise TypeError(
+            f'ci_source_checks must be a mapping, got {type(raw)!r}'
+        )
+
+    checks = []
+    for key_, item in raw.items():
+        key = str(key_)
+        _validate_ci_key(key, field_name='ci_source_checks')
+        if not isinstance(item, Mapping):
+            raise TypeError(
+                f'ci_source_checks[{key!r}] must be a mapping, '
+                f'got {type(item)!r}'
+            )
+        commands = _as_commands(item.get('commands', item.get('command')))
+        if not commands:
+            raise ValueError(
+                f'ci_source_checks[{key!r}] requires command/commands'
+            )
+        env_raw = item.get('env', {}) or {}
+        if not isinstance(env_raw, Mapping):
+            raise TypeError(
+                f'ci_source_checks[{key!r}].env must be a mapping, '
+                f'got {type(env_raw)!r}'
+            )
+        python_version = item.get('python_version', 'main')
+        if python_version is not None:
+            python_version = str(python_version)
+        gitlab_image = item.get('gitlab_image')
+        if gitlab_image is not None:
+            gitlab_image = str(gitlab_image)
+        checks.append(
+            CISourceCheck(
+                key=key,
+                name=str(
+                    item.get(
+                        'name',
+                        key.replace('_', ' ').replace('-', ' ').title(),
+                    )
+                ),
+                shell=str(item.get('shell', 'bash')),
+                python_version=python_version,
+                runner=str(item.get('runner', 'ubuntu-latest')),
+                gitlab_image=gitlab_image,
+                setup_commands=_as_commands(item.get('setup_commands')),
+                commands=commands,
+                env={str(k): str(v) for k, v in env_raw.items()},
+                allow_failure=bool(item.get('allow_failure', False)),
+            )
+        )
+    return tuple(checks)
 
 
 def load_ci_artifacts(config: Mapping[str, Any]) -> tuple[CIArtifact, ...]:
@@ -737,5 +826,6 @@ def make_ci_plan(self: Any) -> CIPlan:
         typecheck_extras=tuple(typecheck_extras),
         sdist_test_extras=tuple(sdist_test_extras),
         ci_artifacts=load_ci_artifacts(self.config),
+        ci_source_checks=load_ci_source_checks(self.config),
         workspace_members=workspace_members,
     )

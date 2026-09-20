@@ -14,7 +14,12 @@ import ubelt as ub
 
 from xcookie.builders import ci_model, common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
-from xcookie.builders.ci_plan import CIArtifact, CIPlan, WorkspaceMember
+from xcookie.builders.ci_plan import (
+    CIArtifact,
+    CIPlan,
+    CISourceCheck,
+    WorkspaceMember,
+)
 from xcookie.util_yaml import Yaml
 
 # Type alias for json / yaml data structure
@@ -956,6 +961,47 @@ def build_workspace_member_job(
     )
 
 
+def build_ci_source_check_job(
+    self, check: CISourceCheck
+) -> JSON_MutableMapping:
+    """Render one project-owned source-level validation job."""
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    python_version = check.python_version
+    if python_version == 'main':
+        python_version = supported_platform_info['main_python_version']
+
+    steps: list[JSON_Mapping] = [Actions.checkout()]
+    if python_version is not None:
+        steps.append(
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {python_version}',
+                    'with': _setup_python_inputs(python_version),
+                }
+            )
+        )
+    # Keep setup and validation commands in one shell process. This makes the
+    # hook useful for native toolchain setup (for example ``export PATH=...``
+    # after rustup) without provider-specific environment persistence syntax.
+    run_commands = [*check.setup_commands, *check.commands]
+    steps.append(
+        {
+            'name': check.name,
+            'shell': check.shell,
+            'env': dict(check.env),
+            'run': '\n'.join(run_commands),
+        }
+    )
+    job: dict[str, Any] = {
+        'name': check.name,
+        'runs-on': check.runner,
+        'steps': steps,
+    }
+    if check.allow_failure:
+        job['continue-on-error'] = True
+    return Yaml.Dict(job)
+
+
 def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
     if plan is None:
         plan = common_ci.make_ci_plan(self)
@@ -1103,6 +1149,9 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
             jobs[artifact.job_key] = build_ci_artifact_job(
                 self, artifact, release=False
             )
+
+    for check in plan.ci_source_checks:
+        jobs[check.job_key] = build_ci_source_check_job(self, check)
 
     return name, jobs
 
@@ -1312,12 +1361,7 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
 
     workspace_sources = common_ci.make_workspace_source_args(self, plan=plan)
 
-    import kwutil
-
-    test_env = {}
-    user_test_env = kwutil.Yaml.coerce(self.config.test_env, backend='pyyaml')
-    if user_test_env:
-        test_env.update(user_test_env)
+    test_env = common_ci.get_test_env(self)
 
     job = {
         'name': 'Build sdist',
@@ -1419,11 +1463,11 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
     return Yaml.Dict(job)
 
 
-_VERSIONLESS_WHEELS_MATRIX_COMMENT = """
-The wheels are python-version independent (e.g. py3-none tags from pure
-ctypes bindings), so a single cibuildwheel build per platform covers every
-supported Python version. Which interpreter performs the build is pinned
-in the [tool.cibuildwheel] section of pyproject.toml.
+_REUSABLE_WHEELS_MATRIX_COMMENT = """
+One built wheel per platform is reusable across the configured CPython test
+versions. This covers both version-independent wheels (e.g. py3-none) and
+stable-ABI wheels (e.g. cp310-abi3). The concrete build selector is project
+packaging policy in [tool.cibuildwheel].build.
 """
 
 
@@ -1609,12 +1653,12 @@ def build_binpy_wheels_job(self):
     else:
         included_runs = []
 
-    versionless = bool(self.config.get('ci_versionless_wheels', False))
+    reusable_wheels = common_ci.uses_reusable_binary_wheels(self)
 
     matrix = Yaml.Dict({})
-    if versionless:
+    if reusable_wheels:
         matrix.yaml_set_start_comment(
-            ub.codeblock(_VERSIONLESS_WHEELS_MATRIX_COMMENT),
+            ub.codeblock(_REUSABLE_WHEELS_MATRIX_COMMENT),
             indent=8,
         )
     else:
@@ -1640,8 +1684,8 @@ def build_binpy_wheels_job(self):
 
     matrix['os'] = os_list
 
-    if not versionless:
-        # Versionless wheels pin their single build (and any skips) in
+    if not reusable_wheels:
+        # Reusable wheels pin their single build (and any skips) in
         # [tool.cibuildwheel], so the skip matrix dimension only exists for
         # per-python-version builds.
         if 'win' in self.config['os']:
@@ -1655,8 +1699,8 @@ def build_binpy_wheels_job(self):
         matrix['include'] = included_runs
 
     conditional_actions = []
-    if 'win' in self.config['os'] and not versionless:
-        # Versionless builds skip msvc-dev-cmd: the single pinned interpreter
+    if 'win' in self.config['os'] and not reusable_wheels:
+        # Reusable builds skip msvc-dev-cmd: the single pinned interpreter
         # build lets the build backend locate MSVC on its own.
         conditional_actions += [
             Actions.msvc_dev_cmd(
@@ -1699,21 +1743,11 @@ def build_binpy_wheels_job(self):
     )
     use_vcpkg = bool(vcpkg_pre_steps)
 
-    USE_ABI3 = False
-    if USE_ABI3:
-        # Hack in abi3 support, todo: clean up later.
-        abi3_action = Actions.cibuildwheel(sensible=True)
-        # TODO: use min python
-        abi3_action['env']['CIBW_CONFIG_SETTINGS'] = (
-            '--build-option=--py-limited-api=cp38'
-        )
-        abi3_action['env']['CIBW_BUILD'] = 'cp38-*'
-
     cibw_action = Actions.cibuildwheel(sensible=True)
     cibw_action['env'].update(vcpkg_cibw_env)
     if supported_platform_info['prerelease_python_versions']:
         cibw_action['env']['CIBW_ENABLE'] = 'cpython-prerelease'
-    if versionless:
+    if reusable_wheels:
         # The single pinned build (and any skips) lives in
         # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
         # runs, so the matrix / msvc related env vars are unnecessary.
@@ -1723,7 +1757,6 @@ def build_binpy_wheels_job(self):
     if _matrix_needs_qemu(matrix):
         job_steps += [Actions.setup_qemu(sensible=True)]
     job_steps += [
-        # abi3_action,
         *vcpkg_pre_steps,
     ]
     if use_vcpkg and 'ci_debug_windows_env' in self.tags:
@@ -1755,8 +1788,23 @@ def build_binpy_wheels_job(self):
             'run': 'ls -la wheelhouse',
         },
     ]
-    if not versionless:
-        # Versionless builds run only a quick smoke test inside cibuildwheel;
+    post_commands = common_ci.wheel_build_post_commands(self)
+    if post_commands:
+        job_steps += [
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {main_python_version} for wheel validation',
+                    'with': _setup_python_inputs(main_python_version),
+                }
+            ),
+            {
+                'name': 'Validate built wheel artifacts',
+                'shell': 'bash',
+                'run': '\n'.join(post_commands),
+            },
+        ]
+    if not reusable_wheels:
+        # Reusable builds run only a quick smoke test inside cibuildwheel;
         # coverage is collected by the wheel test jobs instead, so there is
         # nothing to combine or upload here.
         job_steps += [
@@ -1916,6 +1964,7 @@ def build_sdist_job(self):
 def build_binpy_wheels_release_job(self):
     supported_platform_info = common_ci.get_supported_platform_info(self)
     os_list = supported_platform_info['os_list']
+    main_python_version = supported_platform_info['main_python_version']
 
     pyproj_config = self.config._load_pyproject_config()
     cibw_skip = (
@@ -1926,12 +1975,12 @@ def build_binpy_wheels_release_job(self):
     cibw_skip = _normalize_cibuildwheel_skip_string(cibw_skip)
     explicit_skips = ' ' + cibw_skip
 
-    versionless = bool(self.config.get('ci_versionless_wheels', False))
+    reusable_wheels = common_ci.uses_reusable_binary_wheels(self)
 
     matrix = Yaml.Dict({})
-    if versionless:
+    if reusable_wheels:
         matrix.yaml_set_start_comment(
-            ub.codeblock(_VERSIONLESS_WHEELS_MATRIX_COMMENT),
+            ub.codeblock(_REUSABLE_WHEELS_MATRIX_COMMENT),
             indent=8,
         )
     else:
@@ -1948,12 +1997,12 @@ def build_binpy_wheels_release_job(self):
             indent=8,
         )
     matrix['os'] = os_list
-    if not versionless:
+    if not reusable_wheels:
         matrix['cibw_skip'] = [explicit_skips.strip()]
     matrix['arch'] = ['auto']
 
     conditional_actions = []
-    if 'win' in self.config['os'] and not versionless:
+    if 'win' in self.config['os'] and not reusable_wheels:
         conditional_actions += [
             Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
         ]
@@ -1966,7 +2015,7 @@ def build_binpy_wheels_release_job(self):
     cibw_action['env'].update(vcpkg_cibw_env)
     if supported_platform_info['prerelease_python_versions']:
         cibw_action['env']['CIBW_ENABLE'] = 'cpython-prerelease'
-    if versionless:
+    if reusable_wheels:
         # The single pinned build (and any skips) lives in
         # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
         # runs, so the matrix / msvc related env vars are unnecessary.
@@ -1999,6 +2048,23 @@ def build_binpy_wheels_release_job(self):
             'shell': 'bash',
             'run': 'ls -la wheelhouse',
         },
+    ]
+    post_commands = common_ci.wheel_build_post_commands(self)
+    if post_commands:
+        job_steps += [
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {main_python_version} for wheel validation',
+                    'with': _setup_python_inputs(main_python_version),
+                }
+            ),
+            {
+                'name': 'Validate built wheel artifacts',
+                'shell': 'bash',
+                'run': '\n'.join(post_commands),
+            },
+        ]
+    job_steps += [
         Actions.upload_artifact(
             {
                 'name': 'Upload wheels artifact',
@@ -2109,19 +2175,27 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         ]
     if ci_model.any_test_case_needs_qemu(cases):
         action_steps += [Actions.setup_qemu(sensible=True)]
+    if 'binpy' in self.tags:
+        download_wheel_config = {
+            'name': 'Download wheel for this platform',
+            'with': {
+                'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
+                'path': 'wheelhouse',
+            },
+        }
+    else:
+        # Pure-Python wheels are built once and reused on every platform.
+        download_wheel_config = {
+            'name': 'Download wheels',
+            'with': {
+                'pattern': 'wheels-*',
+                'merge-multiple': True,
+                'path': 'wheelhouse',
+            },
+        }
     action_steps += [
         Actions.setup_python(setup_python_config),
-        Actions.download_artifact(
-            {
-                'name': 'Download wheels',
-                'with': {
-                    # 'name': 'wheels',
-                    'pattern': 'wheels-*',
-                    'merge-multiple': True,
-                    'path': 'wheelhouse',
-                },
-            }
-        ),
+        Actions.download_artifact(download_wheel_config),
     ]
 
     workspace_dname = (
@@ -2244,14 +2318,10 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
             }
         action_steps.append(Actions.action(smoke_test_action))
 
-    import kwutil
-
     test_env = {
         'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}',
+        **common_ci.get_test_env(self),
     }
-    user_test_env = kwutil.Yaml.coerce(self.config.test_env, backend='pyyaml')
-    if user_test_env:
-        test_env.update(user_test_env)
 
     if has_allow_failure:
         test_wheel_action = {

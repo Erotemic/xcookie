@@ -676,7 +676,13 @@ def make_release_plan(
                 build_job_keys.append('build/sdist')
             build_job_keys.append('build/wheel')
         else:
-            build_job_keys.append('build/{swenv_key}')
+            if common_ci.uses_reusable_binary_wheels(self):
+                # The current GitLab binary renderer targets one Linux x86_64
+                # platform. A reusable wheel build is shared by every Python
+                # test image on that platform.
+                build_job_keys.append('build/reusable-linux-x86_64')
+            else:
+                build_job_keys.append('build/{swenv_key}')
 
         deploy_job_keys = []
         if enable_gpg:

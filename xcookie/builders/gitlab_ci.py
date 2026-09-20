@@ -46,6 +46,38 @@ def _add_yaml_merge(target, referent):
         target.add_yaml_merge(merge_value)
 
 
+def _add_source_check_jobs(self, body, common_template, main_image, plan):
+    """Render project-owned source checks into normal GitLab test CI."""
+    from ruamel.yaml.comments import CommentedMap
+
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    main_python_version = supported_platform_info['main_python_version']
+    for check in plan.ci_source_checks:
+        python_version = check.python_version
+        if python_version == 'main':
+            python_version = main_python_version
+        image = check.gitlab_image
+        if image is None:
+            image = (
+                f'python:{python_version}'
+                if python_version is not None
+                else main_image
+            )
+        job = {
+            'stage': 'test',
+            'image': image,
+            'except': {'refs': ['release']},
+            'script': [*check.setup_commands, *check.commands],
+        }
+        if check.env:
+            job['variables'] = dict(check.env)
+        if check.allow_failure:
+            job['allow_failure'] = True
+        job = CommentedMap(job)
+        _add_yaml_merge(job, common_template)
+        body[f'check/{check.key}'] = job
+
+
 def build_gitlab_ci(self):
     """
     Example:
@@ -260,6 +292,9 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
         # main. This speeds up deployment and deployment debugging.
         'except': {'refs': ['release']},
     }
+    test_env = common_ci.get_test_env(self)
+    if test_env:
+        common_test_template['variables'] = test_env
 
     common_test_template = CommentedMap(common_test_template)
     common_test_template.yaml_set_anchor('common_test_template')
@@ -406,6 +441,8 @@ def make_purepy_ci_jobs(self, plan: CIPlan | None = None):
     if enable_lint:
         lint_job = build_lint_job(self, common_template, main_image, plan=plan)
         body['lint'] = lint_job
+
+    _add_source_check_jobs(self, body, common_template, main_image, plan)
 
     if enable_gpg:
         gpgsign_job = build_gpg_job(
@@ -571,6 +608,9 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
     )
 
     cibuildwheel_template = CommentedMap(cibuildwheel_template)
+    post_commands = common_ci.wheel_build_post_commands(self)
+    if post_commands:
+        cibuildwheel_template['script'].extend(post_commands)
     cibuildwheel_template.yaml_set_anchor('cibuildwheel_template')
     body['.cibuildwheel_template'] = cibuildwheel_template
 
@@ -579,6 +619,9 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
         'coverage': '/TOTAL.+ ([0-9]{1,3}%)/',
         'except': {'refs': ['release']},
     }
+    test_env = common_ci.get_test_env(self)
+    if test_env:
+        common_test_template['variables'] = test_env
     common_test_template = CommentedMap(common_test_template)
     common_test_template.yaml_set_anchor('common_test_template')
     _add_yaml_merge(common_test_template, common_template)
@@ -673,18 +716,28 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
                 )
 
         swenv_key = case.gitlab_swenv_key
-        build_name = workflow_plan.wheel_build_job_key.format(
-            swenv_key=swenv_key
-        )
+        reusable_wheels = common_ci.uses_reusable_binary_wheels(self)
+        if reusable_wheels:
+            # One project-selected wheel (e.g. cp310-abi3) serves every
+            # configured CPython test image on this platform. CIBW_BUILD stays
+            # in pyproject.toml instead of being overridden per test case.
+            platform_key = (
+                f'{case.platform.gitlab_os}-{case.platform.gitlab_arch}'
+            )
+            build_name = f'build/reusable-{platform_key}'
+        else:
+            build_name = workflow_plan.wheel_build_job_key.format(
+                swenv_key=swenv_key
+            )
         if build_name not in build_job_names:
-            build_job = {
-                'variables': {
+            build_job = {}
+            if not reusable_wheels:
+                build_job['variables'] = {
                     'CIBW_BUILD': f'{cpver}-*',
                 }
-            }
             build_job = CommentedMap(build_job)
             _add_yaml_merge(build_job, cibuildwheel_template)
-            if case.allow_failure:
+            if case.allow_failure and not reusable_wheels:
                 build_job['allow_failure'] = True
             jobs[build_name] = build_job
             build_names.append(build_name)
@@ -704,10 +757,14 @@ def make_binpy_ci_jobs(self, plan: CIPlan | None = None):
         if case.allow_failure:
             test_job['allow_failure'] = True
         if extra_environs:
-            test_job['variables'] = extra_environs.copy()
+            # YAML merge keys are shallow, so a child ``variables`` mapping
+            # would replace the template's test_env mapping. Preserve both.
+            test_job['variables'] = {**test_env, **extra_environs}
         jobs[test_name] = test_job
 
     body.update(jobs)
+
+    _add_source_check_jobs(self, body, common_template, main_image, plan)
 
     if enable_gpg:
         gpgsign_job = build_gpg_job(

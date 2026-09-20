@@ -225,13 +225,12 @@ def test_gitlab_purepy_gdal_cases_select_strict_and_loose_requirement_files(
     assert '--find-links https://girder.github.io/large_image_wheels' in text
 
 
-def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
+def test_github_binpy_historical_versionless_flag_is_reusable(tmp_path):
     """
-    A binpy repo with python-version-independent wheels (e.g. pure ctypes
-    bindings tagged py3-none) builds ONE wheel per platform: no per-python
-    cibuildwheel fanout, no msvc-dev-cmd setup, and no coverage combining in
-    the build job (the wheel test jobs own coverage). The vcpkg tag composes
-    with it and must appear in BOTH the tests and release workflows.
+    The historical ci_versionless_wheels flag retains its behavior through the
+    reusable-wheel contract: one wheel per platform, no per-python build fanout,
+    and no coverage combining in the build job. The vcpkg tag still composes
+    with it in both test and release workflows.
     """
     self = _make_applier(
         tmp_path, tags=['github', 'binpy', 'vcpkg'], min_python='3.11'
@@ -247,7 +246,7 @@ def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
         assert 'cibw_skip:' not in text
         assert 'CIBW_SKIP' not in text
         assert 'VSCMD_ARG_TGT_ARCH' not in text
-        assert 'python-version independent' in text
+        assert 'stable-ABI wheels' in text
         # vcpkg support pieces (shared between tests and release builds).
         assert 'Restore vcpkg caches (Windows)' in text
         assert 'Save vcpkg caches (Windows, even on failure)' in text
@@ -257,7 +256,7 @@ def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
         ) in text
         assert 'PYTHONUTF8=1' in text
 
-    # The versionless build job runs only a smoke test inside cibuildwheel,
+    # The reusable build job runs only a smoke test inside cibuildwheel,
     # so it must not try to combine or upload coverage (the test job still
     # does, hence the split-scope assertion).
     build_job_section = tests_text.split('test_binpy_wheels:')[0]
@@ -267,8 +266,8 @@ def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
 
 def test_github_binpy_default_keeps_per_python_builds(tmp_path):
     """
-    Without ci_versionless_wheels, nothing changes: repos that link against
-    the CPython C API keep the per-python-version cibuildwheel builds.
+    Without a reusable-wheel flag, repos that link against the CPython C API
+    keep the per-python-version cibuildwheel builds.
     """
     self = _make_applier(tmp_path, tags=['github', 'binpy'], min_python='3.11')
     text = self.build_github_actions_tests()

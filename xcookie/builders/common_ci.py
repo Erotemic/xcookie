@@ -12,6 +12,39 @@ from xcookie.builders import ci_plan
 from xcookie.requirements_layout import DEFAULT_REQUIREMENTS_RELPATH
 
 
+def uses_reusable_binary_wheels(self):
+    """Return True when one wheel per platform serves all tested CPythons.
+
+    ``ci_versionless_wheels`` is the historical spelling. Stable-ABI wheels
+    such as ``cp310-abi3`` are reusable without being versionless, so new
+    projects should use ``ci_reusable_wheels``.
+    """
+    return bool(
+        self.config.get('ci_reusable_wheels', False)
+        or self.config.get('ci_versionless_wheels', False)
+    )
+
+
+def wheel_build_post_commands(self):
+    """Normalize project-owned post-build wheel validation commands."""
+    commands = self.config.get('ci_wheel_build_post_commands', []) or []
+    if isinstance(commands, str):
+        return [commands]
+    return [str(command) for command in commands]
+
+
+def get_test_env(self):
+    """Normalize user-owned test-stage environment variables."""
+    import kwutil
+
+    value = kwutil.Yaml.coerce(self.config.get('test_env'), backend='pyyaml')
+    if not value:
+        return {}
+    if not isinstance(value, dict):
+        raise TypeError(f'test_env must coerce to a mapping, got {type(value)!r}')
+    return {str(key): str(val) for key, val in value.items()}
+
+
 def get_pyproject_optional_dependency_keys(self):
     """
     Return optional-dependency keys declared in ``pyproject.toml``.

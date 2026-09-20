@@ -16,6 +16,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   optional dependencies needed to resolve the source surface they check.
 * Added ``workspace_sync_versions`` so ``xcookie bump`` can keep workspace
   package versions synchronized and update exact root dependency pins.
+* Added reusable binary-wheel CI for stable-ABI packages such as ``abi3``:
+  one project-selected wheel per platform can be exercised across every
+  configured CPython version while preserving the historical
+  ``ci_versionless_wheels`` spelling.
+* Added generic source-check and post-wheel-build validation hooks so projects
+  can run backend parity checks in normal CI and inspect built wheel artifacts
+  without hand-editing generated workflows.
+* GitLab binary test jobs now honor the existing ``test_env`` configuration,
+  matching GitHub so backend-forcing and other runtime validation environment
+  variables are generator-owned on both providers.
+* Binary projects with an explicit non-setuptools PEP 517 backend (for example
+  maturin) now retain that backend and its cibuildwheel configuration instead
+  of having xcookie reintroduce the legacy scikit-build/Cython/CMake stack.
 
 ### Fixed
 * GitHub Actions PyPy jobs now test the minimal dependency surface instead of
