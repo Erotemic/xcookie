@@ -106,15 +106,18 @@ class GitHubActionsRenderer:
                 workspace_members=self.plan.workspace_members,
             )
 
-        # A live release is deliberately branch-driven and provider-neutral:
+        # Live publication is branch-driven and provider-neutral:
         # `git push <remote> main:release` is the release operation whether
-        # <remote> is GitHub or GitLab. Tags are outputs of that operation,
-        # never alternate workflow entry points. Manual dispatch remains
-        # available for artifact builds and explicit TestPyPI probes without
-        # granting it authority to cut a live release.
-        on_lines = """
+        # <remote> is GitHub or GitLab. A normal push to the default branch
+        # also runs the release build and publishes those artifacts to
+        # TestPyPI, preserving the historical pre-release smoke-test path.
+        # Tags are outputs of a live release, never workflow entry points.
+        defaultbranch = self.applier.config['defaultbranch']
+        release_branches = ub.oset([defaultbranch, 'main', 'release'])
+        release_branches_str = ', '.join(release_branches)
+        on_lines = f"""
         push:
-          branches: [ release ]
+          branches: [ {release_branches_str} ]
         workflow_dispatch:
           inputs:
             publish_target:
@@ -2762,9 +2765,12 @@ def build_deploy(
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
+        defaultbranch = self.config.get('defaultbranch', 'main')
         condition = (
-            "github.event_name == 'workflow_dispatch' && "
-            "github.event.inputs.publish_target == 'testpypi'"
+            "(github.event_name == 'push' && "
+            f"github.ref == 'refs/heads/{defaultbranch}') || "
+            "(github.event_name == 'workflow_dispatch' && "
+            "github.event.inputs.publish_target == 'testpypi')"
         )
     else:
         raise KeyError(mode)

@@ -148,12 +148,13 @@ def test_github_release_workflow_current_trusted_behavior_is_pinned(tmp_path):
     # Live publication is provider-neutral and branch driven. A release is
     # requested by `git push <remote> main:release`; tags are outputs, not
     # alternate inputs that could cause a second provider-specific release.
-    assert 'branches: [ release ]' in text
+    assert 'branches: [ main, release ]' in text
     assert "tags: [ '*' ]" not in text
     assert 'publish_target:' in text
     assert 'default: build-only' in text
     assert "github.ref == 'refs/heads/release'" in text
     assert "startsWith(github.event.ref, 'refs/tags')" not in text
+    assert "github.ref == 'refs/heads/main'" in text
     assert "github.event.inputs.publish_target == 'testpypi'" in text
     assert 'draft: false' in text
 
