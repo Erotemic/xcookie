@@ -106,16 +106,27 @@ class GitHubActionsRenderer:
                 workspace_members=self.plan.workspace_members,
             )
 
+        # IMPORTANT RELEASE POLICY:
         # Live publication is branch-driven and provider-neutral:
         # `git push <remote> main:release` is the release operation whether
-        # <remote> is GitHub or GitLab. A normal push to the default branch
-        # also runs the release build and publishes those artifacts to
-        # TestPyPI, preserving the historical pre-release smoke-test path.
-        # Tags are outputs of a live release, never workflow entry points.
+        # <remote> is GitHub or GitLab. Pushes to the default branch
+        # intentionally enter this release workflow and, when deployment is
+        # enabled, publish the resulting artifacts to TestPyPI. This is a
+        # deliberate continuous packaging smoke test of the same build/sign/
+        # trusted-publishing path used before a live release. Do not remove
+        # the default branch trigger or make TestPyPI dispatch-only unless
+        # intentionally changing this release policy. Tags are outputs of a
+        # live release, never workflow entry points.
         defaultbranch = self.applier.config['defaultbranch']
         release_branches = ub.oset([defaultbranch, 'main', 'release'])
         release_branches_str = ', '.join(release_branches)
         on_lines = f"""
+        # MAINTAINER INTENT: pushes to the default branch intentionally enter
+        # this release workflow. With deployment enabled, test_deploy publishes
+        # those artifacts to TestPyPI so every mainline merge exercises the
+        # release packaging/signing/trusted-publishing path before promotion.
+        # Do not make TestPyPI manual-only or remove the default-branch trigger
+        # unless intentionally changing that release policy.
         push:
           branches: [ {release_branches_str} ]
         workflow_dispatch:
@@ -604,7 +615,7 @@ def _matrix_needs_qemu(matrix: Mapping[str, JSON]) -> bool:
             if 'arch' in item:
                 arches.append(item['arch'])
 
-    return any(str(arch) != 'auto' for arch in arches)
+    return any(str(arch) not in {'auto', 'auto64', 'native'} for arch in arches)
 
 
 def _build_github_footer(self):
@@ -687,7 +698,8 @@ def _build_github_footer(self):
 
                    - testpypi:
                        * environment name: testpypi
-                       * use only for explicit workflow_dispatch TestPyPI probes
+                       * used automatically for default-branch packaging smoke tests
+                         and optionally for explicit workflow_dispatch probes
                        * usually no manual approval is needed
                        * this environment is never part of a live release push
 
@@ -1025,24 +1037,27 @@ def build_workspace_binpy_member_job(
         cpython_versions = list(supported_platform_info['cpython_versions'])
     main_python_version = cpython_versions[-1]
     min_python_version = cpython_versions[0]
-    if release:
-        release_os_list = []
-        for os_name in os_list:
-            release_os_list.append(os_name)
-            if os_name.lower() == 'macos-latest':
-                release_os_list.append('macos-15-intel')
-        os_list = list(ub.oset(release_os_list))
-
     cibw_skip = _normalize_cibuildwheel_skip_string(
         member.cibuildwheel_skip
     )
-    matrix = Yaml.Dict(
-        {
-            'os': os_list,
-            'arch': ['auto64'],
-            'cibw_skip': [cibw_skip],
-        }
-    )
+    if release:
+        release_targets = _github_release_binpy_targets(self)
+        for target in release_targets:
+            target['cibw_skip'] = cibw_skip
+        matrix = Yaml.Dict({'include': release_targets})
+        matrix.yaml_set_start_comment(
+            ub.codeblock(_RELEASE_WHEELS_MATRIX_COMMENT),
+            indent=8,
+        )
+        os_list = [target['os'] for target in release_targets]
+    else:
+        matrix = Yaml.Dict(
+            {
+                'os': os_list,
+                'arch': ['auto64'],
+                'cibw_skip': [cibw_skip],
+            }
+        )
     job = Yaml.Dict(
         {
             'name': (
@@ -1067,6 +1082,12 @@ def build_workspace_binpy_member_job(
             'output-dir': outdir,
         }
     )
+    if release:
+        # Release defaults are native 64-bit only. In particular, cibuildwheel
+        # ``auto`` on Windows also includes x86; publishing x86 is not part of
+        # xcookie's required modern wheel set.
+        cibw_action['env']['CIBW_ARCHS_WINDOWS'] = 'auto64'
+        cibw_action['env']['CIBW_ARCHS_MACOS'] = 'auto64'
 
     steps: list[JSON_Mapping] = [
         Actions.checkout(),
@@ -1729,6 +1750,55 @@ packaging policy in [tool.cibuildwheel].build.
 """
 
 
+_RELEASE_WHEELS_MATRIX_COMMENT = """
+Release wheel coverage is deliberately broader than the ordinary test-wheel
+matrix. Every configured desktop OS must emit the modern native architectures
+we publish: Linux x86_64 and ARM64, macOS Apple Silicon and Intel, and Windows
+x86_64. Linux cibuildwheel selectors may emit both manylinux and musllinux
+artifacts from each native runner. Keep every entry required: TestPyPI/PyPI
+deploy jobs depend on this entire build job so a missing architecture fails
+closed instead of publishing a partial wheel set.
+"""
+
+
+def _github_release_binpy_targets(self) -> list[dict[str, str]]:
+    """Return the required native GitHub runners for binary releases.
+
+    The ordinary test workflow intentionally samples fewer architectures to
+    keep compatibility testing affordable. Release/TestPyPI builds are the
+    artifact-completeness gate, so they cover every modern native architecture
+    xcookie currently promises by default.
+
+    Windows ARM64 is intentionally not part of the required default yet. It
+    can be added as an explicit project policy once downstream dependency
+    support is mature enough to make it a reliable release gate.
+    """
+    targets: list[dict[str, str]] = []
+    configured_os = self.config['os']
+
+    if 'linux' in configured_os:
+        targets.extend(
+            [
+                {'os': 'ubuntu-latest', 'arch': 'auto'},
+                {'os': 'ubuntu-24.04-arm', 'arch': 'auto'},
+            ]
+        )
+    if 'osx' in configured_os:
+        targets.extend(
+            [
+                # Pin architecture-bearing labels here. ``macos-latest`` is
+                # useful for broad CI, but release artifact coverage should
+                # not depend on a floating label changing architecture.
+                {'os': 'macos-15', 'arch': 'auto'},
+                {'os': 'macos-15-intel', 'arch': 'auto'},
+            ]
+        )
+    if 'win' in configured_os:
+        targets.append({'os': 'windows-latest', 'arch': 'auto'})
+
+    return targets
+
+
 def _vcpkg_build_support(self, os_list):
     """
     Build the shared vcpkg pieces used by binary wheel build jobs.
@@ -2221,7 +2291,6 @@ def build_sdist_job(self):
 
 def build_binpy_wheels_release_job(self):
     supported_platform_info = common_ci.get_supported_platform_info(self)
-    os_list = supported_platform_info['os_list']
     main_python_version = supported_platform_info['main_python_version']
 
     pyproj_config = self.config._load_pyproject_config()
@@ -2237,36 +2306,27 @@ def build_binpy_wheels_release_job(self):
 
     matrix = Yaml.Dict({})
     if reusable_wheels:
-        matrix.yaml_set_start_comment(
-            ub.codeblock(_REUSABLE_WHEELS_MATRIX_COMMENT),
-            indent=8,
-        )
+        build_policy_comment = _REUSABLE_WHEELS_MATRIX_COMMENT
     else:
-        matrix.yaml_set_start_comment(
-            ub.codeblock(
-                """
-            Normally, xcookie generates explicit lists of platforms to build / test
-            on, but in this case cibuildwheel does that for us, so we need to just
-            set the environment variables for cibuildwheel. These are parsed out of
-            the standard [tool.cibuildwheel] section in pyproject.toml and set
-            explicitly here.
-            """
-            ),
-            indent=8,
-        )
-    release_os_list = []
-    for os_name in os_list:
-        release_os_list.append(os_name)
-        if os_name.lower() == 'macos-latest':
-            # GitHub's macos-latest runner is Apple Silicon. Add the explicit
-            # Intel runner so release artifacts cover both native macOS
-            # architectures without cross-compiling either wheel.
-            release_os_list.append('macos-15-intel')
-    release_os_list = list(ub.oset(release_os_list))
-    matrix['os'] = release_os_list
+        build_policy_comment = """
+        Normally, xcookie generates explicit lists of platforms to build / test
+        on, but in this case cibuildwheel does that for us, so we need to just
+        set the environment variables for cibuildwheel. These are parsed out of
+        the standard [tool.cibuildwheel] section in pyproject.toml and set
+        explicitly here.
+        """
+    release_targets = _github_release_binpy_targets(self)
     if not reusable_wheels:
-        matrix['cibw_skip'] = [explicit_skips.strip()]
-    matrix['arch'] = ['auto']
+        for target in release_targets:
+            target['cibw_skip'] = explicit_skips.strip()
+    matrix['include'] = release_targets
+    matrix.yaml_set_start_comment(
+        ub.codeblock(_RELEASE_WHEELS_MATRIX_COMMENT)
+        + '\n\n'
+        + ub.codeblock(build_policy_comment),
+        indent=8,
+    )
+    release_os_list = [target['os'] for target in release_targets]
 
     conditional_actions = []
     if 'win' in self.config['os'] and not reusable_wheels:
@@ -2280,6 +2340,8 @@ def build_binpy_wheels_release_job(self):
 
     cibw_action = Actions.cibuildwheel(sensible=True)
     cibw_action['env'].update(vcpkg_cibw_env)
+    cibw_action['env']['CIBW_ARCHS_WINDOWS'] = 'auto64'
+    cibw_action['env']['CIBW_ARCHS_MACOS'] = 'auto64'
     if supported_platform_info['prerelease_python_versions']:
         cibw_action['env']['CIBW_ENABLE'] = 'cpython-prerelease'
     if reusable_wheels:

@@ -651,6 +651,8 @@ def test_github_binary_workspace_release_merges_platform_artifacts(tmp_path):
     self.config['deploy_pypi'] = True
     self.config['ci_pypi_trusted_publishing'] = True
     text = self.build_github_actions_release()
+    assert 'ubuntu-24.04-arm' in text
+    assert 'macos-15' in text
     assert 'macos-15-intel' in text
     assert 'Build demo-accel sdist (Linux)' in text
     assert 'workspace-demo-accel-release-${{ matrix.os }}-${{ matrix.arch }}' in text

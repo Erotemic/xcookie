@@ -131,12 +131,17 @@ def test_release_workflow_binpy_uses_cibuildwheel(tmp_path):
     assert 'test_binpy_wheels:' not in text
     assert 'pypa/gh-action-pypi-publish@release/v1' in text
 
-    # GitHub is temporarily supplying release runners, not owning release
-    # semantics. Build native wheels on each available host architecture.
+    # Release artifact coverage is deliberately broader than the ordinary
+    # test matrix. Use native hosted runners for both Linux architectures and
+    # both macOS architectures; Windows ARM64 is not a required default yet.
     assert 'ubuntu-latest' in text
+    assert 'ubuntu-24.04-arm' in text
     assert 'windows-latest' in text
-    assert 'macOS-latest' in text
+    assert 'macos-15' in text
     assert 'macos-15-intel' in text
+    assert 'windows-11-arm' not in text
+    assert 'Release wheel coverage is deliberately broader' in text
+    assert 'missing architecture fails' in text
 
 
 def test_release_workflow_trusted_footer_drops_twine_act_secrets(tmp_path):

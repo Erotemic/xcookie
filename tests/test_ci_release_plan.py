@@ -148,6 +148,11 @@ def test_github_release_workflow_current_trusted_behavior_is_pinned(tmp_path):
     # Live publication is provider-neutral and branch driven. A release is
     # requested by `git push <remote> main:release`; tags are outputs, not
     # alternate inputs that could cause a second provider-specific release.
+    # The generated warning is deliberate: mainline pushes are also supposed
+    # to exercise the release path against TestPyPI, and that policy has been
+    # accidentally removed by automated edits before.
+    assert 'MAINTAINER INTENT: pushes to the default branch intentionally enter' in text
+    assert 'Do not make TestPyPI manual-only' in text
     assert 'branches: [ main, release ]' in text
     assert "tags: [ '*' ]" not in text
     assert 'publish_target:' in text
@@ -220,7 +225,7 @@ def test_release_branch_remains_authoritative_on_both_providers(tmp_path):
         trusted=['gitlab'],
     ).build_gitlab_ci()
 
-    assert 'branches: [ release ]' in github
+    assert 'branches: [ main, release ]' in github
     assert "github.ref == 'refs/heads/release'" in github
     assert '- release' in gitlab
     assert '$CI_COMMIT_BRANCH == "release"' in gitlab

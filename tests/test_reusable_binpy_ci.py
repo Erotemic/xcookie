@@ -97,6 +97,34 @@ def test_reusable_wheel_contract_drives_github_ci(tmp_path):
     assert 'check_backend_parity:' not in release_text
 
 
+def test_reusable_release_matrix_covers_required_native_architectures(tmp_path):
+    self = _make_applier(tmp_path, tags=['github', 'binpy'])
+    self = _configure_reusable_ci(self)
+    self._presetup()
+
+    release = Yaml.loads(self.build_github_actions_release())
+    matrix = release['jobs']['build_binpy_wheels']['strategy']['matrix']
+    assert matrix['include'] == [
+        {'os': 'ubuntu-latest', 'arch': 'auto'},
+        {'os': 'ubuntu-24.04-arm', 'arch': 'auto'},
+        {'os': 'macos-15', 'arch': 'auto'},
+        {'os': 'macos-15-intel', 'arch': 'auto'},
+        {'os': 'windows-latest', 'arch': 'auto'},
+    ]
+
+    # The deployment jobs are intentionally downstream of the whole matrix;
+    # no platform is optional just to make publication proceed.
+    assert matrix.get('exclude') is None
+    assert release['jobs']['build_binpy_wheels']['strategy']['fail-fast'] is False
+    build_step = next(
+        step
+        for step in release['jobs']['build_binpy_wheels']['steps']
+        if step.get('name') == 'Build binary wheels'
+    )
+    assert build_step['env']['CIBW_ARCHS_WINDOWS'] == 'auto64'
+    assert build_step['env']['CIBW_ARCHS_MACOS'] == 'auto64'
+
+
 def test_reusable_wheel_contract_drives_gitlab_ci(tmp_path):
     self = _make_applier(tmp_path, tags=['gitlab', 'binpy'])
     self = _configure_reusable_ci(self)
