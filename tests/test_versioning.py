@@ -316,6 +316,48 @@ include = ["demo_theory*"]
     assert 'demo-theory==1.2.4' in root_pyproject.read_text()
 
 
+def test_bump_synchronizes_reverse_workspace_dependency_and_cargo(tmp_path):
+    _write_dynamic_attr_repo(tmp_path, version='1.2.3')
+    root_pyproject = tmp_path / 'pyproject.toml'
+    root_pyproject.write_text(
+        root_pyproject.read_text()
+        + '\n[tool.xcookie]\n'
+        + 'workspace_members = ["packages/demo-accel"]\n'
+        + 'workspace_sync_versions = true\n'
+    )
+
+    member = tmp_path / 'packages' / 'demo-accel'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-accel"
+version = "1.2.3"
+dependencies = ["demo==1.2.3"]
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+'''.lstrip()
+    )
+    (member / 'Cargo.toml').write_text(
+        '''
+[package]
+name = "demo-accel"
+version = "1.2.3"
+edition = "2021"
+'''.lstrip()
+    )
+
+    plan = VersionBumper(tmp_path).bump(
+        'patch', release_date=datetime_mod.date(2026, 9, 3)
+    )
+    assert plan.next_version == '1.2.4'
+    member_pyproject_text = (member / 'pyproject.toml').read_text()
+    assert 'version = "1.2.4"' in member_pyproject_text
+    assert 'demo==1.2.4' in member_pyproject_text
+    assert 'version = "1.2.4"' in (member / 'Cargo.toml').read_text()
+
+
 def test_bump_accepts_legacy_double_dash_release_heading(tmp_path):
     from xcookie.versioning import update_changelog_for_bump
     import datetime as datetime_mod

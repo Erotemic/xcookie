@@ -15,6 +15,8 @@ import re
 from typing import Any, Iterable, Literal, Mapping
 
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 from packaging.utils import canonicalize_name
 
 from xcookie.requirements_layout import (
@@ -137,6 +139,10 @@ class WorkspaceMember:
     typecheck_extra_paths: tuple[str, ...]
     typed: bool
     publish: bool
+    package_kind: Literal['purepy', 'binpy']
+    cibuildwheel_skip: str
+    required_by_root: bool
+    python_versions: tuple[str, ...]
 
     @property
     def rel_mod_dpath(self) -> str:
@@ -156,6 +162,13 @@ class WorkspaceMember:
     @property
     def release_artifact_name(self) -> str:
         return f'{self.artifact_name}-release'
+
+    def artifact_pattern(self, *, release: bool = False) -> str:
+        """Artifact selector used when one member emits one or many archives."""
+        base = self.release_artifact_name if release else self.artifact_name
+        if self.package_kind == 'binpy':
+            return base + '-*'
+        return base
 
     @property
     def dist_prefix(self) -> str:
@@ -231,6 +244,23 @@ def load_workspace_members(config: Mapping[str, Any]) -> tuple[WorkspaceMember, 
         )
 
     repodir = Path(config['repodir']).resolve()
+    root_pyproject = repodir / 'pyproject.toml'
+    root_dependency_names: set[str] = set()
+    if root_pyproject.exists():
+        import toml
+
+        root_data = toml.loads(root_pyproject.read_text())
+        root_dependencies = (
+            root_data.get('project', {}).get('dependencies', []) or []
+        )
+        for item in root_dependencies:
+            if not isinstance(item, str):
+                continue
+            try:
+                req = Requirement(item)
+            except Exception:
+                continue
+            root_dependency_names.add(canonicalize_name(req.name))
     members: list[WorkspaceMember] = []
     seen_keys: set[str] = set()
     seen_packages: set[str] = set()
@@ -283,6 +313,44 @@ def load_workspace_members(config: Mapping[str, Any]) -> tuple[WorkspaceMember, 
         typed_value = xcookie.get('typed', True)
         typed = typed_value not in {False, None, 'false', 'none', 'off'}
         publish = bool(xcookie.get('deploy_pypi', True))
+        member_tags = _coerce_string_list(xcookie.get('tags'))
+        has_binpy = 'binpy' in member_tags
+        has_purepy = 'purepy' in member_tags
+        if has_binpy and has_purepy:
+            raise ValueError(
+                f'workspace member {pkg_name!r} cannot declare both '
+                'purepy and binpy tags'
+            )
+        package_kind: Literal['purepy', 'binpy'] = (
+            'binpy' if has_binpy else 'purepy'
+        )
+        root_python_versions = config.get('supported_python_versions') or []
+        if isinstance(root_python_versions, str):
+            root_python_versions = [] if root_python_versions == 'auto' else [root_python_versions]
+        member_requires_python = project.get('requires-python')
+        if member_requires_python and root_python_versions:
+            spec = SpecifierSet(str(member_requires_python))
+            python_versions = tuple(
+                str(item)
+                for item in root_python_versions
+                if spec.contains(Version(str(item)), prereleases=True)
+            )
+        else:
+            python_versions = tuple(str(item) for item in root_python_versions)
+        if package_kind == 'binpy' and not python_versions:
+            raise ValueError(
+                f'workspace binary member {pkg_name!r} has no supported '
+                'CPython versions in common with the root project'
+            )
+
+        cibuildwheel = tool.get('cibuildwheel', {}) or {}
+        cibuildwheel_skip = ''
+        if isinstance(cibuildwheel, Mapping):
+            skip_value = cibuildwheel.get('skip', '') or ''
+            if isinstance(skip_value, (list, tuple)):
+                cibuildwheel_skip = ' '.join(str(item) for item in skip_value)
+            else:
+                cibuildwheel_skip = str(skip_value)
 
         from xcookie.versioning import find_version_source
 
@@ -303,6 +371,10 @@ def load_workspace_members(config: Mapping[str, Any]) -> tuple[WorkspaceMember, 
                 typecheck_extra_paths=typecheck_extra_paths,
                 typed=typed,
                 publish=publish,
+                package_kind=package_kind,
+                cibuildwheel_skip=cibuildwheel_skip,
+                required_by_root=(normalized_pkg in root_dependency_names),
+                python_versions=python_versions,
             )
         )
     return tuple(members)
@@ -323,15 +395,31 @@ def validate_workspace_sync(
         )
 
     pyproject = self.config._load_pyproject_config() or {}
-    dependencies = pyproject.get('project', {}).get('dependencies', []) or []
-    parsed_requirements = []
-    for item in dependencies:
-        if not isinstance(item, str):
-            continue
-        try:
-            parsed_requirements.append(Requirement(item))
-        except Exception:
-            continue
+    root_project = pyproject.get('project', {}) or {}
+    root_pkg_name = root_project.get('name')
+    if not isinstance(root_pkg_name, str) or not root_pkg_name:
+        raise ValueError(
+            'workspace_sync_versions requires the root [project].name'
+        )
+
+    def exact_pin_count(project: Mapping[str, Any], pkg_name: str) -> int:
+        dependencies = project.get('dependencies', []) or []
+        target_name = canonicalize_name(pkg_name)
+        count = 0
+        for item in dependencies:
+            if not isinstance(item, str):
+                continue
+            try:
+                req = Requirement(item)
+            except Exception:
+                continue
+            if (
+                canonicalize_name(req.name) == target_name
+                and str(req.specifier) == f'=={root_version}'
+                and req.marker is None
+            ):
+                count += 1
+        return count
 
     for member in members:
         if member.version != root_version:
@@ -340,18 +428,23 @@ def validate_workspace_sync(
                 f'{member.version!r} does not match root version '
                 f'{root_version!r}'
             )
-        member_name = canonicalize_name(member.pkg_name)
-        matching = [
-            req
-            for req in parsed_requirements
-            if canonicalize_name(req.name) == member_name
-            and str(req.specifier) == f'=={root_version}'
-            and req.marker is None
-        ]
-        if len(matching) != 1:
+        import toml
+
+        member_pyproject = (
+            Path(self.config['repodir']).resolve()
+            / member.path
+            / 'pyproject.toml'
+        )
+        member_data = toml.loads(member_pyproject.read_text())
+        member_project = member_data.get('project', {}) or {}
+        root_to_member = exact_pin_count(root_project, member.pkg_name)
+        member_to_root = exact_pin_count(member_project, root_pkg_name)
+        if root_to_member + member_to_root != 1:
             raise ValueError(
-                'workspace_sync_versions requires exactly one root dependency '
-                f'pin {member.pkg_name}=={root_version}'
+                'workspace_sync_versions requires exactly one direct exact '
+                'dependency pin linking the root and workspace member; '
+                f'root->{member.pkg_name}={root_to_member}, '
+                f'{member.pkg_name}->{root_pkg_name}={member_to_root}'
             )
 
 

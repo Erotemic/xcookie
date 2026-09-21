@@ -429,6 +429,48 @@ typed = true
     assert item.rel_mod_dpath == 'packages/demo-theory/src/demo_theory'
     assert item.version == '1.2.3'
     assert item.dependency_free is True
+    assert item.package_kind == 'purepy'
+    assert item.required_by_root is False
+
+
+def test_ci_plan_loads_binary_workspace_member(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+version = "1.2.3"
+
+[tool.xcookie]
+workspace_members = ["packages/demo-accel"]
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-accel'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-accel"
+version = "1.2.3"
+dependencies = ["demo-pkg==1.2.3"]
+
+[tool.xcookie]
+tags = ["binpy"]
+mod_name = "_demo_accel"
+typed = false
+
+[tool.cibuildwheel]
+skip = ["pp*", "*-musllinux_*"]
+'''.lstrip()
+    )
+    self = _make_applier(tmp_path, tags=['github', 'purepy'])
+    self.config['workspace_members'] = ['packages/demo-accel']
+    plan = ci_plan.make_ci_plan(self)
+    item = plan.workspace_members[0]
+    assert item.package_kind == 'binpy'
+    assert item.pkg_name == 'demo-accel'
+    assert item.mod_name == '_demo_accel'
+    assert item.cibuildwheel_skip == 'pp* *-musllinux_*'
+    assert item.required_by_root is False
 
 
 def test_workspace_members_require_github_provider(tmp_path):

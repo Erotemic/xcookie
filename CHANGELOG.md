@@ -10,8 +10,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 * Added first-class Python workspace members for same-repository distributions.
   GitHub CI builds and tests each member in isolation, root jobs install local
-  members before testing, and trusted-publishing release jobs publish member
-  distributions before the root distribution.
+  members only when the root declares them as dependencies, and
+  trusted-publishing release jobs publish member distributions alongside the
+  root distribution. Workspace members may now be pure-Python or binary
+  ``binpy`` packages, including optional native accelerators that depend on the
+  root package without leaking back into the root install.
 * Added ``typecheck_install_extras`` so generated typecheck jobs can install
   optional dependencies needed to resolve the source surface they check.
 * Added ``workspace_sync_versions`` so ``xcookie bump`` can keep workspace
@@ -56,6 +59,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   published rather than left as drafts. Binary release matrices also add the
   native Intel macOS runner alongside Apple Silicon so both macOS wheel
   families are built without changing normal test matrices.
+* Workspace version synchronization now accepts an exact dependency pin in
+  either direction (root -> member or member -> root), allowing optional
+  accelerator distributions to pin the matching pure-Python root release.
+* Regenerating project classifiers now drops stale generated Python-version
+  classifiers before applying the currently configured support range.
 * ``xcookie bump`` now keeps recognized local package-version mirrors in sync
   when they matched before the bump: a package ``__version__`` assignment and
   the Rust ``[package].version`` selected by ``tool.maturin.manifest-path``.

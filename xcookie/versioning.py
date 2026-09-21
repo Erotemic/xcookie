@@ -402,13 +402,11 @@ def _load_workspace_sync_config(repodir: ub.Path) -> tuple[bool, list[str], dict
     return sync, [str(item) for item in members], data
 
 
-def _replace_exact_dependency_pin(
-    text: str,
+def _find_exact_dependency_pins(
     project_data: dict,
     pkg_name: str,
-    current_version: str,
-    next_version: str,
-) -> str:
+    version: str,
+) -> list[str]:
     dependencies = project_data.get('project', {}).get('dependencies', []) or []
     target_name = canonicalize_name(pkg_name)
     matching_entries = []
@@ -421,11 +419,26 @@ def _replace_exact_dependency_pin(
             continue
         if canonicalize_name(req.name) != target_name:
             continue
-        if str(req.specifier) == f'=={current_version}' and not req.marker:
+        if str(req.specifier) == f'=={version}' and not req.marker:
             matching_entries.append(entry)
+    return matching_entries
+
+
+def _replace_exact_dependency_pin(
+    text: str,
+    project_data: dict,
+    pkg_name: str,
+    current_version: str,
+    next_version: str,
+) -> str:
+    matching_entries = _find_exact_dependency_pins(
+        project_data,
+        pkg_name,
+        current_version,
+    )
     if len(matching_entries) != 1:
         raise RuntimeError(
-            f'workspace_sync_versions requires exactly one root dependency '
+            f'workspace_sync_versions requires exactly one direct dependency '
             f'pin {pkg_name}=={current_version}; found {matching_entries!r}'
         )
     old_entry = matching_entries[0]
@@ -590,6 +603,13 @@ def _plan_workspace_version_edits(
         )
 
     root_pyproject_path = repodir / 'pyproject.toml'
+    root_project = root_data.get('project', {}) or {}
+    root_pkg_name = root_project.get('name')
+    if not isinstance(root_pkg_name, str) or not root_pkg_name:
+        raise RuntimeError(
+            'workspace_sync_versions requires the root [project].name'
+        )
+
     root_pyproject_text = (
         version_text
         if source.path.resolve() == root_pyproject_path.resolve()
@@ -621,9 +641,60 @@ def _plan_workspace_version_edits(
                 f'{member_source.version} does not match root version '
                 f'{source.version}'
             )
+        member_pyproject_text = member_pyproject.read_text()
+        root_pins = _find_exact_dependency_pins(
+            root_data,
+            member_pkg_name,
+            source.version,
+        )
+        member_pins = _find_exact_dependency_pins(
+            member_data,
+            root_pkg_name,
+            source.version,
+        )
+        if len(root_pins) + len(member_pins) != 1:
+            raise RuntimeError(
+                'workspace_sync_versions requires exactly one direct exact '
+                'dependency pin linking the root and workspace member; '
+                f'root->{member_pkg_name}={len(root_pins)}, '
+                f'{member_pkg_name}->{root_pkg_name}={len(member_pins)}'
+            )
+
+        root_pin_count = len(root_pins)
+        member_pin_count = len(member_pins)
+        if root_pin_count:
+            root_pyproject_text = _replace_exact_dependency_pin(
+                root_pyproject_text,
+                root_data,
+                member_pkg_name,
+                source.version,
+                next_version,
+            )
+        if member_pin_count:
+            member_pyproject_text = _replace_exact_dependency_pin(
+                member_pyproject_text,
+                member_data,
+                root_pkg_name,
+                source.version,
+                next_version,
+            )
+
+        member_version_text = member_source.updated_text(next_version)
+        if member_source.path.resolve() == member_pyproject.resolve():
+            # Apply the dependency pin update and version update to the same
+            # text without emitting two competing edits for pyproject.toml.
+            member_version_text = _replace_exact_dependency_pin(
+                member_version_text,
+                member_data,
+                root_pkg_name,
+                source.version,
+                next_version,
+            ) if member_pin_count else member_version_text
+            member_pyproject_text = member_version_text
+
         member_edit = VersionTextEdit(
             path=member_source.path,
-            text=member_source.updated_text(next_version),
+            text=member_version_text,
         )
         if member_edit.path.resolve() in seen_paths:
             raise RuntimeError(
@@ -631,17 +702,37 @@ def _plan_workspace_version_edits(
             )
         seen_paths.add(member_edit.path.resolve())
         additional.append(member_edit)
-        root_pyproject_text = _replace_exact_dependency_pin(
-            root_pyproject_text,
-            root_data,
-            member_pkg_name,
-            source.version,
-            next_version,
-        )
 
+        if (
+            member_pin_count
+            and member_source.path.resolve() != member_pyproject.resolve()
+        ):
+            if member_pyproject.resolve() in seen_paths:
+                raise RuntimeError(
+                    f'duplicate workspace version source: {member_pyproject}'
+                )
+            seen_paths.add(member_pyproject.resolve())
+            additional.append(
+                VersionTextEdit(
+                    path=member_pyproject,
+                    text=member_pyproject_text,
+                )
+            )
+
+        for mirror_edit in _plan_local_version_mirror_edits(
+            member_dpath, member_source, next_version
+        ):
+            if mirror_edit.path.resolve() in seen_paths:
+                raise RuntimeError(
+                    f'duplicate workspace version source: {mirror_edit.path}'
+                )
+            seen_paths.add(mirror_edit.path.resolve())
+            additional.append(mirror_edit)
+
+    original_root_pyproject_text = root_pyproject_path.read_text()
     if source.path.resolve() == root_pyproject_path.resolve():
         version_text = root_pyproject_text
-    else:
+    elif root_pyproject_text != original_root_pyproject_text:
         additional.append(
             VersionTextEdit(
                 path=root_pyproject_path,

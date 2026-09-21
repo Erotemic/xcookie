@@ -176,6 +176,8 @@ def make_workspace_install_parts(
         plan = make_ci_plan(self)
     commands = []
     for member in plan.workspace_members:
+        if not member.required_by_root:
+            continue
         target = format_pyproject_install_target(
             [], target=f'./{member.path}', editable=True
         )
@@ -202,6 +204,8 @@ def make_workspace_source_args(
         plan = make_ci_plan(self)
     parts: list[str] = []
     for member in plan.workspace_members:
+        if not member.required_by_root:
+            continue
         target = shlex.quote(f'./{member.path}')
         if editable:
             parts.extend(['-e', target])

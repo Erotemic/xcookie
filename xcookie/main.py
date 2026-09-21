@@ -290,8 +290,11 @@ class XCookieConfig(kwconf.Config):
             help=ub.paragraph(
                 """
             If true, ``xcookie bump`` keeps workspace member package versions
-            synchronized with the root package and updates exact root
-            dependency pins for those members.
+            synchronized with the root package and updates the exact
+            dependency pin that links each member to the root distribution or
+            the root distribution to that member. This supports both
+            root-to-member library splits and member-to-root optional
+            accelerator packages.
             """
             ),
         ),
@@ -1014,9 +1017,18 @@ class TemplateApplier:
         disk_config = self.config._load_pyproject_config()
         if disk_config is None:
             disk_config = {}
-        other_classifiers += disk_config.get('project', {}).get(
+        disk_classifiers = disk_config.get('project', {}).get(
             'classifiers', []
         )
+        # Python-version classifiers are generated from the resolved support
+        # range. Do not preserve stale generated versions from an existing
+        # pyproject when min/max Python changes.
+        python_version_prefix = 'Programming Language :: Python :: '
+        other_classifiers += [
+            item
+            for item in disk_classifiers
+            if not item.startswith(python_version_prefix)
+        ]
 
         pyproject_settings = self.config._load_xcookie_pyproject_settings()
         if (

@@ -528,6 +528,54 @@ typed = true
     )
 
 
+def _write_binary_workspace_demo(tmp_path):
+    (tmp_path / 'demo_pkg').mkdir(exist_ok=True)
+    (tmp_path / 'demo_pkg' / '__init__.py').write_text(
+        "__version__ = '1.2.3'\n"
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = {attr = "demo_pkg.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["demo_pkg*"]
+
+[tool.xcookie]
+workspace_members = ["packages/demo-accel"]
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-accel'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '''
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "demo-accel"
+version = "1.2.3"
+requires-python = ">=3.10"
+dependencies = ["demo-pkg==1.2.3"]
+
+[tool.xcookie]
+tags = ["binpy"]
+mod_name = "_demo_accel"
+typed = false
+
+[tool.cibuildwheel]
+build = "cp310-*"
+skip = "pp*"
+'''.lstrip()
+    )
+
+
 def test_github_workspace_ci_installs_and_tests_member(tmp_path):
     _write_workspace_demo(tmp_path)
     self = _make_applier(
@@ -565,6 +613,50 @@ def test_github_workspace_ci_installs_and_tests_member(tmp_path):
         'packages/demo-theory/tests'
     ) in text
     assert 'expected dependency-free wheel' in text
+
+
+def test_github_binary_workspace_uses_cibuildwheel_matrix(tmp_path):
+    _write_binary_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-accel']
+    text = self.build_github_actions_tests()
+    lint_prefix = text.split('workspace_demo_accel:', 1)[0]
+    assert 'pip install --prefer-binary -e ./packages/demo-accel' not in lint_prefix
+    assert 'workspace_demo_accel:' in text
+    assert 'Build demo-accel on ${{ matrix.os }}' in text
+    assert 'pypa/cibuildwheel' in text
+    assert 'package-dir: ./packages/demo-accel' in text
+    assert 'config-file: ./packages/demo-accel/pyproject.toml' in text
+    assert 'output-dir: workspace_wheelhouse/demo_accel' in text
+    assert 'workspace-demo-accel-${{ matrix.os }}-${{ matrix.arch }}' in text
+    assert 'python -m pip install -e .' in text
+    assert '--no-index --find-links workspace_wheelhouse/demo_accel' in text
+    assert 'Set up Python 3.10' in text
+    assert 'Validate demo-accel on Python 3.10' in text
+
+
+def test_github_binary_workspace_release_merges_platform_artifacts(tmp_path):
+    _write_binary_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-accel']
+    self.config['deploy'] = True
+    self.config['deploy_pypi'] = True
+    self.config['ci_pypi_trusted_publishing'] = True
+    text = self.build_github_actions_release()
+    assert 'macos-15-intel' in text
+    assert 'Build demo-accel sdist (Linux)' in text
+    assert 'workspace-demo-accel-release-${{ matrix.os }}-${{ matrix.arch }}' in text
+    assert 'pattern: workspace-demo-accel-release-*' in text
+    assert 'merge-multiple: true' in text
+    assert 'Publish demo-accel to PyPI' in text
 
 
 def test_github_workspace_release_builds_and_publishes_member(tmp_path):

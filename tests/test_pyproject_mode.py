@@ -1310,3 +1310,43 @@ def test_dynamic_comments_only_extra_and_all_order_are_preserved(tmp_path):
 
     assert optional['optional']['file'] == ['requirements/optional.txt']
     assert optional['all']['file'] == all_files
+
+
+def test_project_classifiers_drop_stale_python_versions(tmp_path) -> None:
+    """Existing generated Python classifiers follow the configured max."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+    (repodir / 'pyproject.toml').write_text(
+        """
+[project]
+name = "demo"
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Utilities",
+]
+
+[tool.xcookie]
+tags = ["purepy"]
+mod_name = "demo"
+repo_name = "demo"
+pkg_name = "demo"
+min_python = "3.10"
+max_python = "3.14"
+"""
+    )
+    cfg = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+    )
+    app = TemplateApplier(cfg)
+    app._presetup()
+    classifiers = app._project_classifiers()
+    assert 'Programming Language :: Python :: 3.14' in classifiers
+    assert 'Programming Language :: Python :: 3.15' not in classifiers
+    assert 'Topic :: Utilities' in classifiers

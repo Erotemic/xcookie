@@ -900,6 +900,11 @@ def build_workspace_member_job(
     release: bool = False,
 ) -> JSON_MutableMapping:
     """Build and optionally test one Python workspace distribution."""
+    if member.package_kind == 'binpy':
+        return build_workspace_binpy_member_job(
+            self, member, release=release
+        )
+
     supported_platform_info = common_ci.get_supported_platform_info(self)
     main_python_version = supported_platform_info['main_python_version']
     outdir = f'workspace_wheelhouse/{member.key}'
@@ -995,6 +1000,207 @@ def build_workspace_member_job(
             'steps': steps,
         }
     )
+
+
+def build_workspace_binpy_member_job(
+    self,
+    member: WorkspaceMember,
+    *,
+    release: bool = False,
+) -> JSON_MutableMapping:
+    """Build a binary workspace distribution with cibuildwheel.
+
+    Workspace binary packages intentionally reuse xcookie's normal
+    cibuildwheel action instead of inventing project-specific wheel plumbing.
+    The member's own pyproject.toml owns build/test selectors while the root
+    repository owns the shared CI/release topology.
+    """
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    os_list = list(supported_platform_info['os_list'])
+    cpython_versions = list(member.python_versions)
+    if not cpython_versions:
+        cpython_versions = list(supported_platform_info['cpython_versions'])
+    main_python_version = cpython_versions[-1]
+    min_python_version = cpython_versions[0]
+    if release:
+        release_os_list = []
+        for os_name in os_list:
+            release_os_list.append(os_name)
+            if os_name.lower() == 'macos-latest':
+                release_os_list.append('macos-15-intel')
+        os_list = list(ub.oset(release_os_list))
+
+    cibw_skip = _normalize_cibuildwheel_skip_string(
+        member.cibuildwheel_skip
+    )
+    matrix = Yaml.Dict(
+        {
+            'os': os_list,
+            'arch': ['auto64'],
+            'cibw_skip': [cibw_skip],
+        }
+    )
+    job = Yaml.Dict(
+        {
+            'name': (
+                f'Build {member.pkg_name} on '
+                '${{ matrix.os }}, arch=${{ matrix.arch }}'
+            ),
+            'runs-on': '${{ matrix.os }}',
+            'strategy': {
+                'fail-fast': False,
+                'matrix': matrix,
+            },
+            'steps': None,
+        }
+    )
+
+    outdir = f'workspace_wheelhouse/{member.key}'
+    cibw_action = Actions.cibuildwheel(sensible=True)
+    cibw_action['with'].update(
+        {
+            'package-dir': f'./{member.path}',
+            'config-file': f'./{member.path}/pyproject.toml',
+            'output-dir': outdir,
+        }
+    )
+
+    steps: list[JSON_Mapping] = [
+        Actions.checkout(),
+        Actions.setup_python(
+            {
+                'name': f'Set up Python {main_python_version}',
+                'with': _setup_python_inputs(main_python_version),
+            }
+        ),
+        {
+            'name': 'Install workspace build helpers',
+            'shell': 'bash',
+            'run': 'python -m pip install -U build twine pytest',
+        },
+    ]
+    if 'win' in self.config['os']:
+        steps.append(Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'))
+    if _matrix_needs_qemu(matrix):
+        steps.append(Actions.setup_qemu(sensible=True))
+    steps.append(cibw_action)
+
+    if release:
+        steps.append(
+            {
+                'name': f'Build {member.pkg_name} sdist (Linux)',
+                'if': "runner.os == 'Linux'",
+                'shell': 'bash',
+                'run': (
+                    f'python -m build --sdist --outdir {outdir} '
+                    f'./{member.path}'
+                ),
+            }
+        )
+
+    validate_commands = [
+        f'python -m twine check {outdir}/*',
+    ]
+    if not release:
+        version_spec = (
+            f'=={member.version}' if member.version is not None else ''
+        )
+        validate_commands.extend(
+            [
+                'python -m pip install -e .',
+                (
+                    'python -m pip install --force-reinstall --no-deps '
+                    f'--no-index --find-links {outdir} '
+                    f'"{member.pkg_name}{version_spec}"'
+                ),
+                (
+                    'python -c "import importlib; '
+                    f'm = importlib.import_module(\'{member.mod_name}\'); '
+                    'print(m.__file__)"'
+                ),
+            ]
+        )
+        if member.test_dpath:
+            validate_commands.extend(
+                [
+                    f'if [[ -d {member.test_dpath} ]]; then',
+                    (
+                        f'    python -m pytest -c ./{member.path}/pyproject.toml '
+                        f'{member.test_dpath}'
+                    ),
+                    'fi',
+                ]
+            )
+    steps.append(
+        {
+            'name': f'Validate {member.pkg_name} artifacts',
+            'shell': 'bash',
+            'run': '\n'.join(validate_commands),
+        }
+    )
+    if not release and min_python_version != main_python_version:
+        # Stable-ABI accelerators in particular should prove that the same
+        # built artifact imports at both ends of the supported CPython range.
+        steps.extend(
+            [
+                Actions.setup_python(
+                    {
+                        'name': f'Set up Python {min_python_version}',
+                        'with': _setup_python_inputs(min_python_version),
+                    }
+                ),
+                {
+                    'name': (
+                        f'Validate {member.pkg_name} on Python '
+                        f'{min_python_version}'
+                    ),
+                    'shell': 'bash',
+                    'run': '\n'.join(
+                        [
+                            'python -m pip install -e .',
+                            (
+                                'python -m pip install --force-reinstall '
+                                '--no-deps --no-index '
+                                f'--find-links {outdir} '
+                                f'"{member.pkg_name}{version_spec}"'
+                            ),
+                            (
+                                'python -c "import importlib; '
+                                f'm = importlib.import_module(\'{member.mod_name}\'); '
+                                'print(m.__file__)"'
+                            ),
+                        ]
+                    ),
+                },
+            ]
+        )
+    steps.append(
+        {
+            'name': 'Show built files',
+            'shell': 'bash',
+            'run': f'ls -la {outdir}',
+        }
+    )
+    artifact_base = (
+        member.release_artifact_name if release else member.artifact_name
+    )
+    steps.append(
+        Actions.upload_artifact(
+            {
+                'name': f'Upload {member.pkg_name} distributions',
+                'with': {
+                    'name': (
+                        artifact_base
+                        + '-${{ matrix.os }}-${{ matrix.arch }}'
+                    ),
+                    'if-no-files-found': 'error',
+                    'path': f'{outdir}/*',
+                },
+            }
+        )
+    )
+    job['steps'] = steps
+    return job
 
 
 def build_ci_source_check_job(
@@ -2783,14 +2989,23 @@ def build_deploy(
         )
     workspace_release_dpath = 'workspace_release'
     for member in workspace_members:
+        download_with: dict[str, JSON] = {
+            'path': f'{workspace_release_dpath}/{member.key}',
+        }
+        if member.package_kind == 'binpy':
+            download_with.update(
+                {
+                    'pattern': member.artifact_pattern(release=True),
+                    'merge-multiple': True,
+                }
+            )
+        else:
+            download_with['name'] = member.release_artifact_name
         deploy_steps.append(
             Actions.download_artifact(
                 {
                     'name': f'Download {member.pkg_name}',
-                    'with': {
-                        'name': member.release_artifact_name,
-                        'path': f'{workspace_release_dpath}/{member.key}',
-                    },
+                    'with': download_with,
                 }
             )
         )
