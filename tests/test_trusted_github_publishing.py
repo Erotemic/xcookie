@@ -194,6 +194,50 @@ def test_trusted_footer_prefers_explicit_github_mirror(tmp_path):
     assert 'gitlab.kitware.com/computer-vision/demo_pkg/actions/' not in text
 
 
+def test_rotate_secrets_dual_host_uses_explicit_github_mirror(
+    monkeypatch, tmp_path
+):
+    """A GitLab-primary repo may publish independently from GitHub too."""
+    _patch_command_queue(monkeypatch)
+
+    cfg = XCookieConfig(
+        repodir=tmp_path,
+        repo_name='demo_pkg',
+        tags=['kitware', 'gitlab', 'github', 'binpy'],
+        url='https://gitlab.kitware.com/computer-vision/demo_pkg',
+        github_url='https://github.com/Erotemic/demo_pkg',
+        interactive=False,
+        use_vcs=False,
+    )
+    cfg['ci_pypi_trusted_publishing'] = ['github', 'gitlab']
+    cfg['enable_gpg'] = False
+    self = TemplateApplier(cfg)
+    self._presetup()
+
+    rotator = SecretRotator(self.config)
+    backends = rotator._secret_rotation_backends()
+
+    assert [backend['name'] for backend in backends] == ['github', 'gitlab']
+    assert (
+        backends[0]['environ_export']
+        == 'setup_package_environs_github_erotemic'
+    )
+    assert backends[0]['repo_full_name'] == 'Erotemic/demo_pkg'
+
+    rotator.rotate_secrets()
+    joined = '\n'.join(_FakeQueue.created[-1].commands)
+    assert '===== Rotating secrets for github backend =====' in joined
+    assert 'export GH_REPO=Erotemic/demo_pkg' in joined
+    assert 'github_repo_full_name(){ printf' in joined
+    assert '===== Rotating secrets for gitlab backend =====' in joined
+    assert 'setup_package_environs_github_erotemic' in joined
+    assert 'setup_package_environs_gitlab_kitware' in joined
+    assert 'upload_github_secrets' not in joined
+    assert (
+        'upload_gitlab_repo_secrets trusted_publishing_direct_gpg' in joined
+    )
+
+
 def test_release_workflow_legacy_footer_keeps_twine_act_secrets(tmp_path):
     text = _make_applier(
         tmp_path, trusted=False, enable_gpg=True
@@ -726,3 +770,20 @@ def test_gitlab_trusted_publishing_notes_absent_when_pypi_deploy_disabled(
     text = self.build_gitlab_ci()
     assert 'publish/pypi:' not in text
     assert 'GitLab PyPI Trusted Publishing setup checklist' not in text
+
+
+def test_setup_secrets_github_repo_resolution_supports_dual_host_checkout():
+    from pathlib import Path
+
+    import xcookie.rc as rc
+
+    text = Path(rc.resource_fpath('setup_secrets.sh.in')).read_text()
+    assert 'if [[ "${GH_REPO:-}" != "" ]]' in text
+    assert 'done < <(git remote)' in text
+    assert 'git remote get-url origin' not in text
+    assert 'gh secret set "$secret_name" --repo "$repo_full_name"' in text
+    assert (
+        'gh secret set "$secret_name" --repo "$repo_full_name" '
+        '--env "$environment_name"'
+        in text
+    )
