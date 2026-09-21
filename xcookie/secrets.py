@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Any
 
 import ubelt as ub
 
+from xcookie.publishing import trusted_publishing_enabled
 from xcookie.util_command import make_command_queue
+from xcookie.vcs.url import GitURL
 
 
 class SecretRotator:
@@ -15,6 +18,27 @@ class SecretRotator:
     def __init__(self, config: Any) -> None:
         self.config = config
         self.repodir = ub.Path(config['repodir'])
+
+    def _configured_github_repo_full_name(self) -> str | None:
+        """Return ``owner/repo`` for an explicitly configured GitHub URL."""
+        candidate_urls = [
+            self.config.get('github_url', None),
+            self.config.get('url', None),
+        ]
+        for url in candidate_urls:
+            if not isinstance(url, str) or not url:
+                continue
+            try:
+                info = GitURL(url).info
+            except (IndexError, ValueError):
+                continue
+            if info.get('host', '').lower() != 'github.com':
+                continue
+            owner = info.get('group', '')
+            repo_name = info.get('repo_name', '').removesuffix('.git')
+            if owner and repo_name:
+                return f'{owner}/{repo_name}'
+        return None
 
     def _github_org_environ(self) -> str:
         """Resolve the org-specific GitHub environment export function."""
@@ -28,12 +52,12 @@ class SecretRotator:
             'erotemic': 'setup_package_environs_github_erotemic',
             'pyutils': 'setup_package_environs_github_pyutils',
         }
-        owner = None
-        url = self.config.get('url', None)
-        if isinstance(url, str) and 'github' in url:
-            parts = url.split('github.com/', 1)[-1].strip('/').split('/')
-            if parts and parts[0]:
-                owner = parts[0].lower()
+        repo_full_name = self._configured_github_repo_full_name()
+        owner = (
+            repo_full_name.partition('/')[0].lower()
+            if repo_full_name is not None
+            else None
+        )
         environ = owner_to_environ.get(owner) if owner is not None else None
         if environ is None:
             raise Exception(
@@ -57,6 +81,7 @@ class SecretRotator:
                     'upload_secret_cmd': 'upload_github_secrets',
                     'gpg_upload_cmd': 'upload_github_gpg_secrets',
                     'is_github': True,
+                    'repo_full_name': self._configured_github_repo_full_name(),
                 }
             )
 
@@ -83,9 +108,6 @@ class SecretRotator:
         """Print the rotation plan, confirm it, then execute it."""
         setup_secrets_fpath = self.repodir / 'dev/setup_secrets.sh'
         enable_gpg = self.config['enable_gpg']
-        use_trusted_publishing = self.config.get(
-            'ci_pypi_trusted_publishing', False
-        )
         ci_gpg_transport = self.config.get(
             'ci_gpg_secret_transport', 'encrypted_repo'
         )
@@ -101,13 +123,29 @@ class SecretRotator:
             environ_export = backend['environ_export']
             upload_secret_cmd = backend['upload_secret_cmd']
             gpg_upload_cmd = backend['gpg_upload_cmd']
+            provider = backend['name']
             is_github = backend['is_github']
+            use_trusted_publishing = trusted_publishing_enabled(
+                self.config, provider
+            )
 
             script.sync().submit(
                 f'echo "===== Rotating secrets for {backend["name"]}'
                 ' backend ====="',
                 log=False,
             )
+            if is_github and backend.get('repo_full_name'):
+                repo_full_name = shlex.quote(backend['repo_full_name'])
+                script.sync().submit(
+                    f'export GH_REPO={repo_full_name}', log=False
+                )
+                # Older generated setup_secrets.sh files only inspect origin.
+                # Override their helper so xcookie secrets works immediately
+                # for a GitLab-primary checkout with an explicit GitHub mirror.
+                script.sync().submit(
+                    "github_repo_full_name(){ printf '%s' \"$GH_REPO\"; }",
+                    log=False,
+                )
             script.sync().submit(f'{environ_export}', log=False)
 
             if enable_gpg:
@@ -130,9 +168,17 @@ class SecretRotator:
                     ' no additional CI secrets to upload."',
                     log=False,
                 )
-            elif use_trusted_publishing and is_github:
+            elif use_trusted_publishing:
+                if is_github:
+                    mode = 'trusted_publishing'
+                else:
+                    mode = (
+                        'trusted_publishing_direct_gpg'
+                        if use_direct_gpg or not enable_gpg
+                        else 'trusted_publishing_encrypted_gpg'
+                    )
                 script.sync().submit(
-                    f'{upload_secret_cmd} trusted_publishing', log=False
+                    f'{upload_secret_cmd} {mode}', log=False
                 )
             elif use_direct_gpg:
                 script.sync().submit(

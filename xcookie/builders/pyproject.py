@@ -205,6 +205,7 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'min_python',
         'version',
         'url',
+        'github_url',
         'author',
         'author_email',
         'description',
@@ -212,7 +213,15 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'dev_status',
         'typed',
         'typecheck_extra_paths',
+        'typecheck_install_extras',
+        'workspace_members',
+        'workspace_sync_versions',
         'ci_prerelease_python_policy',
+        'ci_reusable_wheels',
+        'ci_versionless_wheels',
+        'ci_wheel_build_post_commands',
+        'ci_source_checks',
+        'test_env',
         'ci_artifacts',
         'remote_host',
         'remote_group',
@@ -234,6 +243,7 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'repo_name',
         'min_python',
         'url',
+        'github_url',
         'author',
         'author_email',
         'description',
@@ -242,6 +252,9 @@ def _build_xcookie_tool_config(self, pyproj_config):
         'use_pyproject_requirements',
         'requirements_package',
         'ci_artifacts',
+        'ci_source_checks',
+        'workspace_members',
+        'workspace_sync_versions',
     }
 
     default_os = {'linux', 'osx', 'win'}
@@ -285,8 +298,26 @@ def _build_xcookie_tool_config(self, pyproj_config):
             should_save = should_save or value != 'planning'
         elif key == 'typecheck_extra_paths':
             should_save = should_save or bool(value)
+        elif key == 'typecheck_install_extras':
+            normalized = list(value) if not isinstance(value, str) else [value]
+            should_save = should_save or normalized != ['tests']
+        elif key == 'workspace_members':
+            should_save = should_save or bool(value)
+        elif key == 'workspace_sync_versions':
+            should_save = should_save or bool(value)
         elif key == 'ci_prerelease_python_policy':
             should_save = should_save or value != 'allow-failure'
+        elif key in {
+            'ci_reusable_wheels',
+            'ci_versionless_wheels',
+        }:
+            should_save = should_save or bool(value)
+        elif key == 'ci_wheel_build_post_commands':
+            should_save = should_save or bool(value)
+        elif key == 'ci_source_checks':
+            should_save = should_save or bool(value)
+        elif key == 'test_env':
+            should_save = should_save or bool(value)
         elif key in {'remote_host', 'remote_group'}:
             # These are usually inferred from the URL and need not be persisted
             # unless the user explicitly had them on disk already.
@@ -314,26 +345,42 @@ def build_pyproject(self):
     pyproject_settings = self.config._load_xcookie_pyproject_settings()
     if pyproject_settings is None:
         pyproject_settings = {}
+
+    is_binpy = 'binpy' in self.config['tags']
+    build_backend = pyproj_config['build-system'].get('build-backend')
+    setuptools_backends = {
+        None,
+        'setuptools.build_meta',
+        'setuptools.build_meta:__legacy__',
+    }
+    foreign_binpy_backend = is_binpy and build_backend not in setuptools_backends
+
     # {'tool': {}}
-    if 'binpy' in self.config['tags']:
-        build_system_requires = list(
-            pyproj_config['build-system'].get('requires') or []
+    if is_binpy:
+        reusable_wheels = bool(
+            self.config.get('ci_reusable_wheels', False)
+            or self.config.get('ci_versionless_wheels', False)
         )
-        build_system_requires.extend(
-            [
-                'setuptools>=77',
-                # setuptools_scm[toml]
-                # "wheel",
-                'scikit-build>=0.11.1',
-                'numpy',
-                'ninja>=1.10.2',
-                'cmake>=3.21.2',
-                'cython>=0.29.24',
-            ]
-        )
-        pyproj_config['build-system']['requires'] = list(
-            ub.oset(build_system_requires)
-        )
+
+        if not foreign_binpy_backend:
+            build_system_requires = list(
+                pyproj_config['build-system'].get('requires') or []
+            )
+            build_system_requires.extend(
+                [
+                    'setuptools>=77',
+                    # setuptools_scm[toml]
+                    # "wheel",
+                    'scikit-build>=0.11.1',
+                    'numpy',
+                    'ninja>=1.10.2',
+                    'cmake>=3.21.2',
+                    'cython>=0.29.24',
+                ]
+            )
+            pyproj_config['build-system']['requires'] = list(
+                ub.oset(build_system_requires)
+            )
 
         supported_cp_version = []
         for pyver in self.config['supported_python_versions']:
@@ -343,34 +390,59 @@ def build_pyproject(self):
         for cpver in supported_cp_version:
             wheel_build_patterns.append(cpver + '-*')
 
-        test_extras = ['tests-strict', 'runtime-strict']
-        if 'cv2' in self.config['tags']:
-            test_extras += ['headless-strict']
+        cibw = pyproj_config['tool']['cibuildwheel']
+        if reusable_wheels:
+            # A reusable wheel has one project-owned build selector per
+            # platform. Preserve an explicit selector (e.g. cp310-* for
+            # abi3); otherwise use the minimum supported CPython as the
+            # baseline build interpreter.
+            if not cibw.get('build'):
+                cibw['build'] = supported_cp_version[0] + '-*'
 
-        skip_tokens = ['pp*', '*-musllinux_*']
-        if 'win' in self.config['os']:
-            for pyver in self.config['supported_python_versions']:
-                pyver_parts = tuple(int(p) for p in str(pyver).split('.')[:2])
-                if pyver_parts < (3, 11):
-                    skip_tokens.append(
-                        'cp' + str(pyver).replace('.', '') + '-win_arm64'
+            # cibuildwheel's ``auto`` architecture policy currently expands
+            # to both AMD64 and x86 on a 64-bit Windows runner.  That violates
+            # the reusable-wheel contract of one native artifact per runner
+            # and also makes host-side artifact validation try to install an
+            # x86 wheel into an x64 interpreter.  Prefer 64-bit auto selection
+            # unless the project explicitly names a different architecture
+            # policy.  Projects that still publish 32-bit Windows wheels can
+            # request x86 explicitly.
+            archs = cibw.get('archs')
+            if archs is None or archs == 'auto' or archs == ['auto']:
+                cibw['archs'] = ['auto64']
+
+        if not foreign_binpy_backend:
+            test_extras = ['tests-strict', 'runtime-strict']
+            if 'cv2' in self.config['tags']:
+                test_extras += ['headless-strict']
+
+            skip_tokens = ['pp*', '*-musllinux_*']
+            if 'win' in self.config['os']:
+                for pyver in self.config['supported_python_versions']:
+                    pyver_parts = tuple(
+                        int(p) for p in str(pyver).split('.')[:2]
                     )
+                    if pyver_parts < (3, 11):
+                        skip_tokens.append(
+                            'cp' + str(pyver).replace('.', '') + '-win_arm64'
+                        )
 
-        pyproj_config['tool']['cibuildwheel'].update(
-            {
-                'build': ' '.join(wheel_build_patterns),
-                'build-frontend': 'build',
-                # 'skip': "pp* cp27-* cp34-* cp35-* cp36-* *-musllinux_*",
-                'skip': ' '.join(ub.oset(skip_tokens)),
-                'build-verbosity': 1,
-                # 'test-requires': ["-r requirements/tests.txt"],
-                'test-extras': test_extras,
-                'test-command': 'python {project}/run_tests.py',
-            }
-        )
+            generated_build = (
+                cibw.get('build')
+                if reusable_wheels
+                else ' '.join(wheel_build_patterns)
+            )
+            cibw.update(
+                {
+                    'build': generated_build,
+                    'build-frontend': 'build',
+                    'skip': ' '.join(ub.oset(skip_tokens)),
+                    'build-verbosity': 1,
+                    'test-extras': test_extras,
+                    'test-command': 'python {project}/run_tests.py',
+                }
+            )
 
-        if True:
-            cibw = pyproj_config['tool']['cibuildwheel']
             req_commands = {
                 'linux': [
                     'yum install epel-release lz4 lz4-devel -y',
@@ -385,6 +457,7 @@ def build_pyproject(self):
             for plat in req_commands.keys():
                 cmd = ' && '.join(req_commands[plat])
                 cibw[plat]['before-all'] = cmd
+
     else:
         build_system_requires = list(
             pyproj_config['build-system'].get('requires') or []
@@ -467,7 +540,7 @@ def build_pyproject(self):
 
     use_pyproject_requirements = self.config.get('use_pyproject_requirements')
 
-    if not use_setup_py:
+    if not use_setup_py and not foreign_binpy_backend:
         project_block = pyproj_config['project']
         project_block['name'] = self.config['pkg_name']
         project_block['description'] = self.config['description']

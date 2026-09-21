@@ -1,0 +1,12 @@
+[submodule "submodules/ubelt"]
+	path = submodules/ubelt
+	url = https://github.com/Erotemic/ubelt.git
+[submodule "submodules/xdoctest"]
+	path = submodules/xdoctest
+	url = https://github.com/Erotemic/xdoctest.git
+[submodule "submodules/kwconf"]
+	path = submodules/kwconf
+	url = https://github.com/Erotemic/kwconf.git
+[submodule "submodules/kwutil"]
+	path = submodules/kwutil
+	url = https://github.com/Erotemic/kwutil.git

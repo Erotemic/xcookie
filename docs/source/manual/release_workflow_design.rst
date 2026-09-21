@@ -38,6 +38,28 @@ replaced, while a Git tag or GitHub release can be repaired after a later step
 fails. Do not move tag creation before live PyPI publication merely to make the
 workflow look more transactional.
 
+Workspace distributions
+-----------------------
+
+When ``tool.xcookie.workspace_members`` declares additional Python
+distributions, the same release workflow builds their wheels and source
+distributions alongside the root package. Publishable workspace members are
+published before the root distribution so a root package may depend on the
+member version released by the same commit. The version tag is still created
+only after every live PyPI publication succeeds.
+
+Workspace PyPI publication currently requires GitHub trusted publishing. Each
+published PyPI project must register the same repository, release workflow,
+and ``pypi`` environment as a trusted publisher. The root package and workspace
+members may share that workflow registration; credentials are not copied into
+the repository.
+
+When ``workspace_sync_versions=true``, ``xcookie bump`` advances each member
+to the root package's next version and updates exact root dependency pins such
+as ``member-package==1.2.3`` in the same bump plan. A mismatched member version
+or missing exact pin is a bump-time error rather than a partially synchronized
+release.
+
 GitHub release association
 --------------------------
 

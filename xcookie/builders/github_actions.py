@@ -14,7 +14,13 @@ import ubelt as ub
 
 from xcookie.builders import ci_model, common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
-from xcookie.builders.ci_plan import CIArtifact, CIPlan
+from xcookie.builders.ci_plan import (
+    CIArtifact,
+    CIPlan,
+    CISourceCheck,
+    WorkspaceMember,
+)
+from xcookie.publishing import trusted_publishing_enabled
 from xcookie.util_yaml import Yaml
 
 # Type alias for json / yaml data structure
@@ -49,26 +55,19 @@ class GitHubActionsRenderer:
 
     def render_tests(self) -> str:
         name, jobs = _collect_test_jobs(self.applier, self.plan)
-        defaultbranch = self.applier.config['defaultbranch']
-        run_on_branches = ub.oset([defaultbranch, 'main'])
-        run_on_branches_str = ', '.join(run_on_branches)
-        on_lines = f"""
-        push:
-          # Restricting push triggers to the default branch avoids running
-          # the whole pipeline twice (push + pull_request events) for every
-          # push to a PR branch. Feature branches are covered by the
-          # pull_request trigger; release branches and tags are handled by
-          # release.yml.
-          branches: [ {run_on_branches_str} ]
-        pull_request:
-          branches: [ {run_on_branches_str} ]
-        """
-        concurrency_lines = """
-        group: ${{ github.workflow }}-${{ github.ref }}
-        # Superseded runs on the same ref are cancelled; deploy-bearing refs
-        # never trigger this workflow (release.yml owns them).
-        cancel-in-progress: true
-        """
+        on_lines, concurrency_lines = _normal_validation_triggers(self.applier)
+        return _render_workflow_text(
+            name,
+            on_lines,
+            jobs,
+            footer='',
+            concurrency_lines=concurrency_lines,
+        )
+
+    def render_checks(self) -> str:
+        """Render project-owned source checks in their own workflow."""
+        name, jobs = _collect_source_check_jobs(self.applier, self.plan)
+        on_lines, concurrency_lines = _normal_validation_triggers(self.applier)
         return _render_workflow_text(
             name,
             on_lines,
@@ -91,37 +90,80 @@ class GitHubActionsRenderer:
                 mode='test',
                 needs=release_build_needs,
                 release_artifacts=release_artifacts,
+                workspace_members=self.plan.workspace_members,
             )
             jobs['live_deploy'] = build_deploy(
                 self.applier,
                 mode='live',
                 needs=release_build_needs,
                 release_artifacts=release_artifacts,
+                workspace_members=self.plan.workspace_members,
             )
             jobs['release'] = build_github_release(
                 self.applier,
                 needs=['live_deploy'],
                 release_artifacts=release_artifacts,
+                workspace_members=self.plan.workspace_members,
             )
 
-        # Only refs that can actually deploy trigger the release workflow:
-        # test_deploy fires on pushes to the default branch, and
-        # live_deploy/release fire on release branches and tags. An
-        # unfiltered `push:` would run the (expensive) sdist/wheel build
-        # jobs on every push to every branch and then deploy nothing.
+        # IMPORTANT RELEASE POLICY:
+        # Live publication is branch-driven and provider-neutral:
+        # `git push <remote> main:release` is the release operation whether
+        # <remote> is GitHub or GitLab. Pushes to the default branch
+        # intentionally enter this release workflow and, when deployment is
+        # enabled, publish the resulting artifacts to TestPyPI. This is a
+        # deliberate continuous packaging smoke test of the same build/sign/
+        # trusted-publishing path used before a live release. Do not remove
+        # the default branch trigger or make TestPyPI dispatch-only unless
+        # intentionally changing this release policy. Tags are outputs of a
+        # live release, never workflow entry points.
         defaultbranch = self.applier.config['defaultbranch']
-        release_branches = ub.oset([defaultbranch, 'main'])
-        release_branches_str = ', '.join(
-            list(release_branches) + ["'release*'"]
-        )
+        release_branches = ub.oset([defaultbranch, 'main', 'release'])
+        release_branches_str = ', '.join(release_branches)
         on_lines = f"""
+        # MAINTAINER INTENT: pushes to the default branch intentionally enter
+        # this release workflow. With deployment enabled, test_deploy publishes
+        # those artifacts to TestPyPI so every mainline merge exercises the
+        # release packaging/signing/trusted-publishing path before promotion.
+        # Do not make TestPyPI manual-only or remove the default-branch trigger
+        # unless intentionally changing that release policy.
         push:
           branches: [ {release_branches_str} ]
-          tags: [ '*' ]
         workflow_dispatch:
+          inputs:
+            publish_target:
+              description: Optional non-production publish target
+              required: true
+              default: build-only
+              type: choice
+              options:
+                - build-only
+                - testpypi
         """
         footer = _build_github_footer(self.applier)
         return _render_workflow_text(name, on_lines, jobs, footer=footer)
+
+
+def _normal_validation_triggers(applier) -> tuple[str, str]:
+    """Shared trigger/concurrency policy for tests and source checks."""
+    defaultbranch = applier.config['defaultbranch']
+    run_on_branches = ub.oset([defaultbranch, 'main'])
+    run_on_branches_str = ', '.join(run_on_branches)
+    on_lines = f"""
+    push:
+      # Restricting push triggers to the default branch avoids running
+      # validation twice (push + pull_request events) for every push to a PR
+      # branch. Feature branches are covered by pull_request; release refs are
+      # handled by release.yml.
+      branches: [ {run_on_branches_str} ]
+    pull_request:
+      branches: [ {run_on_branches_str} ]
+    """
+    concurrency_lines = """
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+    """
+    return on_lines, concurrency_lines
 
 
 def _action_ref(name: str) -> str:
@@ -467,7 +509,12 @@ class Actions:
 def _render_workflow_text(
     name, on_lines, jobs, footer='', concurrency_lines=None
 ):
-    workflow_kind = 'release' if name.endswith('Release') else 'tests'
+    if name.endswith('Release'):
+        workflow_kind = 'release'
+    elif name == 'SourceChecks':
+        workflow_kind = 'checks'
+    else:
+        workflow_kind = 'tests'
     header = ub.codeblock(
         f"""
         # This workflow is autogenerated by xcookie.
@@ -504,7 +551,7 @@ def _render_workflow_text(
         + '\n\n'
         + footer
     )
-    return text
+    return text.rstrip() + '\n'
 
 
 def _normalize_cibuildwheel_skip_selector(selector: str) -> str:
@@ -568,12 +615,12 @@ def _matrix_needs_qemu(matrix: Mapping[str, JSON]) -> bool:
             if 'arch' in item:
                 arches.append(item['arch'])
 
-    return any(str(arch) != 'auto' for arch in arches)
+    return any(str(arch) not in {'auto', 'auto64', 'native'} for arch in arches)
 
 
 def _build_github_footer(self):
-    use_trusted_publishing = self.config.get(
-        'ci_pypi_trusted_publishing', False
+    use_trusted_publishing = trusted_publishing_enabled(
+        self.config, 'github'
     )
     ci_gpg_transport = self.config.get(
         'ci_gpg_secret_transport', 'encrypted_repo'
@@ -586,9 +633,21 @@ def _build_github_footer(self):
 
         from packaging.utils import canonicalize_name
 
-        host = self.remote_info.get('host', 'https://github.com')
-        group = self.remote_info.get('group', '<OWNER>')
-        repo_name = self.remote_info.get('repo_name', self.repo_name)
+        github_url = self.config.get('github_url', None)
+        if github_url:
+            from xcookie.vcs.url import GitURL
+
+            github_url = GitURL(github_url).to_https()
+            github_info = github_url.info
+            host = 'https://' + github_info['host']
+            group = github_info['group']
+            repo_name = github_info['repo_name'].removesuffix('.git')
+        else:
+            host = self.remote_info.get('host', 'https://github.com')
+            if not str(host).startswith(('http://', 'https://')):
+                host = 'https://' + str(host)
+            group = self.remote_info.get('group', '<OWNER>')
+            repo_name = self.remote_info.get('repo_name', self.repo_name)
         repo_url = f'{host}/{group}/{repo_name}'
         workflow_relpath = '.github/workflows/release.yml'
         workflow_basename = ub.Path(workflow_relpath).name
@@ -639,17 +698,17 @@ def _build_github_footer(self):
 
                    - testpypi:
                        * environment name: testpypi
-                       * use for non-release pushes that publish to TestPyPI
+                       * used automatically for default-branch packaging smoke tests
+                         and optionally for explicit workflow_dispatch probes
                        * usually no manual approval is needed
-                       * optionally restrict deployment branches if you only want
-                         TestPyPI publishes from selected branches
+                       * this environment is never part of a live release push
 
                    - pypi:
                        * environment name: pypi
                        * use for real releases only
                        * require manual approval / required reviewers
                        * prevent self-review if your org supports it
-                       * restrict deployments to release branches / version tags
+                       * restrict deployments to the exact release branch
 
                    - do not put TWINE_* secrets in these environments when using
                      trusted publishing
@@ -669,6 +728,10 @@ def _build_github_footer(self):
                    {pypi_project_url}
                  Account publishing page:
                    https://pypi.org/manage/account/publishing/
+
+                 If workspace_members publishes additional distributions,
+                 register this same repository/workflow/environment tuple as a
+                 trusted publisher for each workspace PyPI project as well.
 
               3. In TestPyPI, add a trusted publisher for this project:
                    owner: {group}
@@ -845,6 +908,366 @@ def build_ci_artifact_job(
     )
 
 
+def build_workspace_member_job(
+    self,
+    member: WorkspaceMember,
+    *,
+    release: bool = False,
+) -> JSON_MutableMapping:
+    """Build and optionally test one Python workspace distribution."""
+    if member.package_kind == 'binpy':
+        return build_workspace_binpy_member_job(
+            self, member, release=release
+        )
+
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    main_python_version = supported_platform_info['main_python_version']
+    outdir = f'workspace_wheelhouse/{member.key}'
+    build_commands = [
+        f'{self.UPDATE_PIP}',
+        f'{self.PIP_INSTALL} setuptools>=77 wheel build twine',
+        f'python -m build --sdist --wheel --outdir {outdir} ./{member.path}',
+        f'python -m twine check {outdir}/*',
+    ]
+    steps: list[JSON_Mapping] = [
+        Actions.checkout(),
+        Actions.setup_python(
+            {
+                'name': f'Set up Python {main_python_version}',
+                'with': _setup_python_inputs(main_python_version),
+            }
+        ),
+        {
+            'name': f'Build {member.pkg_name}',
+            'shell': 'bash',
+            'run': '\n'.join(build_commands),
+        },
+    ]
+
+    if not release:
+        test_commands = [
+            'python -m pip install pytest ty',
+            f'WHEEL_FPATH=$(ls {outdir}/{member.dist_prefix}*.whl | head -n 1)',
+            'test -n "$WHEEL_FPATH"',
+            'python -m pip install --prefer-binary "$WHEEL_FPATH"',
+            f'python -c "import {member.mod_name}; print({member.mod_name}.__file__)"',
+        ]
+        if member.dependency_free:
+            test_commands.extend(
+                [
+                    "python - <<'PY'",
+                    'import email',
+                    'import glob',
+                    'import zipfile',
+                    f"wheel = glob.glob('{outdir}/{member.dist_prefix}*.whl')[0]",
+                    "with zipfile.ZipFile(wheel) as zfile:",
+                    "    metadata_name = next(name for name in zfile.namelist() if name.endswith('.dist-info/METADATA'))",
+                    "    metadata = email.message_from_bytes(zfile.read(metadata_name))",
+                    "requires = metadata.get_all('Requires-Dist') or []",
+                    "if requires:",
+                    "    raise SystemExit(f'expected dependency-free wheel, found Requires-Dist: {requires}')",
+                    'PY',
+                ]
+            )
+        if member.typed:
+            targets = [member.rel_mod_dpath]
+            for extra in member.typecheck_extra_paths:
+                targets.append(f'{member.path}/{extra}')
+            target_text = ' '.join(targets)
+            test_commands.append(f'ty check {target_text}')
+        test_commands.extend(
+            [
+                f'if [[ -d {member.test_dpath} ]]; then',
+                (
+                    f'    python -m pytest -c ./{member.path}/pyproject.toml '
+                    f'{member.test_dpath}'
+                ),
+                'fi',
+            ]
+        )
+        steps.append(
+            {
+                'name': f'Test {member.pkg_name} in isolation',
+                'shell': 'bash',
+                'run': '\n'.join(test_commands),
+            }
+        )
+
+    artifact_name = (
+        member.release_artifact_name if release else member.artifact_name
+    )
+    steps.append(
+        Actions.upload_artifact(
+            {
+                'name': f'Upload {member.pkg_name} distributions',
+                'with': {
+                    'name': artifact_name,
+                    'if-no-files-found': 'error',
+                    'path': f'{outdir}/*',
+                },
+            }
+        )
+    )
+    return Yaml.Dict(
+        {
+            'name': f'Build {member.pkg_name}',
+            'runs-on': 'ubuntu-latest',
+            'steps': steps,
+        }
+    )
+
+
+def build_workspace_binpy_member_job(
+    self,
+    member: WorkspaceMember,
+    *,
+    release: bool = False,
+) -> JSON_MutableMapping:
+    """Build a binary workspace distribution with cibuildwheel.
+
+    Workspace binary packages intentionally reuse xcookie's normal
+    cibuildwheel action instead of inventing project-specific wheel plumbing.
+    The member's own pyproject.toml owns build/test selectors while the root
+    repository owns the shared CI/release topology.
+    """
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    os_list = list(supported_platform_info['os_list'])
+    cpython_versions = list(member.python_versions)
+    if not cpython_versions:
+        cpython_versions = list(supported_platform_info['cpython_versions'])
+    main_python_version = cpython_versions[-1]
+    min_python_version = cpython_versions[0]
+    cibw_skip = _normalize_cibuildwheel_skip_string(
+        member.cibuildwheel_skip
+    )
+    if release:
+        release_targets = _github_release_binpy_targets(self)
+        for target in release_targets:
+            target['cibw_skip'] = cibw_skip
+        matrix = Yaml.Dict({'include': release_targets})
+        matrix.yaml_set_start_comment(
+            ub.codeblock(_RELEASE_WHEELS_MATRIX_COMMENT),
+            indent=8,
+        )
+        os_list = [target['os'] for target in release_targets]
+    else:
+        matrix = Yaml.Dict(
+            {
+                'os': os_list,
+                'arch': ['auto64'],
+                'cibw_skip': [cibw_skip],
+            }
+        )
+    job = Yaml.Dict(
+        {
+            'name': (
+                f'Build {member.pkg_name} on '
+                '${{ matrix.os }}, arch=${{ matrix.arch }}'
+            ),
+            'runs-on': '${{ matrix.os }}',
+            'strategy': {
+                'fail-fast': False,
+                'matrix': matrix,
+            },
+            'steps': None,
+        }
+    )
+
+    outdir = f'workspace_wheelhouse/{member.key}'
+    cibw_action = Actions.cibuildwheel(sensible=True)
+    cibw_action['with'].update(
+        {
+            'package-dir': f'./{member.path}',
+            'config-file': f'./{member.path}/pyproject.toml',
+            'output-dir': outdir,
+        }
+    )
+    if release:
+        # Release defaults are native 64-bit only. In particular, cibuildwheel
+        # ``auto`` on Windows also includes x86; publishing x86 is not part of
+        # xcookie's required modern wheel set.
+        cibw_action['env']['CIBW_ARCHS_WINDOWS'] = 'auto64'
+        cibw_action['env']['CIBW_ARCHS_MACOS'] = 'auto64'
+
+    steps: list[JSON_Mapping] = [
+        Actions.checkout(),
+        Actions.setup_python(
+            {
+                'name': f'Set up Python {main_python_version}',
+                'with': _setup_python_inputs(main_python_version),
+            }
+        ),
+        {
+            'name': 'Install workspace build helpers',
+            'shell': 'bash',
+            'run': 'python -m pip install -U build twine pytest',
+        },
+    ]
+    if 'win' in self.config['os']:
+        steps.append(Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'))
+    if _matrix_needs_qemu(matrix):
+        steps.append(Actions.setup_qemu(sensible=True))
+    steps.append(cibw_action)
+
+    if release:
+        steps.append(
+            {
+                'name': f'Build {member.pkg_name} sdist (Linux)',
+                'if': "runner.os == 'Linux'",
+                'shell': 'bash',
+                'run': (
+                    f'python -m build --sdist --outdir {outdir} '
+                    f'./{member.path}'
+                ),
+            }
+        )
+
+    validate_commands = [
+        f'python -m twine check {outdir}/*',
+    ]
+    if not release:
+        version_spec = (
+            f'=={member.version}' if member.version is not None else ''
+        )
+        validate_commands.extend(
+            [
+                'python -m pip install -e .',
+                (
+                    'python -m pip install --force-reinstall --no-deps '
+                    f'--no-index --find-links {outdir} '
+                    f'"{member.pkg_name}{version_spec}"'
+                ),
+                (
+                    'python -c "import importlib; '
+                    f'm = importlib.import_module(\'{member.mod_name}\'); '
+                    'print(m.__file__)"'
+                ),
+            ]
+        )
+        if member.test_dpath:
+            validate_commands.extend(
+                [
+                    f'if [[ -d {member.test_dpath} ]]; then',
+                    (
+                        f'    python -m pytest -c ./{member.path}/pyproject.toml '
+                        f'{member.test_dpath}'
+                    ),
+                    'fi',
+                ]
+            )
+    steps.append(
+        {
+            'name': f'Validate {member.pkg_name} artifacts',
+            'shell': 'bash',
+            'run': '\n'.join(validate_commands),
+        }
+    )
+    if not release and min_python_version != main_python_version:
+        # Stable-ABI accelerators in particular should prove that the same
+        # built artifact imports at both ends of the supported CPython range.
+        steps.extend(
+            [
+                Actions.setup_python(
+                    {
+                        'name': f'Set up Python {min_python_version}',
+                        'with': _setup_python_inputs(min_python_version),
+                    }
+                ),
+                {
+                    'name': (
+                        f'Validate {member.pkg_name} on Python '
+                        f'{min_python_version}'
+                    ),
+                    'shell': 'bash',
+                    'run': '\n'.join(
+                        [
+                            'python -m pip install -e .',
+                            (
+                                'python -m pip install --force-reinstall '
+                                '--no-deps --no-index '
+                                f'--find-links {outdir} '
+                                f'"{member.pkg_name}{version_spec}"'
+                            ),
+                            (
+                                'python -c "import importlib; '
+                                f'm = importlib.import_module(\'{member.mod_name}\'); '
+                                'print(m.__file__)"'
+                            ),
+                        ]
+                    ),
+                },
+            ]
+        )
+    steps.append(
+        {
+            'name': 'Show built files',
+            'shell': 'bash',
+            'run': f'ls -la {outdir}',
+        }
+    )
+    artifact_base = (
+        member.release_artifact_name if release else member.artifact_name
+    )
+    steps.append(
+        Actions.upload_artifact(
+            {
+                'name': f'Upload {member.pkg_name} distributions',
+                'with': {
+                    'name': (
+                        artifact_base
+                        + '-${{ matrix.os }}-${{ matrix.arch }}'
+                    ),
+                    'if-no-files-found': 'error',
+                    'path': f'{outdir}/*',
+                },
+            }
+        )
+    )
+    job['steps'] = steps
+    return job
+
+
+def build_ci_source_check_job(
+    self, check: CISourceCheck
+) -> JSON_MutableMapping:
+    """Render one project-owned source-level validation job."""
+    supported_platform_info = common_ci.get_supported_platform_info(self)
+    python_version = check.python_version
+    if python_version == 'main':
+        python_version = supported_platform_info['main_python_version']
+
+    steps: list[JSON_Mapping] = [Actions.checkout()]
+    if python_version is not None:
+        steps.append(
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {python_version}',
+                    'with': _setup_python_inputs(python_version),
+                }
+            )
+        )
+    # Keep setup and validation commands in one shell process. This makes the
+    # hook useful for native toolchain setup (for example ``export PATH=...``
+    # after rustup) without provider-specific environment persistence syntax.
+    run_commands = [*check.setup_commands, *check.commands]
+    steps.append(
+        {
+            'name': check.name,
+            'shell': check.shell,
+            'env': dict(check.env),
+            'run': '\n'.join(run_commands),
+        }
+    )
+    job: dict[str, Any] = {
+        'name': check.name,
+        'runs-on': check.runner,
+        'steps': steps,
+    }
+    if check.allow_failure:
+        job['continue-on-error'] = True
+    return Yaml.Dict(job)
+
+
 def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
     if plan is None:
         plan = common_ci.make_ci_plan(self)
@@ -982,6 +1405,11 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
     else:
         raise Exception('Need to specify binpy or purepy in tags')
 
+    for member in plan.workspace_members:
+        jobs[f'workspace_{member.key}'] = build_workspace_member_job(
+            self, member, release=False
+        )
+
     for artifact in plan.ci_artifacts:
         if artifact.test:
             jobs[artifact.job_key] = build_ci_artifact_job(
@@ -989,6 +1417,18 @@ def _collect_test_jobs(self, plan: CIPlan | None = None) -> tuple[str, Mapping]:
             )
 
     return name, jobs
+
+
+def _collect_source_check_jobs(
+    self, plan: CIPlan | None = None
+) -> tuple[str, Mapping]:
+    """Collect only project-owned source validation jobs."""
+    if plan is None:
+        plan = common_ci.make_ci_plan(self)
+    jobs = Yaml.Dict({})
+    for check in plan.ci_source_checks:
+        jobs[check.job_key] = build_ci_source_check_job(self, check)
+    return 'SourceChecks', jobs
 
 
 def _collect_release_jobs(self, plan: CIPlan | None = None):
@@ -1063,6 +1503,13 @@ def _collect_release_jobs(self, plan: CIPlan | None = None):
     else:
         raise Exception('Need to specify binpy or purepy in tags')
 
+    for member in plan.workspace_members:
+        job_key = f'workspace_{member.key}'
+        jobs[job_key] = build_workspace_member_job(
+            self, member, release=True
+        )
+        release_build_needs.append(job_key)
+
     for artifact in plan.ci_artifacts:
         if artifact.release:
             jobs[artifact.job_key] = build_ci_artifact_job(
@@ -1080,6 +1527,10 @@ def build_github_actions(self):
 
 def build_github_actions_tests(self):
     return GitHubActionsRenderer(self).render_tests()
+
+
+def build_github_actions_checks(self):
+    return GitHubActionsRenderer(self).render_checks()
 
 
 def build_github_actions_release(self):
@@ -1161,9 +1612,16 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
         install_target = common_ci.format_pyproject_install_target(
             plan.sdist_test_extras, editable=True
         )
+        workspace_editable_sources = common_ci.make_workspace_source_args(
+            self, plan=plan, editable=True
+        )
         pip_reqs_install_parts: list[str] = [
             f'{self.UPDATE_PIP}',
-            f'{self.PIP_INSTALL_PREFER_BINARY} {install_target}',
+            common_ci.join_shell_parts(
+                self.PIP_INSTALL_PREFER_BINARY,
+                workspace_editable_sources,
+                install_target,
+            ),
         ]
     else:
         pip_reqs_install_parts = [
@@ -1180,12 +1638,9 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
                 f'{self.PIP_INSTALL_PREFER_BINARY} -r requirements/gdal.txt'
             )
 
-    import kwutil
+    workspace_sources = common_ci.make_workspace_source_args(self, plan=plan)
 
-    test_env = {}
-    user_test_env = kwutil.Yaml.coerce(self.config.test_env, backend='pyyaml')
-    if user_test_env:
-        test_env.update(user_test_env)
+    test_env = common_ci.get_test_env(self)
 
     job = {
         'name': 'Build sdist',
@@ -1212,7 +1667,12 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
                 'name': 'Install sdist',
                 'run': [
                     f'ls -al {wheelhouse_dpath}',
-                    f'{self.PIP_INSTALL_PREFER_BINARY} {wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz -v',
+                    common_ci.join_shell_parts(
+                        self.PIP_INSTALL_PREFER_BINARY,
+                        workspace_sources,
+                        f'{wheelhouse_dpath}/{self.pkg_fname_prefix}*.tar.gz',
+                        '-v',
+                    ),
                 ],
             },
             {
@@ -1282,12 +1742,61 @@ def build_and_test_sdist_job(self, plan: CIPlan | None = None):
     return Yaml.Dict(job)
 
 
-_VERSIONLESS_WHEELS_MATRIX_COMMENT = """
-The wheels are python-version independent (e.g. py3-none tags from pure
-ctypes bindings), so a single cibuildwheel build per platform covers every
-supported Python version. Which interpreter performs the build is pinned
-in the [tool.cibuildwheel] section of pyproject.toml.
+_REUSABLE_WHEELS_MATRIX_COMMENT = """
+One built wheel per platform is reusable across the configured CPython test
+versions. This covers both version-independent wheels (e.g. py3-none) and
+stable-ABI wheels (e.g. cp310-abi3). The concrete build selector is project
+packaging policy in [tool.cibuildwheel].build.
 """
+
+
+_RELEASE_WHEELS_MATRIX_COMMENT = """
+Release wheel coverage is deliberately broader than the ordinary test-wheel
+matrix. Every configured desktop OS must emit the modern native architectures
+we publish: Linux x86_64 and ARM64, macOS Apple Silicon and Intel, and Windows
+x86_64. Linux cibuildwheel selectors may emit both manylinux and musllinux
+artifacts from each native runner. Keep every entry required: TestPyPI/PyPI
+deploy jobs depend on this entire build job so a missing architecture fails
+closed instead of publishing a partial wheel set.
+"""
+
+
+def _github_release_binpy_targets(self) -> list[dict[str, str]]:
+    """Return the required native GitHub runners for binary releases.
+
+    The ordinary test workflow intentionally samples fewer architectures to
+    keep compatibility testing affordable. Release/TestPyPI builds are the
+    artifact-completeness gate, so they cover every modern native architecture
+    xcookie currently promises by default.
+
+    Windows ARM64 is intentionally not part of the required default yet. It
+    can be added as an explicit project policy once downstream dependency
+    support is mature enough to make it a reliable release gate.
+    """
+    targets: list[dict[str, str]] = []
+    configured_os = self.config['os']
+
+    if 'linux' in configured_os:
+        targets.extend(
+            [
+                {'os': 'ubuntu-latest', 'arch': 'auto'},
+                {'os': 'ubuntu-24.04-arm', 'arch': 'auto'},
+            ]
+        )
+    if 'osx' in configured_os:
+        targets.extend(
+            [
+                # Pin architecture-bearing labels here. ``macos-latest`` is
+                # useful for broad CI, but release artifact coverage should
+                # not depend on a floating label changing architecture.
+                {'os': 'macos-15', 'arch': 'auto'},
+                {'os': 'macos-15-intel', 'arch': 'auto'},
+            ]
+        )
+    if 'win' in configured_os:
+        targets.append({'os': 'windows-latest', 'arch': 'auto'})
+
+    return targets
 
 
 def _vcpkg_build_support(self, os_list):
@@ -1472,12 +1981,12 @@ def build_binpy_wheels_job(self):
     else:
         included_runs = []
 
-    versionless = bool(self.config.get('ci_versionless_wheels', False))
+    reusable_wheels = common_ci.uses_reusable_binary_wheels(self)
 
     matrix = Yaml.Dict({})
-    if versionless:
+    if reusable_wheels:
         matrix.yaml_set_start_comment(
-            ub.codeblock(_VERSIONLESS_WHEELS_MATRIX_COMMENT),
+            ub.codeblock(_REUSABLE_WHEELS_MATRIX_COMMENT),
             indent=8,
         )
     else:
@@ -1503,8 +2012,8 @@ def build_binpy_wheels_job(self):
 
     matrix['os'] = os_list
 
-    if not versionless:
-        # Versionless wheels pin their single build (and any skips) in
+    if not reusable_wheels:
+        # Reusable wheels pin their single build (and any skips) in
         # [tool.cibuildwheel], so the skip matrix dimension only exists for
         # per-python-version builds.
         if 'win' in self.config['os']:
@@ -1518,8 +2027,8 @@ def build_binpy_wheels_job(self):
         matrix['include'] = included_runs
 
     conditional_actions = []
-    if 'win' in self.config['os'] and not versionless:
-        # Versionless builds skip msvc-dev-cmd: the single pinned interpreter
+    if 'win' in self.config['os'] and not reusable_wheels:
+        # Reusable builds skip msvc-dev-cmd: the single pinned interpreter
         # build lets the build backend locate MSVC on its own.
         conditional_actions += [
             Actions.msvc_dev_cmd(
@@ -1562,21 +2071,11 @@ def build_binpy_wheels_job(self):
     )
     use_vcpkg = bool(vcpkg_pre_steps)
 
-    USE_ABI3 = False
-    if USE_ABI3:
-        # Hack in abi3 support, todo: clean up later.
-        abi3_action = Actions.cibuildwheel(sensible=True)
-        # TODO: use min python
-        abi3_action['env']['CIBW_CONFIG_SETTINGS'] = (
-            '--build-option=--py-limited-api=cp38'
-        )
-        abi3_action['env']['CIBW_BUILD'] = 'cp38-*'
-
     cibw_action = Actions.cibuildwheel(sensible=True)
     cibw_action['env'].update(vcpkg_cibw_env)
     if supported_platform_info['prerelease_python_versions']:
         cibw_action['env']['CIBW_ENABLE'] = 'cpython-prerelease'
-    if versionless:
+    if reusable_wheels:
         # The single pinned build (and any skips) lives in
         # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
         # runs, so the matrix / msvc related env vars are unnecessary.
@@ -1586,7 +2085,6 @@ def build_binpy_wheels_job(self):
     if _matrix_needs_qemu(matrix):
         job_steps += [Actions.setup_qemu(sensible=True)]
     job_steps += [
-        # abi3_action,
         *vcpkg_pre_steps,
     ]
     if use_vcpkg and 'ci_debug_windows_env' in self.tags:
@@ -1618,8 +2116,23 @@ def build_binpy_wheels_job(self):
             'run': 'ls -la wheelhouse',
         },
     ]
-    if not versionless:
-        # Versionless builds run only a quick smoke test inside cibuildwheel;
+    post_commands = common_ci.wheel_build_post_commands(self)
+    if post_commands:
+        job_steps += [
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {main_python_version} for wheel validation',
+                    'with': _setup_python_inputs(main_python_version),
+                }
+            ),
+            {
+                'name': 'Validate built wheel artifacts',
+                'shell': 'bash',
+                'run': '\n'.join(post_commands),
+            },
+        ]
+    if not reusable_wheels:
+        # Reusable builds run only a quick smoke test inside cibuildwheel;
         # coverage is collected by the wheel test jobs instead, so there is
         # nothing to combine or upload here.
         job_steps += [
@@ -1778,7 +2291,7 @@ def build_sdist_job(self):
 
 def build_binpy_wheels_release_job(self):
     supported_platform_info = common_ci.get_supported_platform_info(self)
-    os_list = supported_platform_info['os_list']
+    main_python_version = supported_platform_info['main_python_version']
 
     pyproj_config = self.config._load_pyproject_config()
     cibw_skip = (
@@ -1789,47 +2302,49 @@ def build_binpy_wheels_release_job(self):
     cibw_skip = _normalize_cibuildwheel_skip_string(cibw_skip)
     explicit_skips = ' ' + cibw_skip
 
-    versionless = bool(self.config.get('ci_versionless_wheels', False))
+    reusable_wheels = common_ci.uses_reusable_binary_wheels(self)
 
     matrix = Yaml.Dict({})
-    if versionless:
-        matrix.yaml_set_start_comment(
-            ub.codeblock(_VERSIONLESS_WHEELS_MATRIX_COMMENT),
-            indent=8,
-        )
+    if reusable_wheels:
+        build_policy_comment = _REUSABLE_WHEELS_MATRIX_COMMENT
     else:
-        matrix.yaml_set_start_comment(
-            ub.codeblock(
-                """
-            Normally, xcookie generates explicit lists of platforms to build / test
-            on, but in this case cibuildwheel does that for us, so we need to just
-            set the environment variables for cibuildwheel. These are parsed out of
-            the standard [tool.cibuildwheel] section in pyproject.toml and set
-            explicitly here.
-            """
-            ),
-            indent=8,
-        )
-    matrix['os'] = os_list
-    if not versionless:
-        matrix['cibw_skip'] = [explicit_skips.strip()]
-    matrix['arch'] = ['auto']
+        build_policy_comment = """
+        Normally, xcookie generates explicit lists of platforms to build / test
+        on, but in this case cibuildwheel does that for us, so we need to just
+        set the environment variables for cibuildwheel. These are parsed out of
+        the standard [tool.cibuildwheel] section in pyproject.toml and set
+        explicitly here.
+        """
+    release_targets = _github_release_binpy_targets(self)
+    if not reusable_wheels:
+        for target in release_targets:
+            target['cibw_skip'] = explicit_skips.strip()
+    matrix['include'] = release_targets
+    matrix.yaml_set_start_comment(
+        ub.codeblock(_RELEASE_WHEELS_MATRIX_COMMENT)
+        + '\n\n'
+        + ub.codeblock(build_policy_comment),
+        indent=8,
+    )
+    release_os_list = [target['os'] for target in release_targets]
 
     conditional_actions = []
-    if 'win' in self.config['os'] and not versionless:
+    if 'win' in self.config['os'] and not reusable_wheels:
         conditional_actions += [
             Actions.msvc_dev_cmd(bits=64, osvar='matrix.os'),
         ]
 
     vcpkg_pre_steps, vcpkg_post_steps, vcpkg_cibw_env = _vcpkg_build_support(
-        self, os_list
+        self, release_os_list
     )
 
     cibw_action = Actions.cibuildwheel(sensible=True)
     cibw_action['env'].update(vcpkg_cibw_env)
+    cibw_action['env']['CIBW_ARCHS_WINDOWS'] = 'auto64'
+    cibw_action['env']['CIBW_ARCHS_MACOS'] = 'auto64'
     if supported_platform_info['prerelease_python_versions']:
         cibw_action['env']['CIBW_ENABLE'] = 'cpython-prerelease'
-    if versionless:
+    if reusable_wheels:
         # The single pinned build (and any skips) lives in
         # [tool.cibuildwheel] in pyproject.toml, and no msvc-dev-cmd step
         # runs, so the matrix / msvc related env vars are unnecessary.
@@ -1862,6 +2377,23 @@ def build_binpy_wheels_release_job(self):
             'shell': 'bash',
             'run': 'ls -la wheelhouse',
         },
+    ]
+    post_commands = common_ci.wheel_build_post_commands(self)
+    if post_commands:
+        job_steps += [
+            Actions.setup_python(
+                {
+                    'name': f'Set up Python {main_python_version} for wheel validation',
+                    'with': _setup_python_inputs(main_python_version),
+                }
+            ),
+            {
+                'name': 'Validate built wheel artifacts',
+                'shell': 'bash',
+                'run': '\n'.join(post_commands),
+            },
+        ]
+    job_steps += [
         Actions.upload_artifact(
             {
                 'name': 'Upload wheels artifact',
@@ -1972,19 +2504,27 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         ]
     if ci_model.any_test_case_needs_qemu(cases):
         action_steps += [Actions.setup_qemu(sensible=True)]
+    if 'binpy' in self.tags:
+        download_wheel_config = {
+            'name': 'Download wheel for this platform',
+            'with': {
+                'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
+                'path': 'wheelhouse',
+            },
+        }
+    else:
+        # Pure-Python wheels are built once and reused on every platform.
+        download_wheel_config = {
+            'name': 'Download wheels',
+            'with': {
+                'pattern': 'wheels-*',
+                'merge-multiple': True,
+                'path': 'wheelhouse',
+            },
+        }
     action_steps += [
         Actions.setup_python(setup_python_config),
-        Actions.download_artifact(
-            {
-                'name': 'Download wheels',
-                'with': {
-                    # 'name': 'wheels',
-                    'pattern': 'wheels-*',
-                    'merge-multiple': True,
-                    'path': 'wheelhouse',
-                },
-            }
-        ),
+        Actions.download_artifact(download_wheel_config),
     ]
 
     workspace_dname = (
@@ -2011,6 +2551,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         workspace_dname,
         custom_before_test_lines=custom_before_test_lines,
         custom_after_test_commands=custom_after_test_commands,
+        plan=plan,
     )
     install_wheel_commands = install_and_test_wheel_parts[
         'install_wheel_commands'
@@ -2106,14 +2647,10 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
             }
         action_steps.append(Actions.action(smoke_test_action))
 
-    import kwutil
-
     test_env = {
         'CI_PYTHON_VERSION': 'py${{ matrix.python-version }}',
+        **common_ci.get_test_env(self),
     }
-    user_test_env = kwutil.Yaml.coerce(self.config.test_env, backend='pyyaml')
-    if user_test_env:
-        test_env.update(user_test_env)
 
     if has_allow_failure:
         test_wheel_action = {
@@ -2195,6 +2732,7 @@ def build_deploy(
     mode='live',
     needs=None,
     release_artifacts: Sequence[CIArtifact] = (),
+    workspace_members: Sequence[WorkspaceMember] = (),
 ) -> dict[str, JSON]:
     """
     CommandLine:
@@ -2214,17 +2752,27 @@ def build_deploy(
 
     enable_gpg = self.config['enable_gpg']
 
-    use_trusted_publishing = self.config.get(
-        'ci_pypi_trusted_publishing', False
+    use_trusted_publishing = trusted_publishing_enabled(
+        self.config, 'github'
     )
+    publishing_workspace_members = tuple(
+        member for member in workspace_members if member.publish
+    )
+    if (
+        publishing_workspace_members
+        and self.config['deploy_pypi']
+        and not use_trusted_publishing
+    ):
+        raise ValueError(
+            'workspace PyPI publishing requires trusted publishing; '
+            'set ci_pypi_trusted_publishing=true'
+        )
     ci_gpg_transport = self.config.get(
         'ci_gpg_secret_transport', 'encrypted_repo'
     )
     use_direct_gpg = ci_gpg_transport == 'direct_ci'
     live_pass_varname = self.config['ci_pypi_live_password_varname']
     test_pass_varname = self.config['ci_pypi_test_password_varname']
-    defaultbranch = self.config.get('defaultbranch', 'main')
-
     assert mode in {'live', 'test'}
     if mode == 'live':
         env = {}
@@ -2250,7 +2798,10 @@ def build_deploy(
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
-        condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
+        condition = (
+            "github.event_name == 'push' && "
+            "github.ref == 'refs/heads/release'"
+        )
 
     elif mode == 'test':
         env = {}
@@ -2276,10 +2827,12 @@ def build_deploy(
             else:
                 env['CI_SECRET'] = '${{ secrets.CI_SECRET }}'
 
-        # condition = "github.event_name == 'push' && ! startsWith(github.event.ref, 'refs/tags') && ! startsWith(github.event.ref, 'refs/heads/release')"
+        defaultbranch = self.config.get('defaultbranch', 'main')
         condition = (
-            "github.event_name == 'push' && "
-            f"github.event.ref == 'refs/heads/{defaultbranch}'"
+            "(github.event_name == 'push' && "
+            f"github.ref == 'refs/heads/{defaultbranch}') || "
+            "(github.event_name == 'workflow_dispatch' && "
+            "github.event.inputs.publish_target == 'testpypi')"
         )
     else:
         raise KeyError(mode)
@@ -2502,10 +3055,36 @@ def build_deploy(
                 }
             )
         )
+    workspace_release_dpath = 'workspace_release'
+    for member in workspace_members:
+        download_with: dict[str, JSON] = {
+            'path': f'{workspace_release_dpath}/{member.key}',
+        }
+        if member.package_kind == 'binpy':
+            download_with.update(
+                {
+                    'pattern': member.artifact_pattern(release=True),
+                    'merge-multiple': True,
+                }
+            )
+        else:
+            download_with['name'] = member.release_artifact_name
+        deploy_steps.append(
+            Actions.download_artifact(
+                {
+                    'name': f'Download {member.pkg_name}',
+                    'with': download_with,
+                }
+            )
+        )
     show_commands = [f'ls -la {wheelhouse_dpath}']
     if release_artifacts:
         show_commands.append(
             f'find {release_artifacts_dpath} -maxdepth 3 -type f -print'
+        )
+    if workspace_members:
+        show_commands.append(
+            f'find {workspace_release_dpath} -maxdepth 3 -type f -print'
         )
     deploy_steps += [
         {
@@ -2541,6 +3120,29 @@ def build_deploy(
         }
         if mode == 'test':
             publish_with['repository-url'] = 'https://test.pypi.org/legacy/'
+
+        for member in workspace_members:
+            if not member.publish:
+                continue
+            member_publish_with = {
+                'packages-dir': f'{workspace_release_dpath}/{member.key}',
+                'skip-existing': True,
+            }
+            if mode == 'test':
+                member_publish_with['repository-url'] = (
+                    'https://test.pypi.org/legacy/'
+                )
+            deploy_steps.append(
+                {
+                    'name': (
+                        f'Publish {member.pkg_name} to PyPI'
+                        if mode == 'live'
+                        else f'Publish {member.pkg_name} to TestPyPI'
+                    ),
+                    'uses': 'pypa/gh-action-pypi-publish@release/v1',
+                    'with': member_publish_with,
+                }
+            )
 
         deploy_steps += [
             {
@@ -2587,6 +3189,19 @@ def build_deploy(
                         'name': 'deploy_extra_artifacts',
                         'if-no-files-found': 'error',
                         'path': f'{release_artifacts_dpath}/**/*',
+                    },
+                }
+            )
+        )
+    if workspace_members:
+        deploy_steps.append(
+            Actions.upload_artifact(
+                {
+                    'name': 'Upload workspace distributions',
+                    'with': {
+                        'name': 'deploy_workspace_artifacts',
+                        'if-no-files-found': 'error',
+                        'path': f'{workspace_release_dpath}/**/*',
                     },
                 }
             )
@@ -2640,6 +3255,7 @@ def build_github_release(
     self,
     needs=None,
     release_artifacts: Sequence[CIArtifact] = (),
+    workspace_members: Sequence[WorkspaceMember] = (),
 ):
     """
     References:
@@ -2647,7 +3263,10 @@ def build_github_release(
         https://github.com/softprops/action-gh-release
         https://github.com/softprops/action-gh-release/issues/20#issuecomment-572245945
     """
-    condition = "github.event_name == 'push' && (startsWith(github.event.ref, 'refs/tags') || startsWith(github.event.ref, 'refs/heads/release'))"
+    condition = (
+        "github.event_name == 'push' && "
+        "github.ref == 'refs/heads/release'"
+    )
     env = {
         'GITHUB_TOKEN': '${{ secrets.GITHUB_TOKEN }}',
     }
@@ -2666,6 +3285,8 @@ def build_github_release(
     ]
     if release_artifacts:
         artifact_globs.append('release_artifacts/**/*')
+    if workspace_members:
+        artifact_globs.append('workspace_release/**/*')
 
     release_meta_action = {
         'name': 'Resolve Release Tag',
@@ -2677,19 +3298,13 @@ def build_github_release(
             echo "VERSION=$VERSION"
             test -n "$VERSION" || {{ echo "failed to parse version" ; exit 1; }}
             TAG="v$VERSION"
-            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-                EVENT_TAG="${{GITHUB_REF#refs/tags/}}"
-                TAG="$EVENT_TAG"
-            fi
             echo "tag=$TAG" >> "$GITHUB_OUTPUT"
             """
         ),
     }
 
-    needs_tag_condition = "(startsWith(github.event.ref, 'refs/heads/release'))"
     tag_action = {
         'name': 'Tag Release Commit',
-        'if': needs_tag_condition,
         'shell': 'bash',
         'run': ub.codeblock(
             """
@@ -2726,7 +3341,7 @@ def build_github_release(
             'target_commitish': '${{ github.sha }}',
             'body': 'Automatic Release',
             'generate_release_notes': True,
-            'draft': True,  # Maybe keep as a draft until we determine this is ok?
+            'draft': False,
             'prerelease': False,
             'files': chr(10).join(artifact_globs),
         },
@@ -2761,14 +3376,38 @@ def build_github_release(
                 if release_artifacts
                 else []
             ),
+            *(
+                [
+                    Actions.download_artifact(
+                        {
+                            'name': 'Download workspace distributions',
+                            'with': {
+                                'name': 'deploy_workspace_artifacts',
+                                'path': 'workspace_release',
+                            },
+                        }
+                    )
+                ]
+                if workspace_members
+                else []
+            ),
             {
                 'name': 'Show files to release',
                 'shell': 'bash',
-                'run': (
-                    'ls -la wheelhouse\n'
-                    'find release_artifacts -maxdepth 3 -type f -print'
-                    if release_artifacts
-                    else 'ls -la wheelhouse'
+                'run': '\n'.join(
+                    [
+                        'ls -la wheelhouse',
+                        *(
+                            ['find release_artifacts -maxdepth 3 -type f -print']
+                            if release_artifacts
+                            else []
+                        ),
+                        *(
+                            ['find workspace_release -maxdepth 3 -type f -print']
+                            if workspace_members
+                            else []
+                        ),
+                    ]
                 ),
             },
             write_release_notes_action,

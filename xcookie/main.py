@@ -259,6 +259,45 @@ class XCookieConfig(kwconf.Config):
             """
             ),
         ),
+        'typecheck_install_extras': kwconf.Value(
+            ['tests'],
+            help=ub.paragraph(
+                """
+            Dependency groups to install before running type checkers. In
+            pyproject dependency mode these name optional-dependency extras;
+            in requirements-file mode they name requirements/<group>.txt files.
+            This is separate from typecheck_extra_paths: the latter selects
+            source targets, while this setting selects dependencies needed to
+            resolve imports while checking them.
+            """
+            ),
+        ),
+        'workspace_members': kwconf.Value(
+            [],
+            help=ub.paragraph(
+                """
+            Repository-relative directories containing additional Python
+            distributions that should participate in generated CI and release
+            workflows. Each member must contain a pyproject.toml with a
+            [project] table. Workspace generation currently requires the
+            GitHub xcookie tag.
+            """
+            ),
+        ),
+        'workspace_sync_versions': kwconf.Value(
+            False,
+            isflag=True,
+            help=ub.paragraph(
+                """
+            If true, ``xcookie bump`` keeps workspace member package versions
+            synchronized with the root package and updates the exact
+            dependency pin that links each member to the root distribution or
+            the root distribution to that member. This supports both
+            root-to-member library splits and member-to-root optional
+            accelerator packages.
+            """
+            ),
+        ),
         'ci_versions_minimal_strict': kwconf.Value('min', help='todo: sus out'),
         'ci_versions_full_strict': kwconf.Value('main'),
         'ci_versions_minimal_loose': kwconf.Value('main'),
@@ -277,13 +316,26 @@ class XCookieConfig(kwconf.Config):
         ),
         'test_env': kwconf.Value(
             None,
-            help='A YAML coercible dictionary of environment variables to use in test stages. (TOTO',
+            help='A YAML-coercible mapping of environment variables used by generated test stages.',
         ),
         'version': kwconf.Value(
             None, help='repo metadata: url for the project'
         ),
         'url': kwconf.Value(
             None, type=str, help='repo metadata: url for the project'
+        ),
+        'github_url': kwconf.Value(
+            None,
+            type=str,
+            help=ub.paragraph(
+                """
+                Optional canonical GitHub mirror URL. This is useful for
+                repositories whose primary ``url`` is hosted elsewhere but
+                which also generate GitHub Actions workflows. GitHub-specific
+                release metadata, such as trusted-publisher setup links, uses
+                this URL when provided.
+                """
+            ),
         ),
         # Note: these may be a string or a list of strings. kwconf only
         # applies the parser to CLI/env strings, so list-valued TOML
@@ -335,7 +387,15 @@ class XCookieConfig(kwconf.Config):
         ),
         'ci_pypi_trusted_publishing': kwconf.Value(
             True,
-            help='if True, github deploy jobs use PyPI trusted publishing instead of twine password secrets',
+            help=ub.paragraph(
+                """
+                Controls which CI providers use PyPI Trusted Publishing
+                instead of long-lived Twine password secrets. For backward
+                compatibility, boolean true means GitHub only. Use a provider
+                list such as ["github", "gitlab"] (or "all") to opt
+                GitLab into trusted publishing explicitly.
+                """
+            ),
         ),
         'regen': kwconf.Value(
             None,
@@ -402,18 +462,56 @@ class XCookieConfig(kwconf.Config):
             ['full-loose', 'full-strict', 'minimal-loose', 'minimal-strict'],
             help='A list of which CI loose / strict / minimal / full variants to use',
         ),
+        'ci_reusable_wheels': kwconf.Value(
+            False,
+            isflag=True,
+            help=ub.paragraph(
+                """
+                If True, one binary wheel per platform is expected to be
+                compatible with every configured CPython test version. This
+                covers both truly version-independent wheels (e.g. py3-none)
+                and stable-ABI wheels (e.g. cp310-abi3). The concrete
+                cibuildwheel build selector remains project packaging policy
+                in [tool.cibuildwheel].build.
+                """
+            ),
+        ),
         'ci_versionless_wheels': kwconf.Value(
             False,
             isflag=True,
             help=ub.paragraph(
                 """
-                If True, the project's binary wheels are python-version
-                independent (e.g. py3-none tags from pure ctypes bindings),
-                so CI builds a single wheel per platform instead of one per
-                CPython version. The interpreter that performs the build is
-                pinned in the [tool.cibuildwheel] section of pyproject.toml.
-                The default (False) keeps per-python-version builds, which
-                repos that link against the CPython C API require.
+                Backwards-compatible spelling for ci_reusable_wheels. Prefer
+                ci_reusable_wheels for new configuration because reusable
+                wheels may still carry an ABI baseline such as cp310-abi3.
+                """
+            ),
+        ),
+        'ci_wheel_build_post_commands': kwconf.Value(
+            [],
+            help=ub.paragraph(
+                """
+                Commands to run after cibuildwheel has produced binary wheel
+                artifacts but before xcookie uploads them. Use this for
+                project-owned artifact validation such as checking wheel tags
+                or binary contents. The commands run in both test and release
+                wheel build jobs.
+                """
+            ),
+        ),
+        'ci_source_checks': kwconf.Value(
+            None,
+            help=ub.paragraph(
+                """
+                Mapping of independent source-level CI checks. Each check may
+                specify name, python_version, setup_commands, commands, env,
+                runner, gitlab_image, shell, and allow_failure. ``shell`` and
+                ``runner`` are GitHub-specific; ``gitlab_image`` is
+                GitLab-specific. Setup and validation commands share one shell
+                session so native-toolchain environment changes persist. These
+                checks run as normal source validation, separated from the
+                generated test matrix and release workflow. Release workflows
+                rely on the reviewed main-branch CI result.
                 """
             ),
         ),
@@ -919,9 +1017,18 @@ class TemplateApplier:
         disk_config = self.config._load_pyproject_config()
         if disk_config is None:
             disk_config = {}
-        other_classifiers += disk_config.get('project', {}).get(
+        disk_classifiers = disk_config.get('project', {}).get(
             'classifiers', []
         )
+        # Python-version classifiers are generated from the resolved support
+        # range. Do not preserve stale generated versions from an existing
+        # pyproject when min/max Python changes.
+        python_version_prefix = 'Programming Language :: Python :: '
+        other_classifiers += [
+            item
+            for item in disk_classifiers
+            if not item.startswith(python_version_prefix)
+        ]
 
         pyproject_settings = self.config._load_xcookie_pyproject_settings()
         if (
@@ -1437,6 +1544,12 @@ class TemplateApplier:
         self._setup_pip_commands()
         return github_actions.build_github_actions_tests(self)
 
+    def build_github_actions_checks(self):
+        from xcookie.builders import github_actions
+
+        self._setup_pip_commands()
+        return github_actions.build_github_actions_checks(self)
+
     def build_github_actions_release(self):
         from xcookie.builders import github_actions
 
@@ -1449,6 +1562,17 @@ class TemplateApplier:
         self._setup_pip_commands()  # Do we need this here?
         return gitlab_ci.build_gitlab_ci(self)
 
+    def build_gitlab_ci_main(self):
+        from xcookie.builders import gitlab_ci
+
+        self._setup_pip_commands()
+        return gitlab_ci.build_gitlab_ci_main(self)
+
+    def build_gitlab_ci_checks(self):
+        from xcookie.builders import gitlab_ci
+
+        self._setup_pip_commands()
+        return gitlab_ci.build_gitlab_ci_checks(self)
 
     def build_refresh_locks_sh(self):
         """Build ``dev/refresh_locks.sh``.
@@ -1479,6 +1603,11 @@ class TemplateApplier:
             combos.append(key)
 
         export_blocks: list[str] = []
+        emit_flag = (
+            '--no-emit-workspace'
+            if plan.workspace_members
+            else '--no-emit-project'
+        )
         for extras in combos:
             out_path = ci_plan.lock_requirements_path(extras)
             label = ', '.join(extras) if extras else 'runtime'
@@ -1486,7 +1615,7 @@ class TemplateApplier:
             # regardless of how the surrounding script is dedented.
             lines = [
                 f'# Strict CI variant extras: {label}',
-                'uv export --frozen --no-emit-project --format requirements.txt --no-hashes \\',
+                f'uv export --frozen {emit_flag} --format requirements.txt --no-hashes \\',
             ]
             for extra in extras:
                 lines.append(f'    --extra {extra} \\')

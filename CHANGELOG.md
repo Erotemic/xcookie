@@ -5,7 +5,87 @@ We are currently working on porting this changelog to the specifications in
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## Version 0.5.0 - Unreleased
+## Version 0.5.1 - Unreleased
+
+### Added
+* Added first-class Python workspace members for same-repository distributions.
+  GitHub CI builds and tests each member in isolation, root jobs install local
+  members only when the root declares them as dependencies, and
+  trusted-publishing release jobs publish member distributions alongside the
+  root distribution. Workspace members may now be pure-Python or binary
+  ``binpy`` packages, including optional native accelerators that depend on the
+  root package without leaking back into the root install.
+* Added ``typecheck_install_extras`` so generated typecheck jobs can install
+  optional dependencies needed to resolve the source surface they check.
+* Added ``workspace_sync_versions`` so ``xcookie bump`` can keep workspace
+  package versions synchronized and update exact root dependency pins.
+* Added reusable binary-wheel CI for stable-ABI packages such as ``abi3``:
+  one project-selected wheel per platform can be exercised across every
+  configured CPython version while preserving the historical
+  ``ci_versionless_wheels`` spelling.
+* Added generic source-check and post-wheel-build validation hooks so projects
+  can run backend parity checks in normal CI and inspect built wheel artifacts
+  without hand-editing generated workflows.
+* Source checks now render as a dedicated GitHub ``checks.yml`` workflow and,
+  on GitLab, as a standalone local include beside the self-contained primary
+  pipeline. Repositories without source checks keep their existing CI layout.
+* GitLab binary test jobs now honor the existing ``test_env`` configuration,
+  matching GitHub so backend-forcing and other runtime validation environment
+  variables are generator-owned on both providers.
+* Binary projects with an explicit non-setuptools PEP 517 backend (for example
+  maturin) now retain that backend and its cibuildwheel configuration instead
+  of having xcookie reintroduce the legacy scikit-build/Cython/CMake stack.
+* Generated binary-wheel helpers now clear stale wheelhouses, honor reusable
+  wheel build selectors from ``[tool.cibuildwheel]``, and run configured
+  post-build artifact validation commands.
+* PyPI Trusted Publishing can now be selected per CI provider. Legacy
+  ``true`` retains its historical GitHub-only meaning, while provider lists
+  such as ``["github", "gitlab"]`` opt GitLab into OIDC publishing.
+  GitLab emits a dedicated minimal PyPI publication job that requests a
+  ``pypi`` audience ID token, binds it to the ``pypi`` environment, and
+  publishes with Twine without long-lived PyPI credentials. Generated GitLab
+  setup notes document the self-managed issuer onboarding requirement.
+
+### Fixed
+* Reusable binary-wheel projects now normalize cibuildwheel's implicit
+  ``auto`` architecture policy to ``auto64``. On 64-bit Windows runners,
+  ``auto`` currently expands to both AMD64 and x86, which violates the
+  one-native-artifact reusable-wheel contract and breaks x64 artifact
+  validation. Explicit project architecture policies remain authoritative.
+* GitHub live releases now use the exact ``release`` branch as the production
+  entry point, matching GitLab's ``git push <remote> main:release`` release
+  contract. Tags are release outputs rather than alternate workflow triggers;
+  TestPyPI publishing is manual-only, and successful GitHub releases are
+  published rather than left as drafts. Binary release matrices also add the
+  native Intel macOS runner alongside Apple Silicon so both macOS wheel
+  families are built without changing normal test matrices.
+* Workspace version synchronization now accepts an exact dependency pin in
+  either direction (root -> member or member -> root), allowing optional
+  accelerator distributions to pin the matching pure-Python root release.
+* Regenerating project classifiers now drops stale generated Python-version
+  classifiers before applying the currently configured support range.
+* ``xcookie bump`` now keeps recognized local package-version mirrors in sync
+  when they matched before the bump: a package ``__version__`` assignment and
+  the Rust ``[package].version`` selected by ``tool.maturin.manifest-path``.
+  Deliberately independent versions are left unchanged.
+* GitHub Actions PyPy jobs now test the minimal dependency surface instead of
+  installing full optional extras. Optional binary/scientific dependencies
+  remain covered by CPython full-loose jobs, avoiding unrelated PyPy source
+  build failures when third-party wheels are unavailable.
+* Legacy requirements-file projects now honor ``typecheck_install_extras``.
+* Workspace root CI now passes member source directories and the root package
+  to the same resolver invocation. Exact synchronized development versions
+  therefore resolve from the checkout even when they do not exist on PyPI.
+* Workspace isolation tests now use each member's own ``pyproject.toml`` as the
+  pytest configuration, preventing root-only pytest plugins from leaking into
+  dependency-free member environments.
+* Version bumping now recognizes legacy changelog headings that use two dashes
+  before ``Released``.
+* GitHub trusted-publisher setup instructions now honor an explicit
+  ``github_url`` when a project has a non-GitHub primary repository URL.
+
+
+## Version 0.5.0 - Released 2026-08-28
 
 
 ## Version 0.4.3 - Released 2026-08-28

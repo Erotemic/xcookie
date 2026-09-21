@@ -268,3 +268,205 @@ version = {attr = "demo.__version__"}
     source = find_version_source(tmp_path)
     assert source is not None
     assert source.version == '7.8.9'
+
+
+def test_bump_synchronizes_workspace_versions_and_dependency_pin(tmp_path):
+    _write_dynamic_attr_repo(tmp_path, version='1.2.3')
+    root_pyproject = tmp_path / 'pyproject.toml'
+    text = root_pyproject.read_text()
+    text = text.replace(
+        '[project]\nname = "demo"\ndynamic = ["version"]',
+        '[project]\nname = "demo"\ndynamic = ["version"]\n'
+        'dependencies = ["demo-theory==1.2.3"]',
+    )
+    text += (
+        '\n[tool.xcookie]\n'
+        'workspace_members = ["packages/demo-theory"]\n'
+        'workspace_sync_versions = true\n'
+    )
+    root_pyproject.write_text(text)
+
+    member = tmp_path / 'packages' / 'demo-theory'
+    (member / 'src' / 'demo_theory').mkdir(parents=True)
+    (member / 'src' / 'demo_theory' / '__init__.py').write_text(
+        "__version__ = '1.2.3'\n"
+    )
+    (member / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-theory"
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = {attr = "demo_theory.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["demo_theory*"]
+'''.lstrip()
+    )
+
+    plan = VersionBumper(tmp_path).bump(
+        'patch', release_date=datetime_mod.date(2026, 9, 3)
+    )
+    assert plan.next_version == '1.2.4'
+    assert "__version__ = '1.2.4'" in (
+        member / 'src' / 'demo_theory' / '__init__.py'
+    ).read_text()
+    assert 'demo-theory==1.2.4' in root_pyproject.read_text()
+
+
+def test_bump_synchronizes_reverse_workspace_dependency_and_cargo(tmp_path):
+    _write_dynamic_attr_repo(tmp_path, version='1.2.3')
+    root_pyproject = tmp_path / 'pyproject.toml'
+    root_pyproject.write_text(
+        root_pyproject.read_text()
+        + '\n[tool.xcookie]\n'
+        + 'workspace_members = ["packages/demo-accel"]\n'
+        + 'workspace_sync_versions = true\n'
+    )
+
+    member = tmp_path / 'packages' / 'demo-accel'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-accel"
+version = "1.2.3"
+dependencies = ["demo==1.2.3"]
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+'''.lstrip()
+    )
+    (member / 'Cargo.toml').write_text(
+        '''
+[package]
+name = "demo-accel"
+version = "1.2.3"
+edition = "2021"
+'''.lstrip()
+    )
+
+    plan = VersionBumper(tmp_path).bump(
+        'patch', release_date=datetime_mod.date(2026, 9, 3)
+    )
+    assert plan.next_version == '1.2.4'
+    member_pyproject_text = (member / 'pyproject.toml').read_text()
+    assert 'version = "1.2.4"' in member_pyproject_text
+    assert 'demo==1.2.4' in member_pyproject_text
+    assert 'version = "1.2.4"' in (member / 'Cargo.toml').read_text()
+
+
+def test_bump_accepts_legacy_double_dash_release_heading(tmp_path):
+    from xcookie.versioning import update_changelog_for_bump
+    import datetime as datetime_mod
+
+    text = (
+        '# Changelog\n\n'
+        '## Version 0.0.2 -- Released 2026-05-08\n\n'
+        '## Version 0.0.1 -- Released 2025-10-28\n'
+    )
+    updated = update_changelog_for_bump(
+        text,
+        '0.0.2',
+        '0.0.3',
+        datetime_mod.date(2026, 9, 3),
+    )
+    assert '## Version 0.0.3 - Unreleased' in updated
+    assert '## Version 0.0.2 -- Released 2026-05-08' in updated
+
+
+def test_bump_syncs_matching_python_and_maturin_version_mirrors(tmp_path):
+    (tmp_path / 'demo').mkdir()
+    (tmp_path / 'demo' / '__init__.py').write_text(
+        "__version__ = '4.5.6'\n"
+    )
+    (tmp_path / 'rust').mkdir()
+    (tmp_path / 'rust' / 'Cargo.toml').write_text(
+        '''
+[package]
+name = "demo-rust"
+version = "4.5.6"
+edition = "2021"
+'''.lstrip()
+    )
+    (tmp_path / 'Cargo.toml').write_text(
+        '''
+[package]
+name = "unrelated-root-crate"
+version = "0.1.0"
+'''.lstrip()
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo"
+version = "4.5.6"
+
+[tool.xcookie]
+mod_name = "demo"
+
+[tool.maturin]
+manifest-path = "rust/Cargo.toml"
+'''.lstrip()
+    )
+    (tmp_path / 'CHANGELOG.md').write_text(
+        '# Changelog\n\n## Version 4.5.6 - Unreleased\n'
+    )
+
+    plan = VersionBumper(tmp_path).bump(
+        'minor', release_date=datetime_mod.date(2026, 9, 20)
+    )
+
+    assert plan.next_version == '4.6.0'
+    assert 'version = "4.6.0"' in (tmp_path / 'pyproject.toml').read_text()
+    assert "__version__ = '4.6.0'" in (
+        tmp_path / 'demo' / '__init__.py'
+    ).read_text()
+    assert 'version = "4.6.0"' in (
+        tmp_path / 'rust' / 'Cargo.toml'
+    ).read_text()
+    assert 'version = "0.1.0"' in (tmp_path / 'Cargo.toml').read_text()
+
+
+def test_bump_leaves_mismatched_local_versions_independent(tmp_path):
+    (tmp_path / 'demo').mkdir()
+    (tmp_path / 'demo' / '__init__.py').write_text(
+        "__version__ = '9.9.9'\n"
+    )
+    (tmp_path / 'rust').mkdir()
+    (tmp_path / 'rust' / 'Cargo.toml').write_text(
+        '''
+[package]
+name = "demo-rust"
+version = "1.0.0"
+'''.lstrip()
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo"
+version = "4.5.6"
+
+[tool.xcookie]
+mod_name = "demo"
+
+[tool.maturin]
+manifest-path = "rust/Cargo.toml"
+'''.lstrip()
+    )
+    (tmp_path / 'CHANGELOG.md').write_text(
+        '# Changelog\n\n## Version 4.5.6 - Unreleased\n'
+    )
+
+    VersionBumper(tmp_path).bump(
+        'patch', release_date=datetime_mod.date(2026, 9, 20)
+    )
+
+    assert "__version__ = '9.9.9'" in (
+        tmp_path / 'demo' / '__init__.py'
+    ).read_text()
+    assert 'version = "1.0.0"' in (
+        tmp_path / 'rust' / 'Cargo.toml'
+    ).read_text()

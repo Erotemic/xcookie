@@ -1,4 +1,4 @@
-from xcookie.builders import ci_model
+from xcookie.builders import ci_model, common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
 
@@ -225,13 +225,12 @@ def test_gitlab_purepy_gdal_cases_select_strict_and_loose_requirement_files(
     assert '--find-links https://girder.github.io/large_image_wheels' in text
 
 
-def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
+def test_github_binpy_historical_versionless_flag_is_reusable(tmp_path):
     """
-    A binpy repo with python-version-independent wheels (e.g. pure ctypes
-    bindings tagged py3-none) builds ONE wheel per platform: no per-python
-    cibuildwheel fanout, no msvc-dev-cmd setup, and no coverage combining in
-    the build job (the wheel test jobs own coverage). The vcpkg tag composes
-    with it and must appear in BOTH the tests and release workflows.
+    The historical ci_versionless_wheels flag retains its behavior through the
+    reusable-wheel contract: one wheel per platform, no per-python build fanout,
+    and no coverage combining in the build job. The vcpkg tag still composes
+    with it in both test and release workflows.
     """
     self = _make_applier(
         tmp_path, tags=['github', 'binpy', 'vcpkg'], min_python='3.11'
@@ -247,7 +246,7 @@ def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
         assert 'cibw_skip:' not in text
         assert 'CIBW_SKIP' not in text
         assert 'VSCMD_ARG_TGT_ARCH' not in text
-        assert 'python-version independent' in text
+        assert 'stable-ABI wheels' in text
         # vcpkg support pieces (shared between tests and release builds).
         assert 'Restore vcpkg caches (Windows)' in text
         assert 'Save vcpkg caches (Windows, even on failure)' in text
@@ -257,7 +256,7 @@ def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
         ) in text
         assert 'PYTHONUTF8=1' in text
 
-    # The versionless build job runs only a smoke test inside cibuildwheel,
+    # The reusable build job runs only a smoke test inside cibuildwheel,
     # so it must not try to combine or upload coverage (the test job still
     # does, hence the split-scope assertion).
     build_job_section = tests_text.split('test_binpy_wheels:')[0]
@@ -267,8 +266,8 @@ def test_github_binpy_versionless_wheels_and_vcpkg(tmp_path):
 
 def test_github_binpy_default_keeps_per_python_builds(tmp_path):
     """
-    Without ci_versionless_wheels, nothing changes: repos that link against
-    the CPython C API keep the per-python-version cibuildwheel builds.
+    Without a reusable-wheel flag, repos that link against the CPython C API
+    keep the per-python-version cibuildwheel builds.
     """
     self = _make_applier(tmp_path, tags=['github', 'binpy'], min_python='3.11')
     text = self.build_github_actions_tests()
@@ -371,6 +370,30 @@ def test_github_allow_failure_rules_normalize_experimental_steps(tmp_path):
     assert 'Report experimental failure' not in stable_text
 
 
+def test_legacy_typecheck_installs_configured_requirement_groups(tmp_path):
+    self = _make_applier(
+        tmp_path,
+        tags=['gitlab', 'purepy'],
+        use_pyproject_requirements=False,
+    )
+    requirements_dpath = tmp_path / 'requirements'
+    requirements_dpath.mkdir(exist_ok=True)
+    for name in ['runtime', 'types', 'optional', 'headless']:
+        (requirements_dpath / f'{name}.txt').write_text(f'# {name}\n')
+    self.config['typecheck_install_extras'] = [
+        'types', 'optional', 'headless'
+    ]
+
+    plan = common_ci.make_ci_plan(self)
+    commands = common_ci.make_typecheck_parts(self, plan=plan)
+    assert (
+        'pip install -r requirements/runtime.txt '
+        '-r requirements/types.txt '
+        '-r requirements/optional.txt '
+        '-r requirements/headless.txt'
+    ) in commands
+
+
 def test_github_typecheck_extra_paths_are_rendered(tmp_path):
     self = _make_applier(
         tmp_path,
@@ -439,3 +462,237 @@ def test_gitlab_prerelease_python_policy_skip(tmp_path):
     text = self.build_gitlab_ci()
     assert '/cp315-' not in text
     assert 'python:3.15-rc' not in text
+
+
+def _write_workspace_demo(tmp_path):
+    (tmp_path / 'demo_pkg').mkdir(exist_ok=True)
+    (tmp_path / 'demo_pkg' / '__init__.py').write_text(
+        "__version__ = '1.2.3'\n"
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+dynamic = ["version"]
+dependencies = ["demo-theory==1.2.3"]
+
+[project.optional-dependencies]
+tests = []
+helm = []
+
+[tool.setuptools.dynamic]
+version = {attr = "demo_pkg.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["demo_pkg*"]
+
+[tool.xcookie]
+workspace_members = ["packages/demo-theory"]
+workspace_sync_versions = true
+typecheck_install_extras = ["tests", "helm"]
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-theory'
+    (member / 'src' / 'demo_theory').mkdir(parents=True)
+    (member / 'tests').mkdir()
+    (member / 'src' / 'demo_theory' / '__init__.py').write_text(
+        "__version__ = '1.2.3'\n"
+    )
+    (member / 'tests' / 'test_smoke.py').write_text(
+        'import demo_theory\n\ndef test_import():\n    assert demo_theory\n'
+    )
+    (member / 'pyproject.toml').write_text(
+        '''
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "demo-theory"
+dynamic = ["version"]
+dependencies = []
+
+[tool.setuptools.dynamic]
+version = {attr = "demo_theory.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["demo_theory*"]
+
+[tool.xcookie]
+mod_name = "demo_theory"
+rel_mod_parent_dpath = "src"
+typed = true
+'''.lstrip()
+    )
+
+
+def _write_binary_workspace_demo(tmp_path):
+    (tmp_path / 'demo_pkg').mkdir(exist_ok=True)
+    (tmp_path / 'demo_pkg' / '__init__.py').write_text(
+        "__version__ = '1.2.3'\n"
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = {attr = "demo_pkg.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["demo_pkg*"]
+
+[tool.xcookie]
+workspace_members = ["packages/demo-accel"]
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-accel'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '''
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "demo-accel"
+version = "1.2.3"
+requires-python = ">=3.10"
+dependencies = ["demo-pkg==1.2.3"]
+
+[tool.xcookie]
+tags = ["binpy"]
+mod_name = "_demo_accel"
+typed = false
+
+[tool.cibuildwheel]
+build = "cp310-*"
+skip = "pp*"
+'''.lstrip()
+    )
+
+
+def test_github_workspace_ci_installs_and_tests_member(tmp_path):
+    _write_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    self.config['typecheck_install_extras'] = ['tests', 'helm']
+    self.config['linter'] = True
+    text = self.build_github_actions_tests()
+    assert 'workspace_demo_theory:' in text
+    assert 'Build demo-theory' in text
+    assert 'Test demo-theory in isolation' in text
+    assert (
+        'python -m build --sdist --wheel '
+        '--outdir workspace_wheelhouse/demo_theory '
+        './packages/demo-theory'
+    ) in text
+    assert (
+        'pip install --prefer-binary -e ./packages/demo-theory '
+        '-e ".[tests,helm]"'
+    ) in text
+    assert (
+        'python -m pip install --prefer-binary ./packages/demo-theory '
+        'wheelhouse/demo_pkg*.tar.gz -v'
+    ) in text
+    assert (
+        'python -m pip install --prefer-binary '
+        './packages/demo-theory "${INSTALL_TARGET}"'
+    ) in text
+    assert '--find-links workspace_wheelhouse/demo_theory' not in text
+    assert (
+        'python -m pytest -c ./packages/demo-theory/pyproject.toml '
+        'packages/demo-theory/tests'
+    ) in text
+    assert 'expected dependency-free wheel' in text
+
+
+def test_github_binary_workspace_uses_cibuildwheel_matrix(tmp_path):
+    _write_binary_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-accel']
+    text = self.build_github_actions_tests()
+    lint_prefix = text.split('workspace_demo_accel:', 1)[0]
+    assert 'pip install --prefer-binary -e ./packages/demo-accel' not in lint_prefix
+    assert 'workspace_demo_accel:' in text
+    assert 'Build demo-accel on ${{ matrix.os }}' in text
+    assert 'pypa/cibuildwheel' in text
+    assert 'package-dir: ./packages/demo-accel' in text
+    assert 'config-file: ./packages/demo-accel/pyproject.toml' in text
+    assert 'output-dir: workspace_wheelhouse/demo_accel' in text
+    assert 'workspace-demo-accel-${{ matrix.os }}-${{ matrix.arch }}' in text
+    assert 'python -m pip install -e .' in text
+    assert '--no-index --find-links workspace_wheelhouse/demo_accel' in text
+    assert 'Set up Python 3.10' in text
+    assert 'Validate demo-accel on Python 3.10' in text
+
+
+def test_github_binary_workspace_release_merges_platform_artifacts(tmp_path):
+    _write_binary_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-accel']
+    self.config['deploy'] = True
+    self.config['deploy_pypi'] = True
+    self.config['ci_pypi_trusted_publishing'] = True
+    text = self.build_github_actions_release()
+    assert 'ubuntu-24.04-arm' in text
+    assert 'macos-15' in text
+    assert 'macos-15-intel' in text
+    assert 'Build demo-accel sdist (Linux)' in text
+    assert 'workspace-demo-accel-release-${{ matrix.os }}-${{ matrix.arch }}' in text
+    assert 'pattern: workspace-demo-accel-release-*' in text
+    assert 'merge-multiple: true' in text
+    assert 'Publish demo-accel to PyPI' in text
+
+
+def test_github_workspace_release_builds_and_publishes_member(tmp_path):
+    _write_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    self.config['deploy'] = True
+    self.config['deploy_pypi'] = True
+    self.config['ci_pypi_trusted_publishing'] = True
+    text = self.build_github_actions_release()
+    assert 'workspace_demo_theory:' in text
+    assert 'workspace-demo-theory-release' in text
+    assert 'Publish demo-theory to PyPI' in text
+    assert 'packages-dir: workspace_release/demo_theory' in text
+    assert 'deploy_workspace_artifacts' in text
+    assert 'workspace_release/**/*' in text
+
+
+def test_github_workspace_publish_requires_trusted_publishing(tmp_path):
+    _write_workspace_demo(tmp_path)
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    self.config['deploy'] = True
+    self.config['deploy_pypi'] = True
+    self.config['ci_pypi_trusted_publishing'] = False
+    import pytest
+
+    with pytest.raises(ValueError, match='trusted publishing'):
+        self.build_github_actions_release()

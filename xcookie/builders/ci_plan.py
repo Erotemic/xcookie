@@ -10,9 +10,19 @@ shape and provider syntax.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import re
 from typing import Any, Iterable, Literal, Mapping
 
-from xcookie.requirements_layout import DEFAULT_LOCKS_RELPATH
+from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
+from packaging.utils import canonicalize_name
+
+from xcookie.requirements_layout import (
+    DEFAULT_LOCKS_RELPATH,
+    DEFAULT_REQUIREMENTS_RELPATH,
+)
 
 VariantKey = Literal[
     'minimal-loose',
@@ -65,6 +75,26 @@ class TestVariant:
 
 
 @dataclass(frozen=True)
+class CISourceCheck:
+    """A project-owned source-level validation job rendered by xcookie."""
+
+    key: str
+    name: str
+    shell: str
+    python_version: str | None
+    runner: str
+    gitlab_image: str | None
+    setup_commands: tuple[str, ...]
+    commands: tuple[str, ...]
+    env: Mapping[str, str]
+    allow_failure: bool
+
+    @property
+    def job_key(self) -> str:
+        return f'check_{self.key.replace("-", "_")}'
+
+
+@dataclass(frozen=True)
 class CIArtifact:
     """A project-owned artifact that xcookie should build and carry through CI."""
 
@@ -95,6 +125,330 @@ class CIArtifact:
 
 
 @dataclass(frozen=True)
+class WorkspaceMember:
+    """One additional Python distribution maintained in the repository."""
+
+    key: str
+    path: str
+    pkg_name: str
+    mod_name: str
+    rel_mod_parent_dpath: str
+    version: str | None
+    dependencies: tuple[str, ...]
+    optional_dependency_keys: frozenset[str]
+    typecheck_extra_paths: tuple[str, ...]
+    typed: bool
+    publish: bool
+    package_kind: Literal['purepy', 'binpy']
+    cibuildwheel_skip: str
+    required_by_root: bool
+    python_versions: tuple[str, ...]
+
+    @property
+    def rel_mod_dpath(self) -> str:
+        parent = self.rel_mod_parent_dpath.strip('./')
+        if parent:
+            return f'{self.path}/{parent}/{self.mod_name}'
+        return f'{self.path}/{self.mod_name}'
+
+    @property
+    def test_dpath(self) -> str:
+        return f'{self.path}/tests'
+
+    @property
+    def artifact_name(self) -> str:
+        return f'workspace-{self.key.replace("_", "-")}'
+
+    @property
+    def release_artifact_name(self) -> str:
+        return f'{self.artifact_name}-release'
+
+    def artifact_pattern(self, *, release: bool = False) -> str:
+        """Artifact selector used when one member emits one or many archives."""
+        base = self.release_artifact_name if release else self.artifact_name
+        if self.package_kind == 'binpy':
+            return base + '-*'
+        return base
+
+    @property
+    def dist_prefix(self) -> str:
+        return re.sub(r'[-.]+', '_', self.pkg_name)
+
+    @property
+    def dependency_free(self) -> bool:
+        return not self.dependencies
+
+    @property
+    def test_extras(self) -> tuple[str, ...]:
+        if 'tests' in self.optional_dependency_keys:
+            return ('tests',)
+        return tuple()
+
+
+def _coerce_string_list(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return tuple()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(str(item) for item in value)
+
+
+def _infer_member_module_metadata(
+    data: Mapping[str, Any], pkg_name: str
+) -> tuple[str, str]:
+    tool = data.get('tool', {}) or {}
+    xcookie = tool.get('xcookie', {}) or {}
+    mod_name = xcookie.get('mod_name')
+    rel_parent = xcookie.get('rel_mod_parent_dpath')
+
+    setuptools = tool.get('setuptools', {}) or {}
+    packages = setuptools.get('packages', {}) or {}
+    find_config = packages.get('find', {}) if isinstance(packages, Mapping) else {}
+    if rel_parent is None and isinstance(find_config, Mapping):
+        where = find_config.get('where', []) or []
+        if isinstance(where, str):
+            where = [where]
+        if where:
+            rel_parent = str(where[0])
+
+    if mod_name is None and isinstance(find_config, Mapping):
+        include = find_config.get('include', []) or []
+        if isinstance(include, str):
+            include = [include]
+        if len(include) == 1:
+            candidate = str(include[0]).rstrip('*').rstrip('.')
+            if candidate and '/' not in candidate and '\\' not in candidate:
+                mod_name = candidate
+
+    if mod_name is None:
+        mod_name = pkg_name.replace('-', '_').replace('.', '_')
+    if rel_parent is None:
+        rel_parent = '.'
+    return str(mod_name), str(rel_parent)
+
+
+def load_workspace_members(config: Mapping[str, Any]) -> tuple[WorkspaceMember, ...]:
+    """Load additional distributions declared by ``workspace_members``."""
+    raw_members = config.get('workspace_members') or []
+    if isinstance(raw_members, str):
+        raw_members = [raw_members]
+    if not raw_members:
+        return tuple()
+
+    tags = config.get('tags', []) or []
+    if isinstance(tags, str):
+        tags = [tags]
+    if 'github' not in tags:
+        raise ValueError(
+            'workspace_members currently requires the github xcookie tag'
+        )
+
+    repodir = Path(config['repodir']).resolve()
+    root_pyproject = repodir / 'pyproject.toml'
+    root_dependency_names: set[str] = set()
+    if root_pyproject.exists():
+        import toml
+
+        root_data = toml.loads(root_pyproject.read_text())
+        root_dependencies = (
+            root_data.get('project', {}).get('dependencies', []) or []
+        )
+        for item in root_dependencies:
+            if not isinstance(item, str):
+                continue
+            try:
+                req = Requirement(item)
+            except Exception:
+                continue
+            root_dependency_names.add(canonicalize_name(req.name))
+    members: list[WorkspaceMember] = []
+    seen_keys: set[str] = set()
+    seen_packages: set[str] = set()
+    for raw_path in raw_members:
+        relpath = Path(str(raw_path))
+        if relpath.is_absolute():
+            raise ValueError(
+                f'workspace member paths must be repository-relative: {raw_path!r}'
+            )
+        member_dpath = (repodir / relpath).resolve()
+        try:
+            normalized_relpath = member_dpath.relative_to(repodir).as_posix()
+        except ValueError as ex:
+            raise ValueError(
+                f'workspace member escapes repository root: {raw_path!r}'
+            ) from ex
+
+        pyproject_fpath = member_dpath / 'pyproject.toml'
+        if not pyproject_fpath.exists():
+            raise ValueError(
+                f'workspace member {normalized_relpath!r} has no pyproject.toml'
+            )
+        import toml
+
+        data = toml.loads(pyproject_fpath.read_text())
+        project = data.get('project', {}) or {}
+        pkg_name = project.get('name')
+        if not isinstance(pkg_name, str) or not pkg_name:
+            raise ValueError(
+                f'workspace member {normalized_relpath!r} requires [project].name'
+            )
+        normalized_pkg = re.sub(r'[-_.]+', '-', pkg_name).lower()
+        key = re.sub(r'[^a-zA-Z0-9_]+', '_', normalized_pkg.replace('-', '_'))
+        if key in seen_keys or normalized_pkg in seen_packages:
+            raise ValueError(f'duplicate workspace package {pkg_name!r}')
+        seen_keys.add(key)
+        seen_packages.add(normalized_pkg)
+
+        mod_name, rel_parent = _infer_member_module_metadata(data, pkg_name)
+        dependencies = _coerce_string_list(project.get('dependencies'))
+        optional = project.get('optional-dependencies', {}) or {}
+        if not isinstance(optional, Mapping):
+            optional = {}
+
+        tool = data.get('tool', {}) or {}
+        xcookie = tool.get('xcookie', {}) or {}
+        typecheck_extra_paths = _coerce_string_list(
+            xcookie.get('typecheck_extra_paths')
+        )
+        typed_value = xcookie.get('typed', True)
+        typed = typed_value not in {False, None, 'false', 'none', 'off'}
+        publish = bool(xcookie.get('deploy_pypi', True))
+        member_tags = _coerce_string_list(xcookie.get('tags'))
+        has_binpy = 'binpy' in member_tags
+        has_purepy = 'purepy' in member_tags
+        if has_binpy and has_purepy:
+            raise ValueError(
+                f'workspace member {pkg_name!r} cannot declare both '
+                'purepy and binpy tags'
+            )
+        package_kind: Literal['purepy', 'binpy'] = (
+            'binpy' if has_binpy else 'purepy'
+        )
+        root_python_versions = config.get('supported_python_versions') or []
+        if isinstance(root_python_versions, str):
+            root_python_versions = [] if root_python_versions == 'auto' else [root_python_versions]
+        member_requires_python = project.get('requires-python')
+        if member_requires_python and root_python_versions:
+            spec = SpecifierSet(str(member_requires_python))
+            python_versions = tuple(
+                str(item)
+                for item in root_python_versions
+                if spec.contains(Version(str(item)), prereleases=True)
+            )
+        else:
+            python_versions = tuple(str(item) for item in root_python_versions)
+        if package_kind == 'binpy' and not python_versions:
+            raise ValueError(
+                f'workspace binary member {pkg_name!r} has no supported '
+                'CPython versions in common with the root project'
+            )
+
+        cibuildwheel = tool.get('cibuildwheel', {}) or {}
+        cibuildwheel_skip = ''
+        if isinstance(cibuildwheel, Mapping):
+            skip_value = cibuildwheel.get('skip', '') or ''
+            if isinstance(skip_value, (list, tuple)):
+                cibuildwheel_skip = ' '.join(str(item) for item in skip_value)
+            else:
+                cibuildwheel_skip = str(skip_value)
+
+        from xcookie.versioning import find_version_source
+
+        version_source = find_version_source(
+            str(member_dpath), data=data, required=False
+        )
+        version = None if version_source is None else version_source.version
+        members.append(
+            WorkspaceMember(
+                key=key,
+                path=normalized_relpath,
+                pkg_name=pkg_name,
+                mod_name=mod_name,
+                rel_mod_parent_dpath=rel_parent,
+                version=version,
+                dependencies=dependencies,
+                optional_dependency_keys=frozenset(str(k) for k in optional),
+                typecheck_extra_paths=typecheck_extra_paths,
+                typed=typed,
+                publish=publish,
+                package_kind=package_kind,
+                cibuildwheel_skip=cibuildwheel_skip,
+                required_by_root=(normalized_pkg in root_dependency_names),
+                python_versions=python_versions,
+            )
+        )
+    return tuple(members)
+
+
+
+def validate_workspace_sync(
+    self: Any, members: tuple[WorkspaceMember, ...]
+) -> None:
+    """Reject a workspace whose synchronized package versions have drifted."""
+    if not members or not self.config.get('workspace_sync_versions', False):
+        return
+
+    root_version = str(self.config.get('version') or '')
+    if not root_version:
+        raise ValueError(
+            'workspace_sync_versions requires a resolved root package version'
+        )
+
+    pyproject = self.config._load_pyproject_config() or {}
+    root_project = pyproject.get('project', {}) or {}
+    root_pkg_name = root_project.get('name')
+    if not isinstance(root_pkg_name, str) or not root_pkg_name:
+        raise ValueError(
+            'workspace_sync_versions requires the root [project].name'
+        )
+
+    def exact_pin_count(project: Mapping[str, Any], pkg_name: str) -> int:
+        dependencies = project.get('dependencies', []) or []
+        target_name = canonicalize_name(pkg_name)
+        count = 0
+        for item in dependencies:
+            if not isinstance(item, str):
+                continue
+            try:
+                req = Requirement(item)
+            except Exception:
+                continue
+            if (
+                canonicalize_name(req.name) == target_name
+                and str(req.specifier) == f'=={root_version}'
+                and req.marker is None
+            ):
+                count += 1
+        return count
+
+    for member in members:
+        if member.version != root_version:
+            raise ValueError(
+                f'workspace member {member.pkg_name!r} version '
+                f'{member.version!r} does not match root version '
+                f'{root_version!r}'
+            )
+        import toml
+
+        member_pyproject = (
+            Path(self.config['repodir']).resolve()
+            / member.path
+            / 'pyproject.toml'
+        )
+        member_data = toml.loads(member_pyproject.read_text())
+        member_project = member_data.get('project', {}) or {}
+        root_to_member = exact_pin_count(root_project, member.pkg_name)
+        member_to_root = exact_pin_count(member_project, root_pkg_name)
+        if root_to_member + member_to_root != 1:
+            raise ValueError(
+                'workspace_sync_versions requires exactly one direct exact '
+                'dependency pin linking the root and workspace member; '
+                f'root->{member.pkg_name}={root_to_member}, '
+                f'{member.pkg_name}->{root_pkg_name}={member_to_root}'
+            )
+
+
+@dataclass(frozen=True)
 class CIPlan:
     """Provider-neutral CI decisions shared by GitHub and GitLab renderers."""
 
@@ -104,6 +458,8 @@ class CIPlan:
     typecheck_extras: tuple[str, ...]
     sdist_test_extras: tuple[str, ...]
     ci_artifacts: tuple[CIArtifact, ...]
+    ci_source_checks: tuple[CISourceCheck, ...]
+    workspace_members: tuple[WorkspaceMember, ...]
 
     def variants_by_key(self) -> dict[VariantKey, TestVariant]:
         return {variant.key: variant for variant in self.test_variants}
@@ -212,18 +568,86 @@ def _as_commands(value: Any) -> tuple[str, ...]:
     return tuple(str(item) for item in value)
 
 
-def _validate_artifact_key(key: str) -> None:
+def _validate_ci_key(key: str, *, field_name: str) -> None:
     if not key:
-        raise ValueError('ci_artifacts keys must be non-empty')
+        raise ValueError(f'{field_name} keys must be non-empty')
     if not (key[0].isalpha() or key[0] == '_'):
         raise ValueError(
-            f'ci_artifacts key must start with a letter or underscore: {key!r}'
+            f'{field_name} key must start with a letter or underscore: {key!r}'
         )
     invalid = [c for c in key if not (c.isalnum() or c in {'_', '-'})]
     if invalid:
         raise ValueError(
-            f'ci_artifacts key contains unsupported characters: {key!r}'
+            f'{field_name} key contains unsupported characters: {key!r}'
         )
+
+
+def _validate_artifact_key(key: str) -> None:
+    _validate_ci_key(key, field_name='ci_artifacts')
+
+
+def load_ci_source_checks(
+    config: Mapping[str, Any],
+) -> tuple[CISourceCheck, ...]:
+    """Normalize independent source-check declarations."""
+    raw = config.get('ci_source_checks')
+    if not raw:
+        return tuple()
+    if isinstance(raw, str):
+        from xcookie.util_yaml import Yaml
+
+        raw = Yaml.loads(raw)
+    if not isinstance(raw, Mapping):
+        raise TypeError(
+            f'ci_source_checks must be a mapping, got {type(raw)!r}'
+        )
+
+    checks = []
+    for key_, item in raw.items():
+        key = str(key_)
+        _validate_ci_key(key, field_name='ci_source_checks')
+        if not isinstance(item, Mapping):
+            raise TypeError(
+                f'ci_source_checks[{key!r}] must be a mapping, '
+                f'got {type(item)!r}'
+            )
+        commands = _as_commands(item.get('commands', item.get('command')))
+        if not commands:
+            raise ValueError(
+                f'ci_source_checks[{key!r}] requires command/commands'
+            )
+        env_raw = item.get('env', {}) or {}
+        if not isinstance(env_raw, Mapping):
+            raise TypeError(
+                f'ci_source_checks[{key!r}].env must be a mapping, '
+                f'got {type(env_raw)!r}'
+            )
+        python_version = item.get('python_version', 'main')
+        if python_version is not None:
+            python_version = str(python_version)
+        gitlab_image = item.get('gitlab_image')
+        if gitlab_image is not None:
+            gitlab_image = str(gitlab_image)
+        checks.append(
+            CISourceCheck(
+                key=key,
+                name=str(
+                    item.get(
+                        'name',
+                        key.replace('_', ' ').replace('-', ' ').title(),
+                    )
+                ),
+                shell=str(item.get('shell', 'bash')),
+                python_version=python_version,
+                runner=str(item.get('runner', 'ubuntu-latest')),
+                gitlab_image=gitlab_image,
+                setup_commands=_as_commands(item.get('setup_commands')),
+                commands=commands,
+                env={str(k): str(v) for k, v in env_raw.items()},
+                allow_failure=bool(item.get('allow_failure', False)),
+            )
+        )
+    return tuple(checks)
 
 
 def load_ci_artifacts(config: Mapping[str, Any]) -> tuple[CIArtifact, ...]:
@@ -329,6 +753,25 @@ def filter_pyproject_extras(
     return tuple(extra for extra in desired if extra in available)
 
 
+def filter_requirement_groups(
+    self: Any, desired_groups: Iterable[str]
+) -> tuple[str, ...]:
+    """Filter desired groups to checked-in ``requirements/*.txt`` files."""
+    requirements_dpath = (
+        Path(self.repodir) / str(DEFAULT_REQUIREMENTS_RELPATH)
+    )
+    desired = _unique(str(group) for group in desired_groups)
+    if not requirements_dpath.exists():
+        # New repo path: nothing to filter against, trust the desired list.
+        return desired
+    available = {
+        path.stem
+        for path in requirements_dpath.glob('*.txt')
+        if path.is_file()
+    }
+    return tuple(group for group in desired if group in available)
+
+
 def format_pyproject_install_target(
     extras: Iterable[str], target: str = '.', editable: bool = False
 ) -> str:
@@ -416,8 +859,11 @@ def make_ci_plan(self: Any) -> CIPlan:
     variant_extras = _base_variant_extras(self)
     _apply_ci_extras(variant_extras, _load_ci_extras(self.config))
 
-    use_pyproject = uses_pyproject_dependency_mode(self)
-    if use_pyproject:
+    use_pyproject_dependencies = uses_pyproject_dependency_mode(self)
+    use_pyproject_requirements = bool(
+        self.config.get('use_pyproject_requirements')
+    )
+    if use_pyproject_dependencies:
         variant_extras = {
             key: list(filter_pyproject_extras(self, extras))
             for key, extras in variant_extras.items()
@@ -441,8 +887,11 @@ def make_ci_plan(self: Any) -> CIPlan:
         variant for variant in variants if variant.key in requested_set
     )
 
-    if use_pyproject:
-        desired_typecheck_extras = ['tests']
+    configured_typecheck_extras = self.config.get(
+        'typecheck_install_extras', ['tests']
+    )
+    desired_typecheck_extras = _as_list(configured_typecheck_extras)
+    if use_pyproject_requirements:
         desired_sdist_extras = ['tests']
         if 'cv2' in self.tags:
             desired_sdist_extras.append('headless')
@@ -453,8 +902,13 @@ def make_ci_plan(self: Any) -> CIPlan:
         )
         sdist_test_extras = filter_pyproject_extras(self, desired_sdist_extras)
     else:
-        typecheck_extras = tuple()
+        typecheck_extras = filter_requirement_groups(
+            self, desired_typecheck_extras
+        )
         sdist_test_extras = tuple()
+
+    workspace_members = load_workspace_members(self.config)
+    validate_workspace_sync(self, workspace_members)
 
     return CIPlan(
         optional_dependency_keys=frozenset(
@@ -465,4 +919,6 @@ def make_ci_plan(self: Any) -> CIPlan:
         typecheck_extras=tuple(typecheck_extras),
         sdist_test_extras=tuple(sdist_test_extras),
         ci_artifacts=load_ci_artifacts(self.config),
+        ci_source_checks=load_ci_source_checks(self.config),
+        workspace_members=workspace_members,
     )

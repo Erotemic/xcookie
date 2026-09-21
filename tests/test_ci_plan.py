@@ -151,14 +151,51 @@ def test_artifact_test_cases_preserve_github_minimal_loose_platform_reduction(
     cases = ci_model.make_artifact_test_cases(
         self, plan=plan, provider='github'
     )
-    minimal_loose = [
-        case for case in cases if case.variant.key == 'minimal-loose'
+    minimal_loose_cpython = [
+        case
+        for case in cases
+        if case.variant.key == 'minimal-loose'
+        and not case.python_version.startswith('pypy-')
     ]
     full_loose = [case for case in cases if case.variant.key == 'full-loose']
-    assert len(full_loose) >= len(minimal_loose)
+    assert len(full_loose) >= len(minimal_loose_cpython)
     assert all(
-        case.platform.github_os != 'ubuntu-latest' for case in minimal_loose
+        case.platform.github_os != 'ubuntu-latest'
+        for case in minimal_loose_cpython
     )
+
+
+def test_github_pypy_cases_use_minimal_loose_extras(tmp_path):
+    self = _make_applier(
+        tmp_path, tags=['github', 'purepy'], min_python='3.10'
+    )
+    # Make this regression independent of whichever PyPy release ``auto``
+    # resolves to when the xcookie constants are next updated.
+    self.config['ci_pypy_versions'] = ['3.11']
+    plan = ci_plan.make_ci_plan(self)
+    cases = ci_model.make_artifact_test_cases(
+        self, plan=plan, provider='github'
+    )
+
+    pypy_cases = [
+        case for case in cases if case.python_version == 'pypy-3.11'
+    ]
+    assert pypy_cases
+    assert {case.variant.key for case in pypy_cases} == {'minimal-loose'}
+    assert {case.install_extras for case in pypy_cases} == {'tests'}
+    assert {case.platform.github_os for case in pypy_cases} == {
+        'ubuntu-latest',
+        'macOS-latest',
+        'windows-latest',
+    }
+
+    full_loose_pypy = [
+        case
+        for case in cases
+        if case.variant.key == 'full-loose'
+        and case.python_version.startswith('pypy-')
+    ]
+    assert not full_loose_pypy
 
 
 def test_ci_platform_mapping_adds_gitlab_linux_platform(tmp_path):
@@ -297,3 +334,190 @@ def test_prerelease_python_policy_skip_omits_prerelease_cases(tmp_path):
     cases = ci_model.make_artifact_test_cases(self, provider='github')
     assert cases
     assert all(case.python_version != '3.15' for case in cases)
+
+
+def test_typecheck_install_extras_are_configurable(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+version = "0.0.0"
+
+[project.optional-dependencies]
+tests = []
+helm = []
+'''.lstrip()
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['typecheck_install_extras'] = ['tests', 'helm', 'missing']
+    plan = ci_plan.make_ci_plan(self)
+    assert plan.typecheck_extras == ('tests', 'helm')
+
+
+def test_typecheck_install_extras_use_requirement_groups_in_legacy_mode(tmp_path):
+    requirements_dpath = tmp_path / 'requirements'
+    requirements_dpath.mkdir()
+    for name in ['runtime', 'types', 'optional']:
+        (requirements_dpath / f'{name}.txt').write_text(f'# {name}\n')
+
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=False,
+    )
+    self.config['typecheck_install_extras'] = [
+        'types', 'optional', 'missing'
+    ]
+    plan = ci_plan.make_ci_plan(self)
+    assert plan.typecheck_extras == ('types', 'optional')
+
+
+def test_ci_plan_loads_python_workspace_members(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+version = "1.2.3"
+
+[project.optional-dependencies]
+tests = []
+
+[tool.xcookie]
+workspace_members = ["packages/demo-theory"]
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-theory'
+    (member / 'src' / 'demo_theory').mkdir(parents=True)
+    (member / 'src' / 'demo_theory' / '__init__.py').write_text(
+        "__version__ = '1.2.3'\n"
+    )
+    (member / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-theory"
+dynamic = ["version"]
+dependencies = []
+
+[tool.setuptools.dynamic]
+version = {attr = "demo_theory.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["demo_theory*"]
+
+[tool.xcookie]
+mod_name = "demo_theory"
+rel_mod_parent_dpath = "src"
+typed = true
+'''.lstrip()
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    plan = ci_plan.make_ci_plan(self)
+    assert len(plan.workspace_members) == 1
+    item = plan.workspace_members[0]
+    assert item.pkg_name == 'demo-theory'
+    assert item.mod_name == 'demo_theory'
+    assert item.rel_mod_dpath == 'packages/demo-theory/src/demo_theory'
+    assert item.version == '1.2.3'
+    assert item.dependency_free is True
+    assert item.package_kind == 'purepy'
+    assert item.required_by_root is False
+
+
+def test_ci_plan_loads_binary_workspace_member(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+version = "1.2.3"
+
+[tool.xcookie]
+workspace_members = ["packages/demo-accel"]
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-accel'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-accel"
+version = "1.2.3"
+dependencies = ["demo-pkg==1.2.3"]
+
+[tool.xcookie]
+tags = ["binpy"]
+mod_name = "_demo_accel"
+typed = false
+
+[tool.cibuildwheel]
+skip = ["pp*", "*-musllinux_*"]
+'''.lstrip()
+    )
+    self = _make_applier(tmp_path, tags=['github', 'purepy'])
+    self.config['workspace_members'] = ['packages/demo-accel']
+    plan = ci_plan.make_ci_plan(self)
+    item = plan.workspace_members[0]
+    assert item.package_kind == 'binpy'
+    assert item.pkg_name == 'demo-accel'
+    assert item.mod_name == '_demo_accel'
+    assert item.cibuildwheel_skip == 'pp* *-musllinux_*'
+    assert item.required_by_root is False
+
+
+def test_workspace_members_require_github_provider(tmp_path):
+    member = tmp_path / 'packages' / 'demo-theory'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '[project]\nname = "demo-theory"\nversion = "1.0.0"\n'
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['gitlab', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['workspace_members'] = ['packages/demo-theory']
+    import pytest
+
+    with pytest.raises(ValueError, match='github'):
+        ci_plan.make_ci_plan(self)
+
+
+def test_workspace_sync_rejects_version_drift(tmp_path):
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo-pkg"
+version = "1.2.3"
+dependencies = ["demo-theory==1.2.3"]
+
+[tool.xcookie]
+workspace_members = ["packages/demo-theory"]
+workspace_sync_versions = true
+'''.lstrip()
+    )
+    member = tmp_path / 'packages' / 'demo-theory'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '[project]\nname = "demo-theory"\nversion = "1.2.4"\n'
+    )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'purepy'],
+        use_pyproject_requirements=True,
+    )
+    self.config['version'] = '1.2.3'
+    self.config['workspace_members'] = ['packages/demo-theory']
+    self.config['workspace_sync_versions'] = True
+    import pytest
+
+    with pytest.raises(ValueError, match='does not match root version'):
+        ci_plan.make_ci_plan(self)

@@ -283,3 +283,40 @@ def test_explicit_builder_is_staged(tmp_path):
     staged = applier._stage_file(info)
     text = staged.stage_fpath.read_text()
     assert '## Version 2.3.4 - Unreleased' in text
+
+
+def test_ci_source_check_templates_are_conditional(tmp_path):
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    def template_paths(ci_source_checks):
+        config = XCookieConfig(
+            repodir=tmp_path,
+            repo_name='demo',
+            mod_name='demo',
+            tags=['github', 'gitlab', 'purepy'],
+            interactive=False,
+            use_vcs=False,
+            author='Example Author',
+            author_email='author@example.com',
+            version='2.3.4',
+            url='https://github.com/example/demo',
+            ci_source_checks=ci_source_checks,
+        )
+        applier = TemplateApplier(config)
+        applier._build_template_registry()
+        return {
+            Path(info.fname).as_posix(): info.enabled
+            for info in applier.template_infos
+        }
+
+    without_checks = template_paths(None)
+    assert without_checks['.github/workflows/checks.yml'] is False
+    assert without_checks['.gitlab/ci/main.yml'] is False
+    assert without_checks['.gitlab/ci/checks.yml'] is False
+
+    with_checks = template_paths(
+        {'smoke': {'commands': ['python -m compileall demo']}}
+    )
+    assert with_checks['.github/workflows/checks.yml'] is True
+    assert with_checks['.gitlab/ci/main.yml'] is True
+    assert with_checks['.gitlab/ci/checks.yml'] is True

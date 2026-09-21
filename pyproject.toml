@@ -121,7 +121,8 @@ src.exclude = []
 
 [tool.pytest]
 ini_options.addopts = "-p no:doctest --xdoctest --xdoctest-style=google --ignore-glob=setup.py --ignore-glob=dev --ignore-glob=docs"
-ini_options.norecursedirs = ".git ignore build __pycache__ dev _skbuild docs"
+ini_options.testpaths = ["xcookie", "tests"]
+ini_options.norecursedirs = ".git ignore build __pycache__ dev _skbuild docs submodules"
 ini_options.filterwarnings = [
   "default",
   "ignore:.*No cfgstr given in Cacher constructor or call.*:Warning",

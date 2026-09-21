@@ -204,7 +204,7 @@ def _normalize_tags(value: Any) -> frozenset[str]:
 def build_template_registry(applier: Any) -> list[TemplateInfo]:
     """Build the active template inventory for a configured applier."""
     from xcookie import rc
-    from xcookie.builders import ci_plan
+    from xcookie.builders import ci_plan, common_ci
     from xcookie.builders.basic import (
         build_changelog,
         build_package_init,
@@ -299,6 +299,14 @@ def build_template_registry(applier: Any) -> list[TemplateInfo]:
             'template': 1,
             'overwrite': 1,
             'tags': 'github',
+            'fname': '.github/workflows/checks.yml',
+            'dynamic': 'build_github_actions_checks',
+            'enabled': bool(applier.config.get('ci_source_checks')),
+        },
+        {
+            'template': 1,
+            'overwrite': 1,
+            'tags': 'github',
             'fname': '.github/workflows/release.yml',
             'dynamic': 'build_github_actions_release',
         },
@@ -316,6 +324,22 @@ def build_template_registry(applier: Any) -> list[TemplateInfo]:
             'fname': '.gitlab-ci.yml',
             'tags': 'gitlab,binpy',
             'dynamic': 'build_gitlab_ci',
+        },
+        {
+            'template': 0,
+            'overwrite': 1,
+            'fname': '.gitlab/ci/main.yml',
+            'tags': 'gitlab',
+            'dynamic': 'build_gitlab_ci_main',
+            'enabled': bool(applier.config.get('ci_source_checks')),
+        },
+        {
+            'template': 0,
+            'overwrite': 1,
+            'fname': '.gitlab/ci/checks.yml',
+            'tags': 'gitlab',
+            'dynamic': 'build_gitlab_ci_checks',
+            'enabled': bool(applier.config.get('ci_source_checks')),
         },
         # {'template': 1, 'overwrite': False, 'fname': 'appveyor.yml'},
         {
@@ -413,11 +437,11 @@ def build_template_registry(applier: Any) -> list[TemplateInfo]:
             'input_fname': rc.resource_fpath('publish.sh.in'),
         },
         {
-            'template': 1,
             'overwrite': 1,
             'fname': 'build_wheels.sh',
             'perms': 'x',
             'tags': 'binpy',
+            'builder': common_ci.build_wheels_script,
         },
         {
             'template': 1,

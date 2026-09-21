@@ -9,6 +9,119 @@ import shlex
 import ubelt as ub
 
 from xcookie.builders import ci_plan
+from xcookie.requirements_layout import DEFAULT_REQUIREMENTS_RELPATH
+
+
+def uses_reusable_binary_wheels(self):
+    """Return True when one wheel per platform serves all tested CPythons.
+
+    ``ci_versionless_wheels`` is the historical spelling. Stable-ABI wheels
+    such as ``cp310-abi3`` are reusable without being versionless, so new
+    projects should use ``ci_reusable_wheels``.
+    """
+    return bool(
+        self.config.get('ci_reusable_wheels', False)
+        or self.config.get('ci_versionless_wheels', False)
+    )
+
+
+def wheel_build_post_commands(self):
+    """Normalize project-owned post-build wheel validation commands."""
+    commands = self.config.get('ci_wheel_build_post_commands', []) or []
+    if isinstance(commands, str):
+        return [commands]
+    return [str(command) for command in commands]
+
+
+def build_wheels_script(self, _info=None):
+    """Render the local cibuildwheel helper from project CI policy.
+
+    Reusable/stable-ABI projects deliberately leave ``CIBW_BUILD`` to the
+    selector declared in ``[tool.cibuildwheel]``.  Non-reusable projects keep
+    the historical convenience behavior of building only for the interpreter
+    running this helper.  In both cases the wheelhouse is recreated so a
+    release check cannot accidentally inspect a stale artifact, and the same
+    project-owned post-build validation used by CI runs locally as well.
+    """
+    reusable = uses_reusable_binary_wheels(self)
+    post_commands = wheel_build_post_commands(self)
+
+    lines = [
+        '#!/usr/bin/env bash',
+        'set -euo pipefail',
+        '',
+        '__doc__="',
+        'Runs cibuildwheel to create linux binary wheels.',
+        '',
+        'Requirements:',
+        '    pip install cibuildwheel',
+        '',
+        'SeeAlso:',
+        '    pyproject.toml',
+        '"',
+        '',
+        'if ! command -v docker >/dev/null 2>&1 ; then',
+        '    echo "Missing requirement: docker. Please install docker before running build_wheels.sh"',
+        '    exit 1',
+        'fi',
+        'if ! command -v cibuildwheel >/dev/null 2>&1 ; then',
+        '    echo "The cibuildwheel module is not installed. Please pip install cibuildwheel before running build_wheels.sh"',
+        '    exit 1',
+        'fi',
+        '',
+    ]
+    if reusable:
+        lines.extend(
+            [
+                '# Reusable/stable-ABI wheel selection is packaging policy.',
+                '# Honor [tool.cibuildwheel].build unless the caller explicitly',
+                '# supplied CIBW_BUILD in the environment.',
+                'if [[ -n "${CIBW_BUILD:-}" ]]; then',
+                '    echo "CIBW_BUILD override = $CIBW_BUILD"',
+                'else',
+                '    echo "CIBW_BUILD = <from pyproject.toml>"',
+                'fi',
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                'LOCAL_CP_VERSION=$(python3 -c "import sys; print(\'cp\' + \'\'.join(map(str, sys.version_info[0:2])))")',
+                'echo "LOCAL_CP_VERSION = $LOCAL_CP_VERSION"',
+                '',
+                '# Build for only the current version of Python.',
+                'export CIBW_BUILD="${CIBW_BUILD:-${LOCAL_CP_VERSION}-*}"',
+                'echo "CIBW_BUILD = $CIBW_BUILD"',
+            ]
+        )
+    lines.extend(
+        [
+            '',
+            '# Recreate the output directory so stale wheels cannot satisfy',
+            '# post-build validation or be mistaken for this build.',
+            'rm -rf wheelhouse',
+            'mkdir -p wheelhouse',
+            '',
+            'cibuildwheel --config-file pyproject.toml --platform linux --archs x86_64',
+        ]
+    )
+    if post_commands:
+        lines.extend(['', '# Project-owned artifact validation.'])
+        lines.extend(post_commands)
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def get_test_env(self):
+    """Normalize user-owned test-stage environment variables."""
+    import kwutil
+
+    value = kwutil.Yaml.coerce(self.config.get('test_env'), backend='pyyaml')
+    if not value:
+        return {}
+    if not isinstance(value, dict):
+        raise TypeError(f'test_env must coerce to a mapping, got {type(value)!r}')
+    return {str(key): str(val) for key, val in value.items()}
 
 
 def get_pyproject_optional_dependency_keys(self):
@@ -45,6 +158,62 @@ def make_ci_plan(self):
     return ci_plan.make_ci_plan(self)
 
 
+def join_shell_parts(*parts: str) -> str:
+    """Join already-quoted shell command fragments without empty gaps."""
+    return ' '.join(part for part in parts if part)
+
+
+def make_workspace_install_parts(
+    self, plan: ci_plan.CIPlan | None = None
+) -> list[str]:
+    """Install local workspace distributions before the root project.
+
+    This helper is retained for callers that specifically want separate
+    editable workspace installs. Generated root-package CI instead passes the
+    member source requirements and root requirement to one resolver invocation.
+    """
+    if plan is None:
+        plan = make_ci_plan(self)
+    commands = []
+    for member in plan.workspace_members:
+        if not member.required_by_root:
+            continue
+        target = format_pyproject_install_target(
+            [], target=f'./{member.path}', editable=True
+        )
+        commands.append(f'pip install --prefer-binary {target}')
+    return commands
+
+
+def make_workspace_source_args(
+    self,
+    plan: ci_plan.CIPlan | None = None,
+    *,
+    editable: bool = False,
+) -> str:
+    """Return local source requirements for workspace members.
+
+    Root-package CI must resolve workspace dependencies from the checkout.
+    Development versions often do not exist on PyPI, and CI-only synchronized
+    versions may never be published.  Supplying every workspace member in the
+    same resolver invocation as the root project makes the local source tree
+    authoritative while still exercising the root package's normal dependency
+    metadata.
+    """
+    if plan is None:
+        plan = make_ci_plan(self)
+    parts: list[str] = []
+    for member in plan.workspace_members:
+        if not member.required_by_root:
+            continue
+        target = shlex.quote(f'./{member.path}')
+        if editable:
+            parts.extend(['-e', target])
+        else:
+            parts.append(target)
+    return ' '.join(parts)
+
+
 def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     """
     Return a list of shell commands to run type checkers.
@@ -53,33 +222,39 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     returned value is a list of command strings so callers can adapt it to
     either GitHub Actions (`run` string) or GitLab CI (`script` list).
     """
-
-    # TODO: more control over which type checkers to use.
-    # right now we always enable ty unless notypes is on.
-    # but we should have more sane defaults.
-    checkers = None
-    if checkers is None:
-        checkers = ['ty']
-
+    checkers = ['ty']
     if 'mypy' in self.tags:
         checkers += ['mypy']
 
-    # Where to install runtime/type requirements from
-    type_requirement_files = [
-        # TODO: get this location from the config
-        'requirements/runtime.txt'
-    ]
-    req_files_text = ' '.join(type_requirement_files)
+    if plan is None:
+        plan = make_ci_plan(self)
 
     if self.config['use_pyproject_requirements']:
-        if plan is None:
-            plan = make_ci_plan(self)
         target = format_pyproject_install_target(
             plan.typecheck_extras, editable=True
         )
-        pip_install_reqs = f'pip install --prefer-binary {target}'
+        workspace_sources = make_workspace_source_args(
+            self, plan=plan, editable=True
+        )
+        dependency_install_commands = [
+            join_shell_parts(
+                'pip install --prefer-binary',
+                workspace_sources,
+                target,
+            ),
+        ]
     else:
-        pip_install_reqs = f'pip install -r {req_files_text}'
+        requirements_relpath = str(DEFAULT_REQUIREMENTS_RELPATH)
+        requirement_files = [f'{requirements_relpath}/runtime.txt']
+        requirement_files.extend(
+            f'{requirements_relpath}/{extra}.txt'
+            for extra in plan.typecheck_extras
+        )
+        requirement_files = list(dict.fromkeys(requirement_files))
+        requirement_args = ' '.join(
+            f'-r {shlex.quote(path)}' for path in requirement_files
+        )
+        dependency_install_commands = [f'pip install {requirement_args}']
 
     targets = [f'./{self.rel_mod_dpath}']
     extra_targets = self.config.get('typecheck_extra_paths', []) or []
@@ -93,26 +268,15 @@ def make_typecheck_parts(self, plan: ci_plan.CIPlan | None = None):
     target_text = ' '.join(shlex.quote(target) for target in targets)
 
     commands = []
-
     if 'mypy' in checkers:
-        commands += [
-            'python -m pip install mypy',
-            pip_install_reqs,
-            # TODO; this likely needs to be replaced with some explicit
-            # registration of what typing requirements are for the library
-            # f'mypy --install-types --non-interactive {target_text}',
-            f'mypy {target_text}',
-        ]
-
+        commands.append('python -m pip install mypy')
     if 'ty' in checkers:
-        # Generic support for "ty". Install and run; users can customize
-        # behavior by changing `checkers` or adding config-specific steps.
-        commands += [
-            'python -m pip install ty',
-            pip_install_reqs,
-            f'ty check {target_text}',
-        ]
-
+        commands.append('python -m pip install ty')
+    commands.extend(dependency_install_commands)
+    if 'mypy' in checkers:
+        commands.append(f'mypy {target_text}')
+    if 'ty' in checkers:
+        commands.append(f'ty check {target_text}')
     return commands
 
 
@@ -155,6 +319,7 @@ def make_install_and_test_wheel_parts(
     workspace_dname,
     custom_before_test_lines=[],
     custom_after_test_commands=[],
+    plan: ci_plan.CIPlan | None = None,
 ):
     """
     Builds the YAML common between github actions and gitlab CI to install and
@@ -265,6 +430,10 @@ def make_install_and_test_wheel_parts(
 
     # export UV_EXTRA_INDEX_URL="https://download.pytorch.org/whl/nightly/cpu https://download.pytorch.org/whl/nightly/cu126"
 
+    if plan is None:
+        plan = make_ci_plan(self)
+    workspace_sources = make_workspace_source_args(self, plan=plan)
+
     use_lockfile_ci = ci_plan.uses_lockfile_ci(self)
     if use_lockfile_ci:
         install_helpers = [
@@ -336,11 +505,20 @@ def make_install_and_test_wheel_parts(
             # uv prefers binary wheels by default; the pip --prefer-binary
             # flag does not exist in ``uv pip install`` and was rejected at
             # runtime, so omit it here.
-            'python -m uv pip install --prerelease=allow "${LOCK_ARGS[@]}" "${INSTALL_TARGET}"',
+            join_shell_parts(
+                'python -m uv pip install --prerelease=allow',
+                '"${LOCK_ARGS[@]}"',
+                workspace_sources,
+                '"${INSTALL_TARGET}"',
+            ),
         ]
     else:
         install_wheel_commands += [
-            f'{self.PIP_INSTALL_PREFER_BINARY} "${{INSTALL_TARGET}}"',
+            join_shell_parts(
+                self.PIP_INSTALL_PREFER_BINARY,
+                workspace_sources,
+                '"${INSTALL_TARGET}"',
+            ),
         ]
 
     install_wheel_commands += [
@@ -545,7 +723,12 @@ def get_supported_platform_info(self):
         elif v == 'main':
             v = [main_python_version]
         elif v == '*':
-            v = cpython_versions_non34 + pypy_versions
+            # The normal dependency-variant matrix is a CPython matrix. PyPy
+            # compatibility is scheduled separately by ci_model using the
+            # minimal-loose dependency surface. This prevents optional binary
+            # stacks from turning a core PyPy compatibility check into a
+            # source-build test of unrelated third-party packages.
+            v = cpython_versions_non34
         else:
             raise KeyError(v)
         extras_versions[k] = v
