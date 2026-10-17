@@ -64,8 +64,12 @@ def test_github_purepy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert 'concurrency:' in text
     assert 'cancel-in-progress: true' in text
     assert '3.15' in text
-    assert 'allow-prereleases:' not in text
-    assert 'check-latest:' not in text
+    # Matrix fields are always present because the setup-python step reads
+    # them via matrix expressions. Stable versions must set them to false.
+    assert "allow-prereleases: 'false'" in text
+    assert "check-latest: 'false'" in text
+    assert "allow-prereleases: 'true'" not in text
+    assert "check-latest: 'true'" not in text
     assert 'Prioritized MSVC linker directory:' in text
     assert 'command -v cl.exe' in text
     assert 'VSCMD_ARG_HOST_ARCH' not in text
@@ -104,8 +108,10 @@ def test_github_only_python_315_uses_stable_setup(tmp_path):
     tests_text = self.build_github_actions_tests()
     assert 'Set up Python max' not in tests_text
     assert '3.15' in tests_text
-    assert 'allow-prereleases:' not in tests_text
-    assert 'check-latest:' not in tests_text
+    assert "allow-prereleases: 'false'" in tests_text
+    assert "check-latest: 'false'" in tests_text
+    assert "allow-prereleases: 'true'" not in tests_text
+    assert "check-latest: 'true'" not in tests_text
 
     release_text = self.build_github_actions_release()
     assert 'allow-prereleases:' not in release_text

@@ -1350,3 +1350,107 @@ max_python = "3.14"
     assert 'Programming Language :: Python :: 3.14' in classifiers
     assert 'Programming Language :: Python :: 3.15' not in classifiers
     assert 'Topic :: Utilities' in classifiers
+
+
+def test_binpy_pyproject_only_keeps_extension_and_license_metadata(
+    tmp_path,
+) -> None:
+    """A Cython project can drop setup.py without losing extension metadata."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'line_demo'
+    repodir.mkdir()
+    for name in ['LICENSE.txt', 'LICENSE_Python.txt']:
+        (repodir / name).write_text('License notice\n')
+    (repodir / 'pyproject.toml').write_text(
+        '''
+[build-system]
+requires = ["setuptools>=77", "Cython>=3.0.3"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["kernprof"]
+ext-modules = [
+    {name = "line_demo._native", sources = ["line_demo/_native.pyx", "line_demo/timer.c"], language = "c++"},
+]
+
+[tool.setuptools.package-data]
+line_demo = ["py.typed", "rc/*.toml"]
+
+[tool.setuptools.dynamic.optional-dependencies]
+ipython = {file = ["requirements/ipython.txt"]}
+'''
+    )
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='line_demo',
+        repo_name='line_demo',
+        tags=['github', 'binpy', 'binpy-ubuntu-arm'],
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_vcs=False,
+        min_python='3.10',
+        max_python='3.15',
+        license='BSD-3-Clause',
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+    assert 'setup.py' not in {info.fname for info in applier.staging_infos}
+    data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
+
+    project = data['project']
+    assert project['license'] == 'BSD-3-Clause'
+    assert project['license-files'] == ['LICENSE.txt', 'LICENSE_Python.txt']
+    assert 'Programming Language :: Python :: 3.15' in project['classifiers']
+    setuptools = data['tool']['setuptools']
+    assert setuptools['py-modules'] == ['kernprof']
+    assert setuptools['ext-modules'][0]['sources'] == [
+        'line_demo/_native.pyx',
+        'line_demo/timer.c',
+    ]
+    assert 'rc/*.toml' in setuptools['package-data']['line_demo']
+    assert setuptools['dynamic']['optional-dependencies']['ipython'] == {
+        'file': ['requirements/ipython.txt']
+    }
+    requires = data['build-system']['requires']
+    assert any(item.startswith('setuptools>=77') for item in requires)
+    # pyproject-fmt normalizes PEP 508 package names (e.g. Cython -> cython).
+    from packaging.requirements import Requirement
+
+    assert any(
+        req.name.casefold() == 'cython'
+        and str(req.specifier) == '>=3.0.3'
+        for req in map(Requirement, requires)
+    )
+    assert not any(
+        item.lower().startswith(('scikit-build', 'cmake', 'ninja', 'numpy'))
+        for item in requires
+    )
+    cibw = data['tool']['cibuildwheel']
+    assert cibw['test-extras'] == ['tests']
+    assert 'cp315-*' in cibw['build']
+
+
+def test_binpy_cibuildwheel_test_extras_follow_packaging_mode(tmp_path) -> None:
+    """Synthetic strict extras only exist when setup.py generates them."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    for use_setup_py, expected in [
+        (True, ['tests-strict', 'runtime-strict', 'headless-strict']),
+        (False, ['tests', 'headless']),
+    ]:
+        config = XCookieConfig(
+            repodir=tmp_path,
+            mod_name='demo',
+            repo_name='demo',
+            tags=['binpy', 'github', 'cv2'],
+            init_new_remotes=False,
+            interactive=False,
+            use_setup_py=use_setup_py,
+            use_vcs=False,
+        )
+        applier = TemplateApplier(config)
+        applier._presetup()
+        result = toml.loads(applier.build_pyproject())
+        assert result['tool']['cibuildwheel']['test-extras'] == expected

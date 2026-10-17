@@ -366,18 +366,24 @@ def build_pyproject(self):
             build_system_requires = list(
                 pyproj_config['build-system'].get('requires') or []
             )
-            build_system_requires.extend(
-                [
-                    'setuptools>=77',
-                    # setuptools_scm[toml]
-                    # "wheel",
-                    'scikit-build>=0.11.1',
-                    'numpy',
-                    'ninja>=1.10.2',
-                    'cmake>=3.21.2',
-                    'cython>=0.29.24',
-                ]
-            )
+            if use_setup_py:
+                # Preserve the legacy setup.py build-method dependencies.
+                build_system_requires.extend(
+                    [
+                        'setuptools>=77',
+                        'scikit-build>=0.11.1',
+                        'numpy',
+                        'ninja>=1.10.2',
+                        'cmake>=3.21.2',
+                        'cython>=0.29.24',
+                    ]
+                )
+            else:
+                # A declarative PEP 621 build does not invoke the legacy
+                # scikit-build / CMake selection in setup.py.  Keep the
+                # project's explicit build requirements (e.g. Cython for
+                # .pyx extensions), without injecting unused build tools.
+                build_system_requires.append('setuptools>=77')
             pyproj_config['build-system']['requires'] = list(
                 ub.oset(build_system_requires)
             )
@@ -412,9 +418,18 @@ def build_pyproject(self):
                 cibw['archs'] = ['auto64']
 
         if not foreign_binpy_backend:
-            test_extras = ['tests-strict', 'runtime-strict']
-            if 'cv2' in self.config['tags']:
-                test_extras += ['headless-strict']
+            if use_setup_py:
+                test_extras = ['tests-strict', 'runtime-strict']
+                if 'cv2' in self.config['tags']:
+                    test_extras.append('headless-strict')
+            else:
+                # PEP 621 mode exposes tests (and headless) as regular extras;
+                # runtime dependencies are installed automatically.  Strict
+                # resolution is handled by the CI lock policy, not by
+                # synthetic setup.py-only extras.
+                test_extras = ['tests']
+                if 'cv2' in self.config['tags']:
+                    test_extras.append('headless')
 
             skip_tokens = ['pp*', '*-musllinux_*']
             if 'win' in self.config['os']:
@@ -571,7 +586,19 @@ def build_pyproject(self):
             project_block['license'] = _coerce_spdx_license(
                 self.config['license']
             )
-            project_block['license-files'] = ['LICENSE']
+            # Projects often use LICENSE.txt or multiple license notices.
+            # Preserve explicit metadata when provided, otherwise include
+            # the actual license files rather than assuming a bare LICENSE.
+            if not project_block.get('license-files'):
+                license_paths = {
+                    fpath.name
+                    for pattern in ('LICENSE*', 'LICENCE*', 'COPYING*')
+                    for fpath in self.repodir.glob(pattern)
+                    if fpath.is_file()
+                }
+                project_block['license-files'] = (
+                    sorted(license_paths) if license_paths else ['LICENSE']
+                )
         if self.config['url']:
             urls = project_block.get('urls', {})
             urls['Homepage'] = str(self.config['url'])
