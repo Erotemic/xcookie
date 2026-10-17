@@ -458,20 +458,22 @@ def build_pyproject(self):
                 }
             )
 
-            req_commands = {
-                'linux': [
-                    'yum install epel-release lz4 lz4-devel -y',
-                ],
-                'windows': [
-                    'choco install lz4 -y',
-                ],
-                'macos': [
-                    'brew install lz4',
-                ],
+            # Native build dependencies are project-specific. Older xcookie
+            # versions inserted lz4 install commands into every binary
+            # project's cibuildwheel config, even when lz4 was not used.
+            # Remove only those exact legacy commands on regeneration. Any
+            # other project-authored before-all hook must be left intact.
+            legacy_before_all = {
+                'linux': 'yum install epel-release lz4 lz4-devel -y',
+                'windows': 'choco install lz4 -y',
+                'macos': 'brew install lz4',
             }
-            for plat in req_commands.keys():
-                cmd = ' && '.join(req_commands[plat])
-                cibw[plat]['before-all'] = cmd
+            for platform, legacy_command in legacy_before_all.items():
+                platform_config = cibw.get(platform, {})
+                if platform_config.get('before-all') == legacy_command:
+                    del platform_config['before-all']
+                    if not platform_config:
+                        del cibw[platform]
 
     else:
         build_system_requires = list(
@@ -554,6 +556,30 @@ def build_pyproject(self):
         )
 
     use_pyproject_requirements = self.config.get('use_pyproject_requirements')
+
+    if (
+        self.config['use_uv']
+        and not use_setup_py
+        and not foreign_binpy_backend
+        and not use_pyproject_requirements
+    ):
+        # setuptools reads dependencies from requirements/*.txt, but uv's
+        # default cache key only watches pyproject.toml, setup.py, setup.cfg,
+        # and the presence of src/. Changes to requirements files would
+        # otherwise reuse outdated metadata during `uv lock`.
+        # An explicitly authored cache-keys configuration takes precedence.
+        pyproj_config['tool']['uv'].setdefault(
+            'cache-keys',
+            [
+                {'file': 'pyproject.toml'},
+                {'file': 'setup.py'},
+                {'file': 'setup.cfg'},
+                {'dir': 'src'},
+                {'file': 'requirements/*.txt'},
+                {'file': self._readme_fpath().name},
+                {'file': (self.rel_mod_dpath / '__init__.py').as_posix()},
+            ],
+        )
 
     if not use_setup_py and not foreign_binpy_backend:
         project_block = pyproj_config['project']
@@ -715,7 +741,10 @@ def build_pyproject(self):
             # because ``all`` is meant for end users pulling in optional runtime
             # features. The loose/strict distinction is handled by lock-file
             # constraints in CI, so there is intentionally no ``all-strict``.
-            DEV_EXTRAS = {'tests', 'docs', 'linting'}
+            # Build tooling belongs in its own opt-in extra, not in the
+            # end-user 'all' extra. This also avoids dragging tool-specific
+            # host-Python constraints into runtime dependency resolution.
+            DEV_EXTRAS = {'tests', 'docs', 'linting', 'build'}
             all_extra_names = [
                 name
                 for name in extras
