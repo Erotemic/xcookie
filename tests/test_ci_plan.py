@@ -1,3 +1,7 @@
+from dataclasses import replace
+
+import pytest
+
 from xcookie.builders import ci_model, ci_plan
 from xcookie.main import TemplateApplier, XCookieConfig
 
@@ -165,6 +169,40 @@ def test_artifact_test_cases_preserve_github_minimal_loose_platform_reduction(
     )
 
 
+@pytest.mark.parametrize('use_pyproject_requirements', [False, True])
+def test_github_linux_arm_runner_kept_distinct_from_x86(
+    tmp_path, use_pyproject_requirements
+):
+    # Both native runners have (logical_os='linux', arch='auto'), but they
+    # produce different wheel artifacts. Legacy requirements must not raise
+    # a duplicate-job assertion, and pyproject requirements must not silently
+    # dedupe away ARM coverage.
+    if use_pyproject_requirements:
+        (tmp_path / 'pyproject.toml').write_text(
+            '[project]\nname = "demo-pkg"\nversion = "0.0.0"\n'
+            '[project.optional-dependencies]\ntests = []\noptional = []\n'
+        )
+    self = _make_applier(
+        tmp_path,
+        tags=['github', 'binpy', 'binpy-ubuntu-arm'],
+        use_setup_py=not use_pyproject_requirements,
+        use_pyproject_requirements=use_pyproject_requirements,
+        min_python='3.10',
+    )
+    cases = ci_model.make_artifact_test_cases(self, provider='github')
+    assert len({case.key for case in cases}) == len(cases)
+    full_loose_315 = [
+        case
+        for case in cases
+        if case.variant.key == 'full-loose'
+        and case.python_version == '3.15'
+    ]
+    assert {
+        case.platform.github_os for case in full_loose_315
+    } >= {'ubuntu-latest', 'ubuntu-24.04-arm'}
+    assert len({case.key for case in full_loose_315}) == len(full_loose_315)
+
+
 def test_github_pypy_cases_use_minimal_loose_extras(tmp_path):
     self = _make_applier(
         tmp_path, tags=['github', 'purepy'], min_python='3.10'
@@ -298,42 +336,32 @@ def test_github_allow_failure_rules_mark_matching_cases_experimental(tmp_path):
     )
 
 
-def test_prerelease_python_policy_defaults_to_allow_failure(tmp_path):
+def test_python_315_stable_cases_are_blocking_by_default(tmp_path):
     self = _make_applier(tmp_path, tags=['github', 'purepy'])
     cases = ci_model.make_artifact_test_cases(self, provider='github')
-    prerelease_cases = [
-        case for case in cases if case.python_version == '3.15'
-    ]
-    stable_cases = [case for case in cases if case.python_version != '3.15']
-    assert prerelease_cases
-    assert stable_cases
-    assert all(case.allow_failure for case in prerelease_cases)
-    assert all(not case.allow_failure for case in stable_cases)
-
-
-def test_prerelease_python_policy_strict_is_blocking(tmp_path):
-    self = _make_applier(
-        tmp_path,
-        tags=['github', 'purepy'],
-        ci_prerelease_python_policy='strict',
+    cases_315 = [case for case in cases if case.python_version == '3.15']
+    assert cases_315
+    assert all(not case.allow_failure for case in cases_315)
+    assert all(
+        case.github_matrix_item()['allow-prereleases'] == 'false'
+        for case in cases_315
     )
-    cases = ci_model.make_artifact_test_cases(self, provider='github')
-    prerelease_cases = [
-        case for case in cases if case.python_version == '3.15'
-    ]
-    assert prerelease_cases
-    assert all(not case.allow_failure for case in prerelease_cases)
 
 
-def test_prerelease_python_policy_skip_omits_prerelease_cases(tmp_path):
-    self = _make_applier(
-        tmp_path,
-        tags=['github', 'purepy'],
-        ci_prerelease_python_policy='skip',
-    )
-    cases = ci_model.make_artifact_test_cases(self, provider='github')
-    assert cases
-    assert all(case.python_version != '3.15' for case in cases)
+def test_prerelease_policy_applies_to_explicit_future_preview(tmp_path):
+    self = _make_applier(tmp_path, tags=['github', 'purepy'])
+    stable = ci_model.make_artifact_test_cases(self, provider='github')[0]
+    preview = replace(stable, python_version='3.16.0rc1')
+    for policy, expected in [
+        ('allow-failure', [False, True]),
+        ('strict', [False, False]),
+        ('skip', [False]),
+    ]:
+        self.config['ci_prerelease_python_policy'] = policy
+        selected = ci_model._apply_prerelease_python_policy(
+            self, [stable, preview]
+        )
+        assert [case.allow_failure for case in selected] == expected
 
 
 def test_typecheck_install_extras_are_configurable(tmp_path):

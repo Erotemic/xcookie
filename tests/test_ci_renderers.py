@@ -1,3 +1,5 @@
+import pytest
+
 from xcookie.builders import ci_model, common_ci
 from xcookie.builders.action_versions import ACTION_VERSIONS
 from xcookie.main import TemplateApplier, XCookieConfig
@@ -62,8 +64,8 @@ def test_github_purepy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert 'concurrency:' in text
     assert 'cancel-in-progress: true' in text
     assert '3.15' in text
-    assert 'allow-prereleases:' in text
-    assert 'check-latest:' in text
+    assert 'allow-prereleases:' not in text
+    assert 'check-latest:' not in text
     assert 'Prioritized MSVC linker directory:' in text
     assert 'command -v cl.exe' in text
     assert 'VSCMD_ARG_HOST_ARCH' not in text
@@ -87,36 +89,12 @@ def test_github_binpy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert 'refs/heads/release' not in text
     assert 'concurrency:' in text
     assert 'cancel-in-progress: true' in text
-    assert 'CIBW_ENABLE: cpython-prerelease' in text
+    assert 'CIBW_ENABLE: cpython-prerelease' not in text
     cibw_version = ACTION_VERSIONS['pypa/cibuildwheel']
     assert f'pypa/cibuildwheel@{cibw_version}' in text
 
 
-def _assert_all_setup_python_steps_allow_prereleases(text):
-    lines = text.splitlines()
-    setup_blocks = []
-    for index, line in enumerate(lines):
-        if 'uses: actions/setup-python@' not in line:
-            continue
-        uses_indent = len(line) - len(line.lstrip())
-        block = [line]
-        for candidate in lines[index + 1 :]:
-            stripped = candidate.strip()
-            indent = len(candidate) - len(candidate.lstrip())
-            if stripped and indent < uses_indent:
-                break
-            block.append(candidate)
-        setup_blocks.append('\n'.join(block))
-
-    assert setup_blocks
-    for block in setup_blocks:
-        assert 'allow-prereleases:' in block
-        assert 'check-latest:' in block
-        assert 'allow-prereleases: false' not in block
-        assert 'check-latest: false' not in block
-
-
-def test_github_only_prerelease_python_uses_it_as_main(tmp_path):
+def test_github_only_python_315_uses_stable_setup(tmp_path):
     self = _make_applier(
         tmp_path,
         tags=['github', 'purepy'],
@@ -126,13 +104,15 @@ def test_github_only_prerelease_python_uses_it_as_main(tmp_path):
     tests_text = self.build_github_actions_tests()
     assert 'Set up Python max' not in tests_text
     assert '3.15' in tests_text
-    _assert_all_setup_python_steps_allow_prereleases(tests_text)
+    assert 'allow-prereleases:' not in tests_text
+    assert 'check-latest:' not in tests_text
 
     release_text = self.build_github_actions_release()
-    _assert_all_setup_python_steps_allow_prereleases(release_text)
+    assert 'allow-prereleases:' not in release_text
+    assert 'check-latest:' not in release_text
 
 
-def test_gitlab_315_uses_prerelease_docker_image(tmp_path):
+def test_gitlab_315_uses_stable_docker_image(tmp_path):
     self = _make_applier(
         tmp_path,
         tags=['gitlab', 'purepy'],
@@ -140,7 +120,8 @@ def test_gitlab_315_uses_prerelease_docker_image(tmp_path):
         max_python='3.15',
     )
     text = self.build_gitlab_ci()
-    assert 'python:3.15-rc' in text
+    assert 'python:3.15' in text
+    assert 'python:3.15-rc' not in text
 
 
 def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
@@ -407,61 +388,27 @@ def test_github_typecheck_extra_paths_are_rendered(tmp_path):
     assert f'ty check {expected_targets}' in text
 
 
-def test_gitlab_prerelease_python_policy_defaults_to_allow_failure(tmp_path):
-    from xcookie.util_yaml import Yaml
-
-    self = _make_applier(tmp_path, tags=['gitlab', 'purepy'], min_python='3.10')
-    body = Yaml.loads(self.build_gitlab_ci())
-    prerelease_jobs = {
-        key: job
-        for key, job in body.items()
-        if key.startswith('test/') and '/cp315-' in key
-    }
-    stable_jobs = {
-        key: job
-        for key, job in body.items()
-        if key.startswith('test/')
-        and '/cp315-' not in key
-        and not key.startswith('test/sdist/')
-    }
-    assert prerelease_jobs
-    assert stable_jobs
-    assert all(
-        job.get('allow_failure') is True
-        for job in prerelease_jobs.values()
-    )
-    assert all('allow_failure' not in job for job in stable_jobs.values())
-
-
-def test_gitlab_prerelease_python_policy_strict(tmp_path):
+@pytest.mark.parametrize('policy', ['allow-failure', 'strict', 'skip'])
+def test_gitlab_python_315_stays_stable_across_prerelease_policies(
+    tmp_path, policy
+):
     from xcookie.util_yaml import Yaml
 
     self = _make_applier(
         tmp_path,
         tags=['gitlab', 'purepy'],
         min_python='3.10',
-        ci_prerelease_python_policy='strict',
+        ci_prerelease_python_policy=policy,
     )
     body = Yaml.loads(self.build_gitlab_ci())
-    prerelease_jobs = {
+    jobs_315 = {
         key: job
         for key, job in body.items()
         if key.startswith('test/') and '/cp315-' in key
     }
-    assert prerelease_jobs
-    assert all('allow_failure' not in job for job in prerelease_jobs.values())
-
-
-def test_gitlab_prerelease_python_policy_skip(tmp_path):
-    self = _make_applier(
-        tmp_path,
-        tags=['gitlab', 'purepy'],
-        min_python='3.10',
-        ci_prerelease_python_policy='skip',
-    )
-    text = self.build_gitlab_ci()
-    assert '/cp315-' not in text
-    assert 'python:3.15-rc' not in text
+    assert jobs_315
+    assert all('allow_failure' not in job for job in jobs_315.values())
+    assert all(job['image'] == 'python:3.15' for job in jobs_315.values())
 
 
 def _write_workspace_demo(tmp_path):

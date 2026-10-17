@@ -1,9 +1,12 @@
 from xcookie.constants import is_prerelease_python_version
 
 
-def test_python_315_is_prerelease():
-    assert is_prerelease_python_version('3.15')
+def test_python_315_is_stable_but_explicit_preview_is_prerelease():
+    assert not is_prerelease_python_version('3.15')
+    assert not is_prerelease_python_version('3.15.0')
     assert is_prerelease_python_version('3.15.0-beta.4')
+    assert is_prerelease_python_version('3.16.0rc1')
+    assert is_prerelease_python_version('3.16.0.dev1')
     assert not is_prerelease_python_version('3.14')
     assert not is_prerelease_python_version('999.0')
 

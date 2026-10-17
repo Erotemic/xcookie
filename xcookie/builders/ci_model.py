@@ -55,12 +55,15 @@ class ArtifactTestCase:
     @property
     def key(
         self,
-    ) -> tuple[str, str, str, str, str, str | None, str | None, bool]:
+    ) -> tuple[str, str, CIPlatform, str, str | None, str | None, bool]:
+        # CIPlatform is a frozen value object: its identity includes the
+        # concrete provider runner. In particular, ubuntu-latest and
+        # ubuntu-24.04-arm are both logical Linux with arch='auto', but
+        # execute different jobs and must not collapse into one test case.
         return (
             self.variant.key,
             self.python_version,
-            self.platform.logical_os,
-            self.platform.arch,
+            self.platform,
             self.install_extras,
             self.lock_requirements if self.use_lockfile else None,
             self.gdal_requirement_txt,
@@ -299,13 +302,13 @@ def _apply_prerelease_python_policy(
 
 
 def _dedupe_cases(cases: list[ArtifactTestCase]) -> list[ArtifactTestCase]:
-    seen: set[str] = set()
+    seen: set[tuple] = set()
     deduped = []
     for case in cases:
-        h = ub.hash_data(case.key)
-        if h in seen:
+        key = case.key
+        if key in seen:
             continue
-        seen.add(h)
+        seen.add(key)
         deduped.append(case)
     return deduped
 

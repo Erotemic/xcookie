@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import Dict, List
 
+from packaging.version import InvalidVersion, Version
+
 
 class PrereleasePythonPolicy(str, Enum):
     """Policy for unreleased CPython interpreter jobs in test CI."""
@@ -29,9 +31,7 @@ KNOWN_PYTHON_VERSIONS: List[str] = [
     '3.15',
 ]
 
-DEV_PYTHON_VERSIONS: List[str] = [
-    '3.15',
-]
+DEV_PYTHON_VERSIONS: List[str] = []
 
 # The major.minor PyPy versions that have been released and that GitHub Actions
 # / pypy.org currently distribute. PyPy tracks CPython compatibility, so each
@@ -48,7 +48,7 @@ KNOWN_PYPY_VERSIONS: List[str] = [
 
 
 KNOWN_CPYTHON_DOCKER_IMAGES: Dict[str, str] = {
-    'cp315': 'python:3.15-rc',
+    'cp315': 'python:3.15',
     'cp314': 'python:3.14',
     'cp313': 'python:3.13',
     'cp312': 'python:3.12',
@@ -71,7 +71,7 @@ KNOWN_PYTHON_VERSION_INFO: List[dict] = [
         'version': '3.15',
         'end_of_life': '2031-10',
         'github_action_version': '3.15',
-        'is_prerelease': True,
+        'is_prerelease': False,
     },
     {
         'version': '3.14',
@@ -94,7 +94,17 @@ KNOWN_PYTHON_VERSION_INFO: List[dict] = [
 
 
 def is_prerelease_python_version(version: str) -> bool:
-    """Return whether a configured CPython line is still a prerelease."""
+    """Return whether the configured Python version is a prerelease.
+
+    Explicit alpha/beta/RC/dev versions remain prereleases even after the
+    corresponding major.minor Python series has shipped a stable release.
+    """
+    try:
+        parsed = Version(str(version))
+    except InvalidVersion:
+        parsed = None
+    if parsed is not None and (parsed.is_prerelease or parsed.is_devrelease):
+        return True
     version_parts = str(version).split('.')
     version_key = '.'.join(version_parts[:2])
     for info in KNOWN_PYTHON_VERSION_INFO:
