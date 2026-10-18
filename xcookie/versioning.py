@@ -181,6 +181,63 @@ def _candidate_module_paths(
     return list(ub.oset(candidates))
 
 
+
+def _find_legacy_setup_version_source(repodir: ub.Path) -> VersionSource | None:
+    """Recognize the static ``setup.py`` version pattern used by line_profiler.
+
+    Its ``VERSION = parse_version(INIT_PATH)`` reads the ``__version__``
+    assignment in a named Python source file. Inspect the AST rather than
+    executing setup.py or importing the package.
+    """
+    setup_path = repodir / 'setup.py'
+    if not setup_path.is_file():
+        return None
+    try:
+        tree = ast.parse(setup_path.read_text())
+    except (OSError, SyntaxError):
+        return None
+
+    init_path = None
+    uses_init_version = False
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        if target.id == 'INIT_PATH':
+            try:
+                init_path = ast.literal_eval(statement.value)
+            except (ValueError, TypeError):
+                continue
+        if target.id == 'VERSION':
+            call = statement.value
+            uses_init_version = (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and call.func.id == 'parse_version'
+                and len(call.args) == 1
+                and isinstance(call.args[0], ast.Name)
+                and call.args[0].id == 'INIT_PATH'
+                and not call.keywords
+            )
+
+    if not uses_init_version or not isinstance(init_path, str):
+        return None
+    candidate = (repodir / init_path).resolve()
+    if not candidate.is_relative_to(repodir.resolve()) or not candidate.is_file():
+        return None
+    version = _parse_python_assignment(candidate, '__version__')
+    if version is None:
+        return None
+    return VersionSource(
+        path=candidate,
+        kind='python',
+        version=version,
+        variable='__version__',
+    )
+
+
 def find_version_source(
     repodir: str | ub.Path,
     data: dict | None = None,
@@ -274,10 +331,15 @@ def find_version_source(
                 )
             return None
 
+    legacy_source = _find_legacy_setup_version_source(repodir)
+    if legacy_source is not None:
+        return legacy_source
+
     if required:
         raise RuntimeError(
             'Could not find an editable package version. Expected '
-            '[project].version or [tool.setuptools.dynamic].version.attr/file.'
+            '[project].version, [tool.setuptools.dynamic].version.attr/file, '
+            'or a recognized static setup.py version source.'
         )
     return None
 
@@ -386,6 +448,84 @@ def update_changelog_for_bump(
 
     new_heading = f'## Version {next_version} - Unreleased\n\n\n'
     lines.insert(current_index, new_heading)
+    return ''.join(lines)
+
+
+def update_rst_changelog_for_bump(
+    text: str,
+    current_version: str,
+    next_version: str,
+) -> str:
+    """Advance an underlined-version reStructuredText changelog.
+
+    Unlike xcookie's Markdown changelog, legacy RST changelogs such as
+    line_profiler's do not mark releases explicitly. If their first entry is
+    *ahead* of the package version, treat it as an existing draft: leave it
+    alone when it already matches the target, or retitle it for a larger bump
+    while keeping its notes. Otherwise prepend a new empty entry.
+    """
+    lines = text.splitlines(keepends=True)
+    headings = []
+    for index in range(len(lines) - 1):
+        title = lines[index].rstrip('\r\n')
+        if not re.fullmatch(r'\d+(?:\.\d+)+[a-zA-Z0-9.+-]*', title):
+            continue
+        try:
+            version = Version(title)
+        except ValueError:
+            continue
+        underline = lines[index + 1].rstrip('\r\n')
+        if (
+            not underline
+            or underline[0] not in '-~^=+*#'
+            or underline != underline[0] * len(underline)
+            or len(underline) < len(title)
+        ):
+            continue
+        headings.append((index, version, underline[0], len(underline)))
+
+    if not headings:
+        raise RuntimeError('Could not find any version headings in CHANGELOG.rst')
+
+    first_index, first_version, underline_char, underline_width = headings[0]
+    current = Version(current_version)
+    target = Version(next_version)
+    if any(version == target for _, version, _, _ in headings[1:]):
+        raise RuntimeError(f'CHANGELOG.rst already contains version {next_version}')
+
+    newline = '\r\n' if lines[first_index].endswith('\r\n') else '\n'
+    if first_version > current:
+        if first_version > target:
+            raise RuntimeError(
+                'The first changelog version is newer than the requested '
+                f'bump: package={current}, changelog={first_version}, '
+                f'target={target}'
+            )
+        if any(version > current for _, version, _, _ in headings[1:]):
+            raise RuntimeError(
+                'CHANGELOG.rst has multiple entries newer than the package '
+                f'version {current}; cannot identify the draft section'
+            )
+        if first_version == target:
+            return text
+        # Retitle the already-started development notes, not past releases.
+        lines[first_index] = next_version + newline
+        lines[first_index + 1] = (
+            underline_char * max(underline_width, len(next_version)) + newline
+        )
+    else:
+        if any(version == current for _, version, _, _ in headings[1:]):
+            raise RuntimeError(
+                'The current package version appears in CHANGELOG.rst but '
+                f'is not its first entry: package={current}'
+            )
+        lines.insert(
+            first_index,
+            next_version
+            + newline
+            + underline_char * max(underline_width, len(next_version))
+            + newline * 2,
+        )
     return ''.join(lines)
 
 
@@ -563,6 +703,68 @@ def _plan_local_version_mirror_edits(
                 )
             )
             seen_paths.add(path.resolve())
+
+    # Even when pyproject.toml supplies the version, legacy setup.py may
+    # still read a separate source file to determine the wheel version.
+    # Treat that source as a required mirror, not an independent package.
+    legacy_source = _find_legacy_setup_version_source(repodir)
+    if legacy_source is not None and legacy_source.path.resolve() not in seen_paths:
+        if legacy_source.version != source.version:
+            raise RuntimeError(
+                'setup.py package version does not match the authoritative '
+                f'version: setup.py={legacy_source.version}, '
+                f'authoritative={source.version}'
+            )
+        additional.append(
+            VersionTextEdit(
+                path=legacy_source.path,
+                text=legacy_source.updated_text(next_version),
+            )
+        )
+        seen_paths.add(legacy_source.path.resolve())
+
+    # Script entry points can also carry a copy of the package version.
+    entry_points = xcookie_config.get('entry_points', {}) or {}
+    console_scripts = (
+        entry_points.get('console_scripts', [])
+        if isinstance(entry_points, dict)
+        else []
+    ) or []
+    if isinstance(console_scripts, str):
+        console_scripts = [console_scripts]
+    for script in console_scripts:
+        if not isinstance(script, str) or '=' not in script:
+            continue
+        module_spec = script.partition('=')[2].strip().partition(':')[0]
+        if not re.fullmatch(r'[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*', module_spec):
+            continue
+        matching_paths = [
+            path
+            for path in _candidate_module_paths(repodir, data, module_spec)
+            if path.is_file()
+            and path.resolve() not in seen_paths
+            and _parse_python_assignment(path, '__version__') == source.version
+        ]
+        if len(matching_paths) > 1:
+            raise RuntimeError(
+                f'Multiple version mirrors match script {script!r}: '
+                f'{matching_paths!r}'
+            )
+        if matching_paths:
+            mirror_path = matching_paths[0]
+            mirror_source = VersionSource(
+                path=mirror_path,
+                kind='python',
+                version=source.version,
+                variable='__version__',
+            )
+            additional.append(
+                VersionTextEdit(
+                    path=mirror_path,
+                    text=mirror_source.updated_text(next_version),
+                )
+            )
+            seen_paths.add(mirror_path.resolve())
 
     maturin = tool.get('maturin', {}) or {}
     manifest_path = maturin.get('manifest-path')
@@ -813,11 +1015,20 @@ class VersionBumper:
         """Validate and construct the coordinated bump before writing files."""
         source = self.find_version_source()
         next_version = self.resolve_next_version(source.version, target)
-        changelog_path = self.repodir / 'CHANGELOG.md'
-        if not changelog_path.exists():
+        changelog_paths = [
+            self.repodir / name for name in ('CHANGELOG.md', 'CHANGELOG.rst')
+            if (self.repodir / name).is_file()
+        ]
+        if not changelog_paths:
             raise RuntimeError(
-                f'Cannot bump version: {changelog_path} does not exist'
+                'Cannot bump version: expected CHANGELOG.md or CHANGELOG.rst'
             )
+        if len(changelog_paths) > 1:
+            raise RuntimeError(
+                'Cannot bump version: both CHANGELOG.md and CHANGELOG.rst '
+                'exist; select a single authoritative changelog'
+            )
+        changelog_path = changelog_paths[0]
         if release_date is None:
             release_date = datetime_mod.date.today()
         version_text = source.updated_text(next_version)
@@ -833,12 +1044,17 @@ class VersionBumper:
             raise RuntimeError(
                 'A version bump planned multiple edits for the same file'
             )
-        changelog_text = update_changelog_for_bump(
-            changelog_path.read_text(),
-            source.version,
-            next_version,
-            release_date,
-        )
+        if changelog_path.suffix == '.rst':
+            changelog_text = update_rst_changelog_for_bump(
+                changelog_path.read_text(), source.version, next_version
+            )
+        else:
+            changelog_text = update_changelog_for_bump(
+                changelog_path.read_text(),
+                source.version,
+                next_version,
+                release_date,
+            )
         return VersionBumpPlan(
             current_version=source.version,
             next_version=next_version,

@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## Version 0.5.1 - Unreleased
 
 ### Added
+* ``xcookie bump`` now supports version-underlined ``CHANGELOG.rst`` files,
+  including carrying existing draft notes forward when a release target changes.
+* Legacy ``setup.py`` projects that use ``VERSION = parse_version(INIT_PATH)``
+  can now bump their static version source without importing package code.
 * Added first-class Python workspace members for same-repository distributions.
   GitHub CI builds and tests each member in isolation, root jobs install local
   members only when the root declares them as dependencies, and

@@ -67,15 +67,22 @@ The top level CLI is command-oriented:
 Run ``xcookie generate --help`` for the project-generation options.
 
 Version bumps are a separate maintenance command. They update the authoritative
-package version and roll ``CHANGELOG.md`` from the current release into the next
-``Unreleased`` section::
+package version and update ``CHANGELOG.md`` or an existing
+``CHANGELOG.rst``. Markdown changelogs start a new ``Unreleased`` section;
+RST changelogs preserve an already-started draft section when changing its
+planned version::
 
     xcookie bump              # patch, by default
     xcookie bump patch
     xcookie bump minor
     xcookie bump major
     xcookie bump 2.0.0        # explicit target version
+    xcookie bump --target minor --branch  # create dev/<new-version>
 
+Legacy ``setup.py`` projects with a static
+``VERSION = parse_version(INIT_PATH)`` declaration are supported as well.
+Matching package and configured console-script ``__version__`` copies are
+updated together.
 
 Invocations to create a new github repo:
 
