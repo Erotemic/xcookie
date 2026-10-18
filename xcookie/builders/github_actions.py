@@ -2408,6 +2408,34 @@ def build_binpy_wheels_release_job(self):
     return job
 
 
+def _wheel_artifact_build_runner(platform, build_runners):
+    """Find the wheel-producing runner for a GitHub artifact test case.
+
+    Cibuildwheel's Windows ARM64 wheels come from the standard Windows build
+    runner, even though their tests execute on the native ARM64 runner.
+    The same distinction applies to older-Python test runner substitutions.
+    """
+    test_runner = platform.github_os
+    if test_runner in build_runners:
+        return test_runner
+
+    # Only use a different build runner when exactly one builder targets the
+    # same OS family. Ambiguous or unsupported mappings should fail during
+    # generation, not later with an unexplained missing artifact.
+    build_candidates = [
+        runner
+        for runner in build_runners
+        if ci_model._logical_os_from_github_runner(runner)
+        == platform.logical_os
+    ]
+    if len(build_candidates) == 1:
+        return build_candidates[0]
+    raise ValueError(
+        f'Cannot identify wheel artifact builder for {test_runner!r}: '
+        f'candidates={build_candidates!r}, builders={build_runners!r}'
+    )
+
+
 def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     if plan is None:
         plan = common_ci.make_ci_plan(self)
@@ -2416,6 +2444,17 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         self, plan=plan, provider='github'
     )
     include = [case.github_matrix_item() for case in cases]
+    if 'binpy' in self.tags:
+        # Native test runners need not be the runners which built the wheels.
+        # In particular, cibuildwheel cross-compiles Windows ARM64 on
+        # windows-latest, but tests those wheels on windows-11-arm.  Give each
+        # test case the build runner's artifact identity separately from its
+        # test runner identity.
+        build_runners = common_ci.get_supported_platform_info(self)['os_list']
+        for case, matrix_item in zip(cases, include):
+            matrix_item['wheel-artifact-os'] = _wheel_artifact_build_runner(
+                case.platform, build_runners
+            )
     has_allow_failure = any(case.allow_failure for case in cases)
 
     # Note: this job used to be guarded by
@@ -2508,7 +2547,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
         download_wheel_config = {
             'name': 'Download wheel for this platform',
             'with': {
-                'name': 'wheels-${{ matrix.os }}-${{ matrix.arch }}',
+                'name': 'wheels-${{ matrix.wheel-artifact-os }}-${{ matrix.arch }}',
                 'path': 'wheelhouse',
             },
         }
