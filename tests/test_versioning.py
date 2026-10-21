@@ -157,6 +157,104 @@ def test_bump_normalizes_legacy_current_changelog_heading(tmp_path):
     assert '## Version 2.3.0 - Released 2026-08-23' in changelog
 
 
+@pytest.mark.parametrize(
+    ('current_heading', 'expected_prefix'),
+    [
+        ('## Version: 1.3.0 - Unreleased', '## Version:'),
+        ('## Version: 1.3.0 - Released 2026-10-20', '## Version:'),
+        ('## Version: 1.3.0', '## Version:'),
+        ('## Version 1.3.0 - Unreleased', '## Version'),
+    ],
+)
+def test_bump_preserves_colon_heading_style(
+    tmp_path, current_heading, expected_prefix
+):
+    """The xcookie bump handles mkinit's long-standing `Version:` headings."""
+    _write_dynamic_attr_repo(tmp_path, version='1.3.0')
+    changelog = tmp_path / 'CHANGELOG.md'
+    changelog.write_text(
+        '# Changelog\n\n'
+        f'{current_heading}\n\n'
+        '### Changed\n* Changed packaging\n\n'
+        '## Version: 1.2.0 - Released 2025-12-02\n\n'
+        '### Fixed\n* Older fix\n'
+    )
+
+    plan = VersionBumper(tmp_path).bump(
+        'patch', release_date=datetime_mod.date(2026, 10, 21)
+    )
+
+    assert plan.current_version == '1.3.0'
+    assert plan.next_version == '1.3.1'
+    updated = changelog.read_text()
+    assert f'{expected_prefix} 1.3.1 - Unreleased' in updated
+    if 'Released' in current_heading:
+        assert current_heading in updated
+    else:
+        assert f'{expected_prefix} 1.3.0 - Released 2026-10-21' in updated
+    assert '* Changed packaging' in updated
+    assert '## Version: 1.2.0 - Released 2025-12-02' in updated
+    assert '* Older fix' in updated
+    assert updated.index('1.3.1') < updated.index('1.3.0')
+    assert "__version__ = '1.3.1'" in (
+        tmp_path / 'demo' / '__init__.py'
+    ).read_text()
+
+
+def test_bump_colon_heading_creates_branch(tmp_path):
+    """Regression for `xcookie bump --branch` on mkinit's changelog."""
+    _write_dynamic_attr_repo(tmp_path, version='1.3.0')
+    changelog = tmp_path / 'CHANGELOG.md'
+    changelog.write_text(
+        '# Changelog\n\n## Version: 1.3.0 - Unreleased\n\n'
+        '### Changed\n* Keep these release notes\n\n'
+        '## Version: 1.2.0 - Released 2025-12-02\n'
+    )
+    subprocess.run(['git', 'init', '-q'], cwd=tmp_path, check=True)
+    subprocess.run(
+        ['git', 'config', 'user.email', 'test@example.com'],
+        cwd=tmp_path, check=True,
+    )
+    subprocess.run(
+        ['git', 'config', 'user.name', 'XCookie Test'],
+        cwd=tmp_path, check=True,
+    )
+    subprocess.run(['git', 'add', '.'], cwd=tmp_path, check=True)
+    subprocess.run(
+        ['git', 'commit', '-qm', 'initial'], cwd=tmp_path, check=True
+    )
+
+    VersionBumper(tmp_path).bump(
+        'patch', branch=True, release_date=datetime_mod.date(2026, 10, 21)
+    )
+
+    branch = subprocess.run(
+        ['git', 'branch', '--show-current'],
+        cwd=tmp_path, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert branch == 'dev/1.3.1'
+    assert '## Version: 1.3.1 - Unreleased' in changelog.read_text()
+    assert '## Version: 1.3.0 - Released 2026-10-21' in changelog.read_text()
+    assert '* Keep these release notes' in changelog.read_text()
+
+
+def test_bump_colon_heading_rejects_duplicate_target_without_edits(tmp_path):
+    _write_dynamic_attr_repo(tmp_path, version='1.3.0')
+    changelog = tmp_path / 'CHANGELOG.md'
+    changelog.write_text(
+        '# Changelog\n\n'
+        '## Version: 1.3.1 - Unreleased\n\n'
+        '## Version: 1.3.0 - Unreleased\n'
+    )
+    before_version = (tmp_path / 'demo' / '__init__.py').read_text()
+    before_changelog = changelog.read_text()
+
+    with pytest.raises(RuntimeError, match='already contains version 1.3.1'):
+        VersionBumper(tmp_path).bump('patch')
+    assert (tmp_path / 'demo' / '__init__.py').read_text() == before_version
+    assert changelog.read_text() == before_changelog
+
+
 def test_bump_can_create_version_branch(tmp_path):
     _write_dynamic_attr_repo(tmp_path)
     subprocess.run(['git', 'init', '-q'], cwd=tmp_path, check=True)

@@ -375,7 +375,7 @@ def update_changelog_for_bump(
     above it instead of requiring a manual changelog rewrite first.
     """
     heading_pattern = re.compile(
-        r'^##\s+\[?Version\s+'
+        r'^##\s+\[?Version(?P<colon>:?)\s+'
         r'(?P<version>[^\]\s]+)'
         r'\]?'
         r'(?P<tail>.*)$'
@@ -430,12 +430,18 @@ def update_changelog_for_bump(
         current_index = first_index
         status = None
 
+    # Preserve the leading heading style ("Version" vs "Version:") so that
+    # the next development section matches the project's existing changelog.
+    heading_prefix = (
+        '## Version:' if headings[0][1].group('colon') else '## Version'
+    )
+
     if status in {'Unreleased', ''}:
         newline = '\n' if lines[current_index].endswith('\n') else ''
         if lines[current_index].endswith('\r\n'):
             newline = '\r\n'
         lines[current_index] = (
-            f'## Version {current_version} - '
+            f'{heading_prefix} {current_version} - '
             f'Released {release_date.isoformat()}{newline}'
         )
     elif status is not None and not re.fullmatch(
@@ -446,7 +452,7 @@ def update_changelog_for_bump(
             f'Unreleased, blank, or Released YYYY-MM-DD, found {status!r}'
         )
 
-    new_heading = f'## Version {next_version} - Unreleased\n\n\n'
+    new_heading = f'{heading_prefix} {next_version} - Unreleased\n\n\n'
     lines.insert(current_index, new_heading)
     return ''.join(lines)
 
