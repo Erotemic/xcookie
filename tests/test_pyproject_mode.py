@@ -48,6 +48,11 @@ def test_use_setup_py_false_generates_pep621(tmp_path) -> None:
 
     package_data = pyproject_data['tool']['setuptools']['package-data']
     assert package_data['*'] == ['requirements/*.txt']
+    assert '--ignore-glob=setup.py' not in pyproject_data['tool']['pytest']['ini_options']['addopts']
+    assert '*/setup.py' not in pyproject_data['tool']['coverage']['report']['omit']
+    if 'uv' in pyproject_data['tool']:
+        cache_keys = pyproject_data['tool']['uv'].get('cache-keys', [])
+        assert {'file': 'setup.py'} not in cache_keys
 
 
 def test_typed_package_data_uses_inline_annotations(tmp_path) -> None:
@@ -933,8 +938,11 @@ def test_uv_exclude_newer_is_not_generated(tmp_path) -> None:
         if isinstance(pyproject_text, str)
         else pyproject_text
     )
-    assert 'uv' not in pyproject_data.get('tool', {})
-    assert 'exclude-newer' not in pyproject_text
+    uv_config = pyproject_data.get('tool', {}).get('uv', {})
+    assert 'exclude-newer' not in uv_config
+    cache_keys = uv_config.get('cache-keys', [])
+    assert {'file': 'requirements/*.txt'} in cache_keys
+    assert {'file': 'setup.py'} not in cache_keys
 
 
 def test_uv_exclude_newer_user_value_is_preserved(tmp_path) -> None:

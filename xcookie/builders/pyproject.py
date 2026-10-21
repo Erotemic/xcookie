@@ -498,8 +498,10 @@ def build_pyproject(self):
     if WITH_PYTEST_INI:
         xdoctest_style = self.config['xdoctest_style']
         pytest_ini_opts = pyproj_config['tool']['pytest']['ini_options']
+        setup_ignore = ' --ignore-glob=setup.py' if use_setup_py else ''
         pytest_ini_opts['addopts'] = (
-            f'-p no:doctest --xdoctest --xdoctest-style={xdoctest_style} --ignore-glob=setup.py --ignore-glob=dev --ignore-glob=docs'
+            f'-p no:doctest --xdoctest --xdoctest-style={xdoctest_style}'
+            f'{setup_ignore} --ignore-glob=dev --ignore-glob=docs'
         )
         pytest_ini_opts['norecursedirs'] = (
             '.git ignore build __pycache__ dev _skbuild docs'
@@ -546,6 +548,9 @@ def build_pyproject(self):
                 ).format(REPO_NAME=self.repo_name)
             )
         )
+        if not use_setup_py:
+            coverage_omit = pyproj_config['tool']['coverage']['report']['omit']
+            coverage_omit.remove('*/setup.py')
 
     pyproj_config['tool']['mypy']['ignore_missing_imports'] = True
 
@@ -572,7 +577,6 @@ def build_pyproject(self):
             'cache-keys',
             [
                 {'file': 'pyproject.toml'},
-                {'file': 'setup.py'},
                 {'file': 'setup.cfg'},
                 {'dir': 'src'},
                 {'file': 'requirements/*.txt'},
@@ -765,9 +769,16 @@ def build_pyproject(self):
                 if isinstance(previous_all_files, str):
                     previous_all_files = [previous_all_files]
                 if previous_all_files:
-                    all_file_set = set(all_files)
+                    # Respect an explicitly curated ``all`` extra, including
+                    # entries outside the generated runtime-only defaults.
+                    # Only retain paths belonging to known extras.
+                    available_files = {
+                        relpath
+                        for entry in optional_dynamic.values()
+                        for relpath in entry['file']
+                    }
                     stable_prefix = [
-                        f for f in previous_all_files if f in all_file_set
+                        f for f in previous_all_files if f in available_files
                     ]
                     all_files = list(
                         ub.oset(
