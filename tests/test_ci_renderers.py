@@ -53,6 +53,7 @@ def test_github_purepy_uses_shared_workflow_plan_and_test_cases(tmp_path):
     assert 'build_purepy_wheels:' in text
     assert 'test_purepy_wheels:' in text
     assert 'build_and_test_sdist:' in text
+    assert '"setuptools>=77"' in text
     assert 'matrix:' in text
     assert 'install-extras:' in text
     assert (
@@ -144,7 +145,7 @@ def test_gitlab_purepy_render_uses_artifact_test_cases(tmp_path):
     assert 'export LOCK_REQUIREMENTS="requirements/locks/tests.txt"' in text
     assert 'tests-strict' not in text
     assert 'runtime-strict' not in text
-    assert 'setuptools>=77' in text
+    assert '"setuptools>=77"' in text
 
 
 def test_gitlab_purepy_tests_share_one_wheel_build(tmp_path):

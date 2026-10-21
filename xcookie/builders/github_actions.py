@@ -925,7 +925,7 @@ def build_workspace_member_job(
     outdir = f'workspace_wheelhouse/{member.key}'
     build_commands = [
         f'{self.UPDATE_PIP}',
-        f'{self.PIP_INSTALL} setuptools>=77 wheel build twine',
+        f'{self.PIP_INSTALL} "setuptools>=77" wheel build twine',
         f'python -m build --sdist --wheel --outdir {outdir} ./{member.path}',
         f'python -m twine check {outdir}/*',
     ]
