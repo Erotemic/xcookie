@@ -116,7 +116,7 @@ overrides = [ { module = [
 
 [tool.ty]
 rules.unused-type-ignore-comment = "ignore"
-rules.unresolved-import = "ignore"
+rules.import-not-found = "ignore"
 src.exclude = []
 
 [tool.pytest]
