@@ -10,6 +10,8 @@ from typing import Literal
 
 import toml
 import ubelt as ub
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 
@@ -68,15 +70,15 @@ class VersionSource:
                     section = section_match.group(1)
                     continue
                 if section == 'project':
-                    match = pattern.match(line)
-                    if match:
-                        quote = match.group('quote')
+                    project_match = pattern.match(line)
+                    if project_match:
+                        quote = project_match.group('quote')
                         lines[index] = (
-                            match.group('prefix')
+                            project_match.group('prefix')
                             + quote
                             + new_version
                             + quote
-                            + match.group('suffix')
+                            + project_match.group('suffix')
                         )
                         replaced += 1
             if replaced != 1:
@@ -103,6 +105,14 @@ class VersionSource:
 
 
 @dataclasses.dataclass(frozen=True)
+class VersionTextEdit:
+    """One additional file edit coupled to a root version bump."""
+
+    path: ub.Path
+    text: str
+
+
+@dataclasses.dataclass(frozen=True)
 class VersionBumpPlan:
     """Resolved edits for one package-version bump."""
 
@@ -112,10 +122,13 @@ class VersionBumpPlan:
     changelog_path: ub.Path
     version_text: str
     changelog_text: str
+    additional_edits: tuple[VersionTextEdit, ...] = ()
 
     def apply(self) -> None:
         """Write the validated version and changelog edits."""
         self.version_source.path.write_text(self.version_text)
+        for edit in self.additional_edits:
+            edit.path.write_text(edit.text)
         self.changelog_path.write_text(self.changelog_text)
 
 
@@ -166,6 +179,63 @@ def _candidate_module_paths(
             ]
         )
     return list(ub.oset(candidates))
+
+
+
+def _find_legacy_setup_version_source(repodir: ub.Path) -> VersionSource | None:
+    """Recognize the static ``setup.py`` version pattern used by line_profiler.
+
+    Its ``VERSION = parse_version(INIT_PATH)`` reads the ``__version__``
+    assignment in a named Python source file. Inspect the AST rather than
+    executing setup.py or importing the package.
+    """
+    setup_path = repodir / 'setup.py'
+    if not setup_path.is_file():
+        return None
+    try:
+        tree = ast.parse(setup_path.read_text())
+    except (OSError, SyntaxError):
+        return None
+
+    init_path = None
+    uses_init_version = False
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        if target.id == 'INIT_PATH':
+            try:
+                init_path = ast.literal_eval(statement.value)
+            except (ValueError, TypeError):
+                continue
+        if target.id == 'VERSION':
+            call = statement.value
+            uses_init_version = (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and call.func.id == 'parse_version'
+                and len(call.args) == 1
+                and isinstance(call.args[0], ast.Name)
+                and call.args[0].id == 'INIT_PATH'
+                and not call.keywords
+            )
+
+    if not uses_init_version or not isinstance(init_path, str):
+        return None
+    candidate = (repodir / init_path).resolve()
+    if not candidate.is_relative_to(repodir.resolve()) or not candidate.is_file():
+        return None
+    version = _parse_python_assignment(candidate, '__version__')
+    if version is None:
+        return None
+    return VersionSource(
+        path=candidate,
+        kind='python',
+        version=version,
+        variable='__version__',
+    )
 
 
 def find_version_source(
@@ -261,10 +331,15 @@ def find_version_source(
                 )
             return None
 
+    legacy_source = _find_legacy_setup_version_source(repodir)
+    if legacy_source is not None:
+        return legacy_source
+
     if required:
         raise RuntimeError(
             'Could not find an editable package version. Expected '
-            '[project].version or [tool.setuptools.dynamic].version.attr/file.'
+            '[project].version, [tool.setuptools.dynamic].version.attr/file, '
+            'or a recognized static setup.py version source.'
         )
     return None
 
@@ -300,7 +375,7 @@ def update_changelog_for_bump(
     above it instead of requiring a manual changelog rewrite first.
     """
     heading_pattern = re.compile(
-        r'^##\s+\[?Version\s+'
+        r'^##\s+\[?Version(?P<colon>:?)\s+'
         r'(?P<version>[^\]\s]+)'
         r'\]?'
         r'(?P<tail>.*)$'
@@ -311,7 +386,7 @@ def update_changelog_for_bump(
         match = heading_pattern.match(line.rstrip('\r\n'))
         if match:
             tail = match.group('tail').strip()
-            status = tail[1:].strip() if tail.startswith('-') else tail
+            status = tail.lstrip('-').strip() if tail.startswith('-') else tail
             headings.append((index, match, status))
 
     if not headings:
@@ -355,12 +430,18 @@ def update_changelog_for_bump(
         current_index = first_index
         status = None
 
+    # Preserve the leading heading style ("Version" vs "Version:") so that
+    # the next development section matches the project's existing changelog.
+    heading_prefix = (
+        '## Version:' if headings[0][1].group('colon') else '## Version'
+    )
+
     if status in {'Unreleased', ''}:
         newline = '\n' if lines[current_index].endswith('\n') else ''
         if lines[current_index].endswith('\r\n'):
             newline = '\r\n'
         lines[current_index] = (
-            f'## Version {current_version} - '
+            f'{heading_prefix} {current_version} - '
             f'Released {release_date.isoformat()}{newline}'
         )
     elif status is not None and not re.fullmatch(
@@ -371,9 +452,502 @@ def update_changelog_for_bump(
             f'Unreleased, blank, or Released YYYY-MM-DD, found {status!r}'
         )
 
-    new_heading = f'## Version {next_version} - Unreleased\n\n\n'
+    new_heading = f'{heading_prefix} {next_version} - Unreleased\n\n\n'
     lines.insert(current_index, new_heading)
     return ''.join(lines)
+
+
+def update_rst_changelog_for_bump(
+    text: str,
+    current_version: str,
+    next_version: str,
+) -> str:
+    """Advance an underlined-version reStructuredText changelog.
+
+    Unlike xcookie's Markdown changelog, legacy RST changelogs such as
+    line_profiler's do not mark releases explicitly. If their first entry is
+    *ahead* of the package version, treat it as an existing draft: leave it
+    alone when it already matches the target, or retitle it for a larger bump
+    while keeping its notes. Otherwise prepend a new empty entry.
+    """
+    lines = text.splitlines(keepends=True)
+    headings = []
+    for index in range(len(lines) - 1):
+        title = lines[index].rstrip('\r\n')
+        if not re.fullmatch(r'\d+(?:\.\d+)+[a-zA-Z0-9.+-]*', title):
+            continue
+        try:
+            version = Version(title)
+        except ValueError:
+            continue
+        underline = lines[index + 1].rstrip('\r\n')
+        if (
+            not underline
+            or underline[0] not in '-~^=+*#'
+            or underline != underline[0] * len(underline)
+            or len(underline) < len(title)
+        ):
+            continue
+        headings.append((index, version, underline[0], len(underline)))
+
+    if not headings:
+        raise RuntimeError('Could not find any version headings in CHANGELOG.rst')
+
+    first_index, first_version, underline_char, underline_width = headings[0]
+    current = Version(current_version)
+    target = Version(next_version)
+    if any(version == target for _, version, _, _ in headings[1:]):
+        raise RuntimeError(f'CHANGELOG.rst already contains version {next_version}')
+
+    newline = '\r\n' if lines[first_index].endswith('\r\n') else '\n'
+    if first_version > current:
+        if first_version > target:
+            raise RuntimeError(
+                'The first changelog version is newer than the requested '
+                f'bump: package={current}, changelog={first_version}, '
+                f'target={target}'
+            )
+        if any(version > current for _, version, _, _ in headings[1:]):
+            raise RuntimeError(
+                'CHANGELOG.rst has multiple entries newer than the package '
+                f'version {current}; cannot identify the draft section'
+            )
+        if first_version == target:
+            return text
+        # Retitle the already-started development notes, not past releases.
+        lines[first_index] = next_version + newline
+        lines[first_index + 1] = (
+            underline_char * max(underline_width, len(next_version)) + newline
+        )
+    else:
+        if any(version == current for _, version, _, _ in headings[1:]):
+            raise RuntimeError(
+                'The current package version appears in CHANGELOG.rst but '
+                f'is not its first entry: package={current}'
+            )
+        lines.insert(
+            first_index,
+            next_version
+            + newline
+            + underline_char * max(underline_width, len(next_version))
+            + newline * 2,
+        )
+    return ''.join(lines)
+
+
+def _load_workspace_sync_config(repodir: ub.Path) -> tuple[bool, list[str], dict]:
+    pyproject_path = repodir / 'pyproject.toml'
+    if not pyproject_path.exists():
+        return False, [], {}
+    data = toml.loads(pyproject_path.read_text())
+    xcookie = data.get('tool', {}).get('xcookie', {}) or {}
+    sync = bool(xcookie.get('workspace_sync_versions', False))
+    members = xcookie.get('workspace_members', []) or []
+    if isinstance(members, str):
+        members = [members]
+    return sync, [str(item) for item in members], data
+
+
+def _find_exact_dependency_pins(
+    project_data: dict,
+    pkg_name: str,
+    version: str,
+) -> list[str]:
+    dependencies = project_data.get('project', {}).get('dependencies', []) or []
+    target_name = canonicalize_name(pkg_name)
+    matching_entries = []
+    for entry in dependencies:
+        if not isinstance(entry, str):
+            continue
+        try:
+            req = Requirement(entry)
+        except Exception:
+            continue
+        if canonicalize_name(req.name) != target_name:
+            continue
+        if str(req.specifier) == f'=={version}' and not req.marker:
+            matching_entries.append(entry)
+    return matching_entries
+
+
+def _replace_exact_dependency_pin(
+    text: str,
+    project_data: dict,
+    pkg_name: str,
+    current_version: str,
+    next_version: str,
+) -> str:
+    matching_entries = _find_exact_dependency_pins(
+        project_data,
+        pkg_name,
+        current_version,
+    )
+    if len(matching_entries) != 1:
+        raise RuntimeError(
+            f'workspace_sync_versions requires exactly one direct dependency '
+            f'pin {pkg_name}=={current_version}; found {matching_entries!r}'
+        )
+    old_entry = matching_entries[0]
+    new_entry = re.sub(
+        rf'=={re.escape(current_version)}$',
+        f'=={next_version}',
+        old_entry,
+    )
+    pattern = re.compile(
+        r'(?P<quote>[\"\'])' + re.escape(old_entry) + r'(?P=quote)'
+    )
+    matches = list(pattern.finditer(text))
+    if len(matches) != 1:
+        raise RuntimeError(
+            f'Expected exactly one textual dependency {old_entry!r} in '
+            f'pyproject.toml, found {len(matches)}'
+        )
+    match = matches[0]
+    quote = match.group('quote')
+    return text[: match.start()] + quote + new_entry + quote + text[match.end() :]
+
+
+def _updated_toml_section_version_text(
+    path: ub.Path,
+    *,
+    section_name: str,
+    current_version: str,
+    next_version: str,
+) -> str:
+    """Update exactly one ``version`` key in a named TOML section."""
+    text = path.read_text()
+    lines = text.splitlines(keepends=True)
+    section = None
+    replaced = 0
+    pattern = re.compile(
+        rf"^(?P<prefix>\s*version\s*=\s*)"
+        rf"(?P<quote>['\"]){re.escape(current_version)}(?P=quote)"
+        r"(?P<suffix>\s*(?:#.*)?(?:\r?\n)?)$"
+    )
+    for index, line in enumerate(lines):
+        section_match = re.match(r'^\s*\[([^]]+)\]\s*$', line.strip())
+        if section_match:
+            section = section_match.group(1)
+            continue
+        if section == section_name:
+            match = pattern.match(line)
+            if match:
+                quote = match.group('quote')
+                lines[index] = (
+                    match.group('prefix')
+                    + quote
+                    + next_version
+                    + quote
+                    + match.group('suffix')
+                )
+                replaced += 1
+    if replaced != 1:
+        raise RuntimeError(
+            f'Expected exactly one [{section_name}] version assignment equal '
+            f'to {current_version!r} in {path}, found {replaced}'
+        )
+    return ''.join(lines)
+
+
+def _plan_local_version_mirror_edits(
+    repodir: ub.Path,
+    source: VersionSource,
+    next_version: str,
+) -> tuple[VersionTextEdit, ...]:
+    """Synchronize recognized local mirrors that matched before the bump.
+
+    Static PEP 621 projects often duplicate their distribution version in a
+    package ``__version__`` and, for Maturin projects, in the Rust crate
+    manifest.  Treat those locations as mirrors only when they already equal
+    the authoritative version.  A deliberately independent version therefore
+    remains untouched.
+    """
+    pyproject_path = repodir / 'pyproject.toml'
+    if not pyproject_path.exists():
+        return tuple()
+    data = toml.loads(pyproject_path.read_text())
+    project = data.get('project', {}) or {}
+    tool = data.get('tool', {}) or {}
+    xcookie_config = tool.get('xcookie', {}) or {}
+
+    additional: list[VersionTextEdit] = []
+    seen_paths: set[ub.Path] = {source.path.resolve()}
+
+    module_name = xcookie_config.get('mod_name')
+    if not isinstance(module_name, str) or not module_name:
+        project_name = project.get('name')
+        if isinstance(project_name, str) and project_name:
+            module_name = project_name.replace('-', '_')
+        else:
+            module_name = None
+
+    if module_name is not None:
+        python_mirrors = []
+        for path in _candidate_module_paths(repodir, data, module_name):
+            if not path.exists() or path.resolve() in seen_paths:
+                continue
+            version = _parse_python_assignment(path, '__version__')
+            if version == source.version:
+                python_mirrors.append(path)
+        if len(python_mirrors) > 1:
+            raise RuntimeError(
+                'Multiple package __version__ mirrors match the authoritative '
+                f'version: {python_mirrors!r}'
+            )
+        if python_mirrors:
+            path = python_mirrors[0]
+            mirror_source = VersionSource(
+                path=path,
+                kind='python',
+                version=source.version,
+                variable='__version__',
+            )
+            additional.append(
+                VersionTextEdit(
+                    path=path,
+                    text=mirror_source.updated_text(next_version),
+                )
+            )
+            seen_paths.add(path.resolve())
+
+    # Even when pyproject.toml supplies the version, legacy setup.py may
+    # still read a separate source file to determine the wheel version.
+    # Treat that source as a required mirror, not an independent package.
+    legacy_source = _find_legacy_setup_version_source(repodir)
+    if legacy_source is not None and legacy_source.path.resolve() not in seen_paths:
+        if legacy_source.version != source.version:
+            raise RuntimeError(
+                'setup.py package version does not match the authoritative '
+                f'version: setup.py={legacy_source.version}, '
+                f'authoritative={source.version}'
+            )
+        additional.append(
+            VersionTextEdit(
+                path=legacy_source.path,
+                text=legacy_source.updated_text(next_version),
+            )
+        )
+        seen_paths.add(legacy_source.path.resolve())
+
+    # Script entry points can also carry a copy of the package version.
+    entry_points = xcookie_config.get('entry_points', {}) or {}
+    console_scripts = (
+        entry_points.get('console_scripts', [])
+        if isinstance(entry_points, dict)
+        else []
+    ) or []
+    if isinstance(console_scripts, str):
+        console_scripts = [console_scripts]
+    for script in console_scripts:
+        if not isinstance(script, str) or '=' not in script:
+            continue
+        module_spec = script.partition('=')[2].strip().partition(':')[0]
+        if not re.fullmatch(r'[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*', module_spec):
+            continue
+        matching_paths = [
+            path
+            for path in _candidate_module_paths(repodir, data, module_spec)
+            if path.is_file()
+            and path.resolve() not in seen_paths
+            and _parse_python_assignment(path, '__version__') == source.version
+        ]
+        if len(matching_paths) > 1:
+            raise RuntimeError(
+                f'Multiple version mirrors match script {script!r}: '
+                f'{matching_paths!r}'
+            )
+        if matching_paths:
+            mirror_path = matching_paths[0]
+            mirror_source = VersionSource(
+                path=mirror_path,
+                kind='python',
+                version=source.version,
+                variable='__version__',
+            )
+            additional.append(
+                VersionTextEdit(
+                    path=mirror_path,
+                    text=mirror_source.updated_text(next_version),
+                )
+            )
+            seen_paths.add(mirror_path.resolve())
+
+    maturin = tool.get('maturin', {}) or {}
+    manifest_path = maturin.get('manifest-path')
+    if isinstance(manifest_path, str) and manifest_path:
+        cargo_path = (repodir / manifest_path).resolve()
+        if cargo_path.exists() and cargo_path not in seen_paths:
+            cargo_data = toml.loads(cargo_path.read_text())
+            cargo_version = (cargo_data.get('package', {}) or {}).get('version')
+            if cargo_version == source.version:
+                additional.append(
+                    VersionTextEdit(
+                        path=cargo_path,
+                        text=_updated_toml_section_version_text(
+                            cargo_path,
+                            section_name='package',
+                            current_version=source.version,
+                            next_version=next_version,
+                        ),
+                    )
+                )
+                seen_paths.add(cargo_path)
+
+    return tuple(additional)
+
+
+def _plan_workspace_version_edits(
+    repodir: ub.Path,
+    source: VersionSource,
+    next_version: str,
+    version_text: str,
+) -> tuple[str, tuple[VersionTextEdit, ...]]:
+    sync, member_paths, root_data = _load_workspace_sync_config(repodir)
+    if not sync:
+        return version_text, tuple()
+    if not member_paths:
+        raise RuntimeError(
+            'workspace_sync_versions=true requires at least one workspace member'
+        )
+
+    root_pyproject_path = repodir / 'pyproject.toml'
+    root_project = root_data.get('project', {}) or {}
+    root_pkg_name = root_project.get('name')
+    if not isinstance(root_pkg_name, str) or not root_pkg_name:
+        raise RuntimeError(
+            'workspace_sync_versions requires the root [project].name'
+        )
+
+    root_pyproject_text = (
+        version_text
+        if source.path.resolve() == root_pyproject_path.resolve()
+        else root_pyproject_path.read_text()
+    )
+    additional: list[VersionTextEdit] = []
+    seen_paths: set[ub.Path] = set()
+    for relpath in member_paths:
+        member_dpath = (repodir / relpath).resolve()
+        member_pyproject = member_dpath / 'pyproject.toml'
+        if not member_pyproject.exists():
+            raise RuntimeError(
+                f'workspace member {relpath!r} has no pyproject.toml'
+            )
+        member_data = toml.loads(member_pyproject.read_text())
+        member_project = member_data.get('project', {}) or {}
+        member_pkg_name = member_project.get('name')
+        if not isinstance(member_pkg_name, str):
+            raise RuntimeError(
+                f'workspace member {relpath!r} requires [project].name'
+            )
+        member_source = find_version_source(
+            member_dpath, data=member_data, required=True
+        )
+        assert member_source is not None
+        if member_source.version != source.version:
+            raise RuntimeError(
+                f'workspace member {member_pkg_name!r} version '
+                f'{member_source.version} does not match root version '
+                f'{source.version}'
+            )
+        member_pyproject_text = member_pyproject.read_text()
+        root_pins = _find_exact_dependency_pins(
+            root_data,
+            member_pkg_name,
+            source.version,
+        )
+        member_pins = _find_exact_dependency_pins(
+            member_data,
+            root_pkg_name,
+            source.version,
+        )
+        if len(root_pins) + len(member_pins) != 1:
+            raise RuntimeError(
+                'workspace_sync_versions requires exactly one direct exact '
+                'dependency pin linking the root and workspace member; '
+                f'root->{member_pkg_name}={len(root_pins)}, '
+                f'{member_pkg_name}->{root_pkg_name}={len(member_pins)}'
+            )
+
+        root_pin_count = len(root_pins)
+        member_pin_count = len(member_pins)
+        if root_pin_count:
+            root_pyproject_text = _replace_exact_dependency_pin(
+                root_pyproject_text,
+                root_data,
+                member_pkg_name,
+                source.version,
+                next_version,
+            )
+        if member_pin_count:
+            member_pyproject_text = _replace_exact_dependency_pin(
+                member_pyproject_text,
+                member_data,
+                root_pkg_name,
+                source.version,
+                next_version,
+            )
+
+        member_version_text = member_source.updated_text(next_version)
+        if member_source.path.resolve() == member_pyproject.resolve():
+            # Apply the dependency pin update and version update to the same
+            # text without emitting two competing edits for pyproject.toml.
+            member_version_text = _replace_exact_dependency_pin(
+                member_version_text,
+                member_data,
+                root_pkg_name,
+                source.version,
+                next_version,
+            ) if member_pin_count else member_version_text
+            member_pyproject_text = member_version_text
+
+        member_edit = VersionTextEdit(
+            path=member_source.path,
+            text=member_version_text,
+        )
+        if member_edit.path.resolve() in seen_paths:
+            raise RuntimeError(
+                f'duplicate workspace version source: {member_edit.path}'
+            )
+        seen_paths.add(member_edit.path.resolve())
+        additional.append(member_edit)
+
+        if (
+            member_pin_count
+            and member_source.path.resolve() != member_pyproject.resolve()
+        ):
+            if member_pyproject.resolve() in seen_paths:
+                raise RuntimeError(
+                    f'duplicate workspace version source: {member_pyproject}'
+                )
+            seen_paths.add(member_pyproject.resolve())
+            additional.append(
+                VersionTextEdit(
+                    path=member_pyproject,
+                    text=member_pyproject_text,
+                )
+            )
+
+        for mirror_edit in _plan_local_version_mirror_edits(
+            member_dpath, member_source, next_version
+        ):
+            if mirror_edit.path.resolve() in seen_paths:
+                raise RuntimeError(
+                    f'duplicate workspace version source: {mirror_edit.path}'
+                )
+            seen_paths.add(mirror_edit.path.resolve())
+            additional.append(mirror_edit)
+
+    original_root_pyproject_text = root_pyproject_path.read_text()
+    if source.path.resolve() == root_pyproject_path.resolve():
+        version_text = root_pyproject_text
+    elif root_pyproject_text != original_root_pyproject_text:
+        additional.append(
+            VersionTextEdit(
+                path=root_pyproject_path,
+                text=root_pyproject_text,
+            )
+        )
+    return version_text, tuple(additional)
 
 
 class VersionBumper:
@@ -444,23 +1018,49 @@ class VersionBumper:
         *,
         release_date: datetime_mod.date | None = None,
     ) -> VersionBumpPlan:
-        """Validate and construct the two-file bump before writing either."""
+        """Validate and construct the coordinated bump before writing files."""
         source = self.find_version_source()
         next_version = self.resolve_next_version(source.version, target)
-        changelog_path = self.repodir / 'CHANGELOG.md'
-        if not changelog_path.exists():
+        changelog_paths = [
+            self.repodir / name for name in ('CHANGELOG.md', 'CHANGELOG.rst')
+            if (self.repodir / name).is_file()
+        ]
+        if not changelog_paths:
             raise RuntimeError(
-                f'Cannot bump version: {changelog_path} does not exist'
+                'Cannot bump version: expected CHANGELOG.md or CHANGELOG.rst'
             )
+        if len(changelog_paths) > 1:
+            raise RuntimeError(
+                'Cannot bump version: both CHANGELOG.md and CHANGELOG.rst '
+                'exist; select a single authoritative changelog'
+            )
+        changelog_path = changelog_paths[0]
         if release_date is None:
             release_date = datetime_mod.date.today()
         version_text = source.updated_text(next_version)
-        changelog_text = update_changelog_for_bump(
-            changelog_path.read_text(),
-            source.version,
-            next_version,
-            release_date,
+        local_mirror_edits = _plan_local_version_mirror_edits(
+            self.repodir, source, next_version
         )
+        version_text, workspace_edits = _plan_workspace_version_edits(
+            self.repodir, source, next_version, version_text
+        )
+        additional_edits = local_mirror_edits + workspace_edits
+        resolved_paths = [edit.path.resolve() for edit in additional_edits]
+        if len(resolved_paths) != len(set(resolved_paths)):
+            raise RuntimeError(
+                'A version bump planned multiple edits for the same file'
+            )
+        if changelog_path.suffix == '.rst':
+            changelog_text = update_rst_changelog_for_bump(
+                changelog_path.read_text(), source.version, next_version
+            )
+        else:
+            changelog_text = update_changelog_for_bump(
+                changelog_path.read_text(),
+                source.version,
+                next_version,
+                release_date,
+            )
         return VersionBumpPlan(
             current_version=source.version,
             next_version=next_version,
@@ -468,6 +1068,7 @@ class VersionBumper:
             changelog_path=changelog_path,
             version_text=version_text,
             changelog_text=changelog_text,
+            additional_edits=additional_edits,
         )
 
     def bump(
@@ -486,5 +1087,7 @@ class VersionBumper:
         plan.apply()
         print(f'Bumped version {plan.current_version} -> {plan.next_version}')
         print(f'Updated {plan.version_source.path}')
+        for edit in plan.additional_edits:
+            print(f'Updated {edit.path}')
         print(f'Updated {plan.changelog_path}')
         return plan

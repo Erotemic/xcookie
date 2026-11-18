@@ -145,6 +145,24 @@ def test_github_release_workflow_current_trusted_behavior_is_pinned(tmp_path):
     assert 'environment: pypi' in text
     assert 'Trusted publishing setup checklist' in text
 
+    # Live publication is provider-neutral and branch driven. A release is
+    # requested by `git push <remote> main:release`; tags are outputs, not
+    # alternate inputs that could cause a second provider-specific release.
+    # The generated warning is deliberate: mainline pushes are also supposed
+    # to exercise the release path against TestPyPI, and that policy has been
+    # accidentally removed by automated edits before.
+    assert 'MAINTAINER INTENT: pushes to the default branch intentionally enter' in text
+    assert 'Do not make TestPyPI manual-only' in text
+    assert 'branches: [ main, release ]' in text
+    assert "tags: [ '*' ]" not in text
+    assert 'publish_target:' in text
+    assert 'default: build-only' in text
+    assert "github.ref == 'refs/heads/release'" in text
+    assert "startsWith(github.event.ref, 'refs/tags')" not in text
+    assert "github.ref == 'refs/heads/main'" in text
+    assert "github.event.inputs.publish_target == 'testpypi'" in text
+    assert 'draft: false' in text
+
 
 def test_github_release_workflow_direct_gpg_uses_environment_secrets(tmp_path):
     self = _make_applier(
@@ -191,6 +209,27 @@ def test_gitlab_gpg_and_deploy_render_current_behavior_is_pinned(tmp_path):
         {'job': 'build/sdist', 'artifacts': True},
         {'job': 'build/wheel', 'artifacts': True},
     ]
+
+
+def test_release_branch_remains_authoritative_on_both_providers(tmp_path):
+    github = _make_applier(
+        tmp_path / 'github',
+        tags=['github', 'purepy', 'erotemic'],
+        deploy=True,
+        trusted=True,
+    ).build_github_actions_release()
+    gitlab = _make_applier(
+        tmp_path / 'gitlab',
+        tags=['gitlab', 'purepy'],
+        deploy=True,
+        trusted=['gitlab'],
+    ).build_gitlab_ci()
+
+    assert 'branches: [ main, release ]' in github
+    assert "github.ref == 'refs/heads/release'" in github
+    assert '- release' in gitlab
+    assert '$CI_COMMIT_BRANCH == "release"' in gitlab
+    assert 'publish/pypi:' in gitlab
 
 
 def test_gitlab_direct_gpg_render_uses_ci_variables_not_encrypted_repo(

@@ -139,3 +139,39 @@ def test_refresh_locks_sh_disabled_for_legacy_setup_py_repos(tmp_path) -> None:
     ]
     assert len(infos) == 1
     assert infos[0].enabled is False
+
+
+def test_refresh_locks_omits_workspace_members_from_constraints(tmp_path) -> None:
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    member = tmp_path / 'packages' / 'demo-theory'
+    member.mkdir(parents=True)
+    (member / 'pyproject.toml').write_text(
+        '[project]\nname = "demo-theory"\nversion = "1.0.0"\n'
+    )
+    (tmp_path / 'pyproject.toml').write_text(
+        '''
+[project]
+name = "demo"
+version = "1.0.0"
+
+[project.optional-dependencies]
+tests = []
+
+[tool.xcookie]
+workspace_members = ["packages/demo-theory"]
+'''.lstrip()
+    )
+    config = XCookieConfig(
+        repodir=tmp_path,
+        tags=['github', 'purepy'],
+        use_uv=True,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+        workspace_members=['packages/demo-theory'],
+    )
+    applier = TemplateApplier(config)
+    applier._presetup()
+    text = applier.build_refresh_locks_sh()
+    assert '--no-emit-workspace' in text
+    assert '--no-emit-project' not in text

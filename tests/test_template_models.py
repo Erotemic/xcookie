@@ -147,7 +147,7 @@ def test_pypy_auto_locks_to_supported_range(tmp_path):
         assert pyver in resolved.supported_python_versions
 
 
-def test_supported_python_auto_includes_315_prerelease(tmp_path):
+def test_supported_python_auto_includes_315_stable(tmp_path):
     resolved = _resolve_pypy(tmp_path, tags='github,purepy', min_python='3.14')
     assert resolved.supported_python_versions == ('3.14', '3.15')
     assert resolved.ci_cpython_versions == ('3.14', '3.15')
@@ -283,3 +283,40 @@ def test_explicit_builder_is_staged(tmp_path):
     staged = applier._stage_file(info)
     text = staged.stage_fpath.read_text()
     assert '## Version 2.3.4 - Unreleased' in text
+
+
+def test_ci_source_check_templates_are_conditional(tmp_path):
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    def template_paths(ci_source_checks):
+        config = XCookieConfig(
+            repodir=tmp_path,
+            repo_name='demo',
+            mod_name='demo',
+            tags=['github', 'gitlab', 'purepy'],
+            interactive=False,
+            use_vcs=False,
+            author='Example Author',
+            author_email='author@example.com',
+            version='2.3.4',
+            url='https://github.com/example/demo',
+            ci_source_checks=ci_source_checks,
+        )
+        applier = TemplateApplier(config)
+        applier._build_template_registry()
+        return {
+            Path(info.fname).as_posix(): info.enabled
+            for info in applier.template_infos
+        }
+
+    without_checks = template_paths(None)
+    assert without_checks['.github/workflows/checks.yml'] is False
+    assert without_checks['.gitlab/ci/main.yml'] is False
+    assert without_checks['.gitlab/ci/checks.yml'] is False
+
+    with_checks = template_paths(
+        {'smoke': {'commands': ['python -m compileall demo']}}
+    )
+    assert with_checks['.github/workflows/checks.yml'] is True
+    assert with_checks['.gitlab/ci/main.yml'] is True
+    assert with_checks['.gitlab/ci/checks.yml'] is True

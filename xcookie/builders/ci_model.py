@@ -55,12 +55,15 @@ class ArtifactTestCase:
     @property
     def key(
         self,
-    ) -> tuple[str, str, str, str, str, str | None, str | None, bool]:
+    ) -> tuple[str, str, CIPlatform, str, str | None, str | None, bool]:
+        # CIPlatform is a frozen value object: its identity includes the
+        # concrete provider runner. In particular, ubuntu-latest and
+        # ubuntu-24.04-arm are both logical Linux with arch='auto', but
+        # execute different jobs and must not collapse into one test case.
         return (
             self.variant.key,
             self.python_version,
-            self.platform.logical_os,
-            self.platform.arch,
+            self.platform,
             self.install_extras,
             self.lock_requirements if self.use_lockfile else None,
             self.gdal_requirement_txt,
@@ -299,13 +302,13 @@ def _apply_prerelease_python_policy(
 
 
 def _dedupe_cases(cases: list[ArtifactTestCase]) -> list[ArtifactTestCase]:
-    seen: set[str] = set()
+    seen: set[tuple] = set()
     deduped = []
     for case in cases:
-        h = ub.hash_data(case.key)
-        if h in seen:
+        key = case.key
+        if key in seen:
             continue
-        seen.add(h)
+        seen.add(key)
         deduped.append(case)
     return deduped
 
@@ -375,6 +378,34 @@ def make_artifact_test_cases(
                         cases.append(github_case)
                     else:
                         cases.append(base_case)
+
+    if provider == 'github':
+        # PyPy is an interpreter-compatibility dimension, not a request to
+        # exercise every optional dependency under an alternate interpreter.
+        # In particular, optional scientific stacks often lack PyPy wheels on
+        # one or more GitHub runner platforms and then fall back to expensive
+        # or impossible source builds. Keep PyPy coverage focused on the
+        # package plus its test dependencies. CPython full-loose jobs continue
+        # to cover the project's optional extras.
+        pypy_versions = supported_platform_info['pypy_versions']
+        if pypy_versions:
+            pypy_variant = plan.variants_by_key()['minimal-loose']
+            for platform in platforms:
+                for pyver in pypy_versions:
+                    base_case = ArtifactTestCase(
+                        variant=pypy_variant,
+                        python_version=str(pyver),
+                        platform=platform,
+                        install_extras=pypy_variant.install_extras,
+                        use_lockfile=False,
+                        lock_requirements=None,
+                        gdal_requirement_txt=_variant_gdal_requirement(
+                            self, pypy_variant
+                        ),
+                    )
+                    github_case = _github_case_for_python(base_case)
+                    if github_case is not None:
+                        cases.append(github_case)
 
     if self.config['use_pyproject_requirements']:
         cases = _dedupe_cases(cases)
@@ -648,7 +679,13 @@ def make_release_plan(
                 build_job_keys.append('build/sdist')
             build_job_keys.append('build/wheel')
         else:
-            build_job_keys.append('build/{swenv_key}')
+            if common_ci.uses_reusable_binary_wheels(self):
+                # The current GitLab binary renderer targets one Linux x86_64
+                # platform. A reusable wheel build is shared by every Python
+                # test image on that platform.
+                build_job_keys.append('build/reusable-linux-x86_64')
+            else:
+                build_job_keys.append('build/{swenv_key}')
 
         deploy_job_keys = []
         if enable_gpg:

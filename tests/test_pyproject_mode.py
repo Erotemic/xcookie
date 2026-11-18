@@ -48,6 +48,11 @@ def test_use_setup_py_false_generates_pep621(tmp_path) -> None:
 
     package_data = pyproject_data['tool']['setuptools']['package-data']
     assert package_data['*'] == ['requirements/*.txt']
+    assert '--ignore-glob=setup.py' not in pyproject_data['tool']['pytest']['ini_options']['addopts']
+    assert '*/setup.py' not in pyproject_data['tool']['coverage']['report']['omit']
+    if 'uv' in pyproject_data['tool']:
+        cache_keys = pyproject_data['tool']['uv'].get('cache-keys', [])
+        assert {'file': 'setup.py'} not in cache_keys
 
 
 def test_typed_package_data_uses_inline_annotations(tmp_path) -> None:
@@ -630,6 +635,41 @@ def test_dynamic_pyproject_extras_are_available_to_ci(tmp_path) -> None:
     assert "install-extras: ''" not in text
 
 
+def test_pypy_matrix_uses_tests_without_optional_extras(tmp_path) -> None:
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    _write_pyproject_with_extras(
+        repodir,
+        optional_dependencies={
+            'tests': ['pytest>=8.0'],
+            'optional': ['pandas', 'kwplot'],
+        },
+    )
+
+    config = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+        use_setup_py=False,
+        use_pyproject_requirements=True,
+    )
+    applier = TemplateApplier(config)
+    applier._presetup()
+    applier.config['ci_pypy_versions'] = ['3.11']
+    text = applier.build_github_actions_tests()
+
+    assert 'python-version: pypy-3.11' in text
+    pypy_blocks = text.split('python-version: pypy-3.11')[1:]
+    assert pypy_blocks
+    for block in pypy_blocks:
+        matrix_item = block.split('- python-version:', 1)[0]
+        assert 'install-extras: tests\n' in matrix_item
+        assert 'install-extras: tests,optional' not in matrix_item
+
+
 def test_sdist_install_step_uses_tests_extra_when_available(tmp_path) -> None:
     """
     When the project's pyproject.toml declares a ``tests`` extra, the sdist
@@ -898,8 +938,11 @@ def test_uv_exclude_newer_is_not_generated(tmp_path) -> None:
         if isinstance(pyproject_text, str)
         else pyproject_text
     )
-    assert 'uv' not in pyproject_data.get('tool', {})
-    assert 'exclude-newer' not in pyproject_text
+    uv_config = pyproject_data.get('tool', {}).get('uv', {})
+    assert 'exclude-newer' not in uv_config
+    cache_keys = uv_config.get('cache-keys', [])
+    assert {'file': 'requirements/*.txt'} in cache_keys
+    assert {'file': 'setup.py'} not in cache_keys
 
 
 def test_uv_exclude_newer_user_value_is_preserved(tmp_path) -> None:
@@ -1275,3 +1318,149 @@ def test_dynamic_comments_only_extra_and_all_order_are_preserved(tmp_path):
 
     assert optional['optional']['file'] == ['requirements/optional.txt']
     assert optional['all']['file'] == all_files
+
+
+def test_project_classifiers_drop_stale_python_versions(tmp_path) -> None:
+    """Existing generated Python classifiers follow the configured max."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'demo'
+    repodir.mkdir()
+    (repodir / 'pyproject.toml').write_text(
+        """
+[project]
+name = "demo"
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Utilities",
+]
+
+[tool.xcookie]
+tags = ["purepy"]
+mod_name = "demo"
+repo_name = "demo"
+pkg_name = "demo"
+min_python = "3.10"
+max_python = "3.14"
+"""
+    )
+    cfg = XCookieConfig.load_from_cli_and_pyproject(
+        argv=0,
+        repodir=repodir,
+        interactive=False,
+        init_new_remotes=False,
+        use_vcs=False,
+    )
+    app = TemplateApplier(cfg)
+    app._presetup()
+    classifiers = app._project_classifiers()
+    assert 'Programming Language :: Python :: 3.14' in classifiers
+    assert 'Programming Language :: Python :: 3.15' not in classifiers
+    assert 'Topic :: Utilities' in classifiers
+
+
+def test_binpy_pyproject_only_keeps_extension_and_license_metadata(
+    tmp_path,
+) -> None:
+    """A Cython project can drop setup.py without losing extension metadata."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    repodir = tmp_path / 'line_demo'
+    repodir.mkdir()
+    for name in ['LICENSE.txt', 'LICENSE_Python.txt']:
+        (repodir / name).write_text('License notice\n')
+    (repodir / 'pyproject.toml').write_text(
+        '''
+[build-system]
+requires = ["setuptools>=77", "Cython>=3.0.3"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["kernprof"]
+ext-modules = [
+    {name = "line_demo._native", sources = ["line_demo/_native.pyx", "line_demo/timer.c"], language = "c++"},
+]
+
+[tool.setuptools.package-data]
+line_demo = ["py.typed", "rc/*.toml"]
+
+[tool.setuptools.dynamic.optional-dependencies]
+ipython = {file = ["requirements/ipython.txt"]}
+'''
+    )
+    config = XCookieConfig(
+        repodir=repodir,
+        mod_name='line_demo',
+        repo_name='line_demo',
+        tags=['github', 'binpy', 'binpy-ubuntu-arm'],
+        init_new_remotes=False,
+        interactive=False,
+        use_setup_py=False,
+        use_vcs=False,
+        min_python='3.10',
+        max_python='3.15',
+        license='BSD-3-Clause',
+    )
+    applier = TemplateApplier(config)
+    applier.setup()
+    assert 'setup.py' not in {info.fname for info in applier.staging_infos}
+    data = toml.loads((applier.staging_dpath / 'pyproject.toml').read_text())
+
+    project = data['project']
+    assert project['license'] == 'BSD-3-Clause'
+    assert project['license-files'] == ['LICENSE.txt', 'LICENSE_Python.txt']
+    assert 'Programming Language :: Python :: 3.15' in project['classifiers']
+    setuptools = data['tool']['setuptools']
+    assert setuptools['py-modules'] == ['kernprof']
+    assert setuptools['ext-modules'][0]['sources'] == [
+        'line_demo/_native.pyx',
+        'line_demo/timer.c',
+    ]
+    assert 'rc/*.toml' in setuptools['package-data']['line_demo']
+    assert setuptools['dynamic']['optional-dependencies']['ipython'] == {
+        'file': ['requirements/ipython.txt']
+    }
+    requires = data['build-system']['requires']
+    assert any(item.startswith('setuptools>=77') for item in requires)
+    # pyproject-fmt normalizes PEP 508 package names (e.g. Cython -> cython).
+    from packaging.requirements import Requirement
+
+    assert any(
+        req.name.casefold() == 'cython'
+        and str(req.specifier) == '>=3.0.3'
+        for req in map(Requirement, requires)
+    )
+    assert not any(
+        item.lower().startswith(('scikit-build', 'cmake', 'ninja', 'numpy'))
+        for item in requires
+    )
+    cibw = data['tool']['cibuildwheel']
+    assert cibw['test-extras'] == ['tests']
+    assert 'cp315-*' in cibw['build']
+
+
+def test_binpy_cibuildwheel_test_extras_follow_packaging_mode(tmp_path) -> None:
+    """Synthetic strict extras only exist when setup.py generates them."""
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    for use_setup_py, expected in [
+        (True, ['tests-strict', 'runtime-strict', 'headless-strict']),
+        (False, ['tests', 'headless']),
+    ]:
+        config = XCookieConfig(
+            repodir=tmp_path,
+            mod_name='demo',
+            repo_name='demo',
+            tags=['binpy', 'github', 'cv2'],
+            init_new_remotes=False,
+            interactive=False,
+            use_setup_py=use_setup_py,
+            use_vcs=False,
+        )
+        applier = TemplateApplier(config)
+        applier._presetup()
+        result = toml.loads(applier.build_pyproject())
+        # pyproject-fmt may alphabetize extras; their order has no meaning.
+        actual_extras = result['tool']['cibuildwheel']['test-extras']
+        assert sorted(actual_extras) == sorted(expected)
