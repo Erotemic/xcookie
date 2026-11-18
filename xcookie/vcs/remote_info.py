@@ -51,7 +51,7 @@ def resolve_remote_info(config: Any, repodir: ub.Path) -> ub.udict:
     if 'github' in tags:
         remote_info['type'] = 'github'
 
-    defaults = ub.udict()
+    defaults: ub.udict[str, str] = ub.udict()
     if remote_info['type'] == 'gitlab' and 'kitware' in tags:
         defaults['host'] = 'https://gitlab.kitware.com'
         defaults['group'] = 'computer-vision'

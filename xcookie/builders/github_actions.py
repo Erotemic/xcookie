@@ -2512,7 +2512,7 @@ def test_wheels_job(self, needs=None, plan: CIPlan | None = None):
     else:
         custom_before_test_lines = []
 
-    setup_python_config = {
+    setup_python_config: dict[str, JSON] = {
         'with': {
             'python-version': '${{ matrix.python-version }}',
             'allow-prereleases': '${{ matrix.allow-prereleases }}',
@@ -3163,7 +3163,7 @@ def build_deploy(
         for member in workspace_members:
             if not member.publish:
                 continue
-            member_publish_with = {
+            member_publish_with: dict[str, JSON] = {
                 'packages-dir': f'{workspace_release_dpath}/{member.key}',
                 'skip-existing': True,
             }

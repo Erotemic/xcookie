@@ -65,18 +65,18 @@ class RepositoryInitializer:
         if 'gitlab' in self.tags:
             from xcookie.vcs.gitlab import GitlabRemote
 
-            vcs_remote = GitlabRemote(
+            gitlab_remote = GitlabRemote(
                 proj_name=self.remote_info['repo_name'],
                 proj_group=self.remote_info['group'],
                 url=self.remote_info['host'],
                 visibility=self.config['visibility'],
             )
-            vcs_remote.auth()
-            vcs_remote.new_project()
+            gitlab_remote.auth()
+            gitlab_remote.new_project()
         elif 'github' in self.tags:
             from xcookie.vcs.github import GithubRemote
 
-            vcs_remote = GithubRemote(self.remote_info['repo_name'])
-            vcs_remote.new_project()
+            github_remote = GithubRemote(self.remote_info['repo_name'])
+            github_remote.new_project()
         else:
             raise NotImplementedError('unknown vcs remote')

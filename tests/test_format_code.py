@@ -148,8 +148,8 @@ def test_generated_init_text_formats_platform_specific(tmp_path) -> None:
     from xcookie.builders.basic import build_package_init
     from xcookie.template_registry import TemplateInfo
 
-    info = TemplateInfo.coerce(info)
-    text = build_package_init(applier, info)
+    template_info = TemplateInfo.coerce(info)
+    text = build_package_init(applier, template_info)
     formatted = applier.format_code(text, filename='__init__.py')
 
     assert '__mkinit__' in formatted

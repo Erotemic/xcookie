@@ -1461,4 +1461,6 @@ def test_binpy_cibuildwheel_test_extras_follow_packaging_mode(tmp_path) -> None:
         applier = TemplateApplier(config)
         applier._presetup()
         result = toml.loads(applier.build_pyproject())
-        assert result['tool']['cibuildwheel']['test-extras'] == expected
+        # pyproject-fmt may alphabetize extras; their order has no meaning.
+        actual_extras = result['tool']['cibuildwheel']['test-extras']
+        assert sorted(actual_extras) == sorted(expected)

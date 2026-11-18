@@ -70,15 +70,15 @@ class VersionSource:
                     section = section_match.group(1)
                     continue
                 if section == 'project':
-                    match = pattern.match(line)
-                    if match:
-                        quote = match.group('quote')
+                    project_match = pattern.match(line)
+                    if project_match:
+                        quote = project_match.group('quote')
                         lines[index] = (
-                            match.group('prefix')
+                            project_match.group('prefix')
                             + quote
                             + new_version
                             + quote
-                            + match.group('suffix')
+                            + project_match.group('suffix')
                         )
                         replaced += 1
             if replaced != 1:

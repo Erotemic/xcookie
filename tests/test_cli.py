@@ -227,7 +227,7 @@ def test_modal_short_aliases_dispatch(monkeypatch) -> None:
     from xcookie.versioning import VersionBumper
 
     generated = {}
-    bumped = {}
+    bumped: dict[str, object] = {}
     refreshed = {}
     rotated = {}
 
