@@ -5,7 +5,10 @@ We are currently working on porting this changelog to the specifications in
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## Version 0.5.1 - Unreleased
+## Version 0.5.2 - Unreleased
+
+
+## Version 0.5.1 - Released 2026-11-18
 
 ### Added
 * ``xcookie bump`` now supports version-underlined ``CHANGELOG.rst`` files,
