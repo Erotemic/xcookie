@@ -17,4 +17,4 @@ projects but the goal is to eventually generalize everything.
 
 """
 
-__version__ = '0.5.2'
+__version__ = '0.5.3'
