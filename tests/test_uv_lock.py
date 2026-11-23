@@ -1,4 +1,6 @@
+import os
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -40,7 +42,7 @@ def test_checked_lock_requirement_exports_are_present_and_sanitized() -> None:
         assert 'reader:' not in text
 
 
-def test_generated_github_ci_uses_checked_lock_requirement_cases(
+def test_generated_github_ci_exports_lock_requirements_at_install(
     tmp_path,
 ) -> None:
     from xcookie.main import TemplateApplier, XCookieConfig
@@ -65,9 +67,108 @@ def test_generated_github_ci_uses_checked_lock_requirement_cases(
     assert 'lock-requirements:' in text
     assert 'LOCK_REQUIREMENTS: ${{ matrix.lock-requirements }}' in text
     assert 'requirements/locks/tests.txt' in text
-    assert 'Using checked-in lock requirements' in text
-    assert 'python -m uv export --frozen --no-emit-project' not in text
+    assert 'python -m uv export --locked --no-emit-project' in text
+    assert 'Missing checked-in lock requirements' not in text
     assert 'python -m uv pip compile' not in text
+    # Generated paths are output targets, not files that must already exist.
+    assert 'mkdir -p "$(dirname "$LOCK_REQUIREMENTS")"' in text
+
+
+def test_strict_ci_can_export_constraints_when_only_uv_lock_exists(
+    tmp_path,
+) -> None:
+    """Exercise the generated bash without a network or installed uv."""
+    from xcookie.builders import common_ci
+    from xcookie.main import TemplateApplier, XCookieConfig
+
+    cfg = XCookieConfig(
+        repodir=tmp_path,
+        repo_name='demo_pkg',
+        mod_name='demo_pkg',
+        tags=['github', 'purepy'],
+        interactive=False,
+        use_uv=True,
+        use_setup_py=False,
+        use_pyproject_requirements=False,
+    )
+    cfg['enable_gpg'] = False
+    cfg['deploy'] = False
+    self = TemplateApplier(cfg)
+    self._presetup()
+    parts = common_ci.make_install_and_test_wheel_parts(
+        self, 'wheelhouse', [], 'sandbox'
+    )
+    commands = parts['install_wheel_commands']
+    lock_start = commands.index('LOCK_ARGS=()')
+    lock_script = '\n'.join(commands[lock_start:])
+    assert 'uv export --locked' in lock_script
+
+    # The shell fake records uv's argv and writes a minimal requirements file.
+    # This exercises the actual generated quoting and --extra expansion.
+    fake_uv = r'''
+python() {
+    if [[ "$1" == '-m' && "$2" == 'uv' && "$3" == 'export' ]]; then
+        printf '%s\n' "$@" > export_args.txt
+        while [[ $# -gt 0 ]]; do
+            if [[ "$1" == '-o' ]]; then
+                shift
+                printf 'some-dependency==1.2.3\n' > "$1"
+                return 0
+            fi
+            shift
+        done
+        return 2
+    elif [[ "$1" == '-m' && "$2" == 'uv' && "$3" == 'pip' ]]; then
+        printf '%s\n' "$@" > install_args.txt
+        return 0
+    fi
+    return 3
+}
+'''
+    lock_relp = Path('requirements/locks/tests-optional.txt')
+    assert not (tmp_path / lock_relp).exists()
+    env = {
+        'USE_UV_LOCK': 'true',
+        'INSTALL_EXTRAS': 'tests,optional',
+        'LOCK_REQUIREMENTS': lock_relp.as_posix(),
+        'INSTALL_TARGET': 'wheelhouse/demo_pkg-1.0.whl[tests,optional]',
+    }
+    # Empty uv.lock content is enough for the shell fake; the real --locked
+    # flag independently rejects a stale lock during CI.
+    (tmp_path / 'uv.lock').write_text('')
+    run = subprocess.run(
+        ['bash', '-c', 'set -euo pipefail\n' + fake_uv + lock_script],
+        cwd=tmp_path,
+        env={**os.environ, **env},
+        text=True,
+        capture_output=True,
+    )
+    assert run.returncode == 0, (run.stdout, run.stderr)
+    assert (tmp_path / lock_relp).read_text() == 'some-dependency==1.2.3\n'
+    export_args = (tmp_path / 'export_args.txt').read_text().splitlines()
+    assert '--locked' in export_args
+    assert '--no-emit-project' in export_args
+    assert export_args[export_args.index('--extra') + 1] == 'tests'
+    second_extra = export_args.index('--extra', export_args.index('--extra') + 1)
+    assert export_args[second_extra + 1] == 'optional'
+    assert export_args[-2:] == ['-o', lock_relp.as_posix()]
+    install_args = (tmp_path / 'install_args.txt').read_text().splitlines()
+    assert install_args[install_args.index('--constraint') + 1] == lock_relp.as_posix()
+    assert install_args[-1] == env['INSTALL_TARGET']
+
+    # Missing authoritative uv.lock should fail visibly, not silently
+    # install an unlocked dependency set.
+    (tmp_path / 'uv.lock').unlink()
+    (tmp_path / lock_relp).unlink()
+    run = subprocess.run(
+        ['bash', '-c', 'set -euo pipefail\n' + fake_uv + lock_script],
+        cwd=tmp_path,
+        env={**os.environ, **env},
+        text=True,
+        capture_output=True,
+    )
+    assert run.returncode != 0
+    assert 'Missing uv.lock' in run.stdout
 
 
 def test_refresh_locks_sh_emits_one_export_per_strict_variant(tmp_path) -> None:
@@ -175,3 +276,5 @@ workspace_members = ["packages/demo-theory"]
     text = applier.build_refresh_locks_sh()
     assert '--no-emit-workspace' in text
     assert '--no-emit-project' not in text
+    workflow = applier.build_github_actions_tests()
+    assert 'uv export --locked --no-emit-workspace' in workflow
