@@ -4,6 +4,8 @@ import subprocess
 
 import pytest
 
+from xcookie.util_command import find_bash_executable
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -103,6 +105,10 @@ def test_strict_ci_can_export_constraints_when_only_uv_lock_exists(
     lock_script = '\n'.join(commands[lock_start:])
     assert 'uv export --locked' in lock_script
 
+    bash_executable = find_bash_executable()
+    if bash_executable is None:
+        pytest.skip('Bash is required (Git Bash on Windows)')
+
     # The shell fake records uv's argv and writes a minimal requirements file.
     # This exercises the actual generated quoting and --extra expansion.
     fake_uv = r'''
@@ -137,7 +143,7 @@ python() {
     # flag independently rejects a stale lock during CI.
     (tmp_path / 'uv.lock').write_text('')
     run = subprocess.run(
-        ['bash', '-c', 'set -euo pipefail\n' + fake_uv + lock_script],
+        [bash_executable, '-c', 'set -euo pipefail\n' + fake_uv + lock_script],
         cwd=tmp_path,
         env={**os.environ, **env},
         text=True,
@@ -161,7 +167,7 @@ python() {
     (tmp_path / 'uv.lock').unlink()
     (tmp_path / lock_relp).unlink()
     run = subprocess.run(
-        ['bash', '-c', 'set -euo pipefail\n' + fake_uv + lock_script],
+        [bash_executable, '-c', 'set -euo pipefail\n' + fake_uv + lock_script],
         cwd=tmp_path,
         env={**os.environ, **env},
         text=True,

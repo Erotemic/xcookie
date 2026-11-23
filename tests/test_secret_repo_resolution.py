@@ -1,6 +1,6 @@
 """Resolve the correct GitHub secret target before executing any upload."""
 
-import shutil
+import os
 import subprocess
 from unittest.mock import MagicMock
 
@@ -8,6 +8,7 @@ import pytest
 
 import xcookie.secrets as secrets_mod
 from xcookie.secrets import SecretRotator
+from xcookie.util_command import find_bash_executable
 
 
 class _Config(dict):
@@ -155,18 +156,20 @@ def test_secret_rotation_preserves_explicit_gh_repo(monkeypatch, tmp_path):
         line for line in script.splitlines()
         if 'GH_REPO' in line or line.startswith('github_repo_full_name()')
     ]
-    if shutil.which('bash') is None:
-        return  # Shell execution is checked where Bash is available.
+    shell_script = '\n'.join(commands) + '\ngithub_repo_full_name'
+    bash_executable = find_bash_executable()
+    if bash_executable is None:
+        pytest.skip('Bash is required (Git Bash on Windows)')
     for initial, expected in [
         ('', 'Erotemic/ubelt'),
         ('someone/another-repo', 'someone/another-repo'),
         ('github.com/someone/other', 'someone/other'),
     ]:
         result = subprocess.run(
-            ['bash', '-c', '\n'.join(commands) + '\ngithub_repo_full_name'],
+            [bash_executable, '-c', shell_script],
             capture_output=True,
             text=True,
             check=True,
-            env={'GH_REPO': initial},
+            env={**os.environ, 'GH_REPO': initial},
         )
         assert result.stdout == expected
