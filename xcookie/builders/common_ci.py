@@ -487,6 +487,13 @@ def make_install_and_test_wheel_parts(
     )
 
     if use_lockfile_ci:
+        # uv.lock is the authoritative dependency lock. The per-extra
+        # requirements files are temporary exports, not separately maintained
+        # input files. This also works for a freshly normalized repository
+        # where requirements/locks/*.txt has not been generated or committed.
+        emit_flag = (
+            '--no-emit-workspace' if plan.workspace_members else '--no-emit-project'
+        )
         install_wheel_commands += [
             'LOCK_ARGS=()',
             'if [[ "${USE_UV_LOCK:-false}" == "true" ]]; then',
@@ -494,12 +501,28 @@ def make_install_and_test_wheel_parts(
             '        echo "USE_UV_LOCK=true but LOCK_REQUIREMENTS is empty"',
             '        exit 1',
             '    fi',
-            '    if [[ ! -f "$LOCK_REQUIREMENTS" ]]; then',
-            '        echo "Missing checked-in lock requirements: $LOCK_REQUIREMENTS"',
+            '    if [[ ! -f uv.lock ]]; then',
+            '        echo "Missing uv.lock; run dev/refresh_locks.sh and commit uv.lock"',
             '        exit 1',
             '    fi',
-            '    echo "Using checked-in lock requirements: $LOCK_REQUIREMENTS"',
-            '    cat "$LOCK_REQUIREMENTS"',
+            '    UV_EXPORT_EXTRAS=()',
+            '    if [[ -n "${INSTALL_EXTRAS:-}" ]]; then',
+            '        IFS="," read -r -a UV_EXTRAS <<< "$INSTALL_EXTRAS"',
+            '        for extra in "${UV_EXTRAS[@]}"; do',
+            '            UV_EXPORT_EXTRAS+=(--extra "$extra")',
+            '        done',
+            '    fi',
+            '    mkdir -p "$(dirname "$LOCK_REQUIREMENTS")"',
+            '    echo "Exporting constraints from uv.lock for ${INSTALL_EXTRAS:-runtime}"',
+            # --locked checks freshness; --frozen would silently accept a
+            # stale lock left over from before the packaging migration.
+            join_shell_parts(
+                '    python -m uv export --locked',
+                emit_flag,
+                '--format requirements.txt --no-hashes',
+                '"${UV_EXPORT_EXTRAS[@]}"',
+                '-o "$LOCK_REQUIREMENTS"',
+            ),
             '    LOCK_ARGS=(--constraint "$LOCK_REQUIREMENTS")',
             'fi',
             # uv prefers binary wheels by default; the pip --prefer-binary

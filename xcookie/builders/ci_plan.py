@@ -65,11 +65,10 @@ class TestVariant:
 
     @property
     def use_lockfile(self) -> bool:
-        """Whether this variant should install from the checked-in lockfile.
+        """Whether this variant should install using the checked-in uv.lock.
 
-        In pyproject-only mode, the old ``*-strict`` extras are replaced by a
-        checked-in lockfile. Loose jobs resolve normally, while strict jobs
-        export dependency constraints from ``uv.lock``.
+        In pyproject-only mode, strict jobs export constraints directly from
+        ``uv.lock`` at installation time. Loose jobs resolve normally.
         """
         return self.is_strict
 
@@ -502,7 +501,7 @@ def uses_pyproject_dependency_mode(self: Any) -> bool:
 
 
 def uses_lockfile_ci(self: Any) -> bool:
-    """Return True when CI should use checked-in lock constraints."""
+    """Return True when CI should export constraints from checked-in uv.lock."""
     return bool(
         uses_pyproject_dependency_mode(self) and self.config.get('use_uv')
     )

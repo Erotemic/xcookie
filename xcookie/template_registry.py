@@ -458,9 +458,9 @@ def build_template_registry(applier: Any) -> list[TemplateInfo]:
             'dynamic': 'build_run_linter',
         },
         {
-            # Helper that re-exports requirements/locks/*.txt from uv.lock
-            # for every strict CI variant. Only meaningful when the project
-            # uses pyproject + uv (lockfile-driven CI); skipped otherwise.
+            # Helper to refresh uv.lock and optional per-extra exports.
+            # Strict CI uses uv.lock directly; exported files are not required.
+            # Skip this script outside pyproject + uv mode.
             'template': 0,
             'overwrite': 1,
             'fname': 'dev/refresh_locks.sh',

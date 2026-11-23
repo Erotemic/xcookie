@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import shlex
+import subprocess
 from typing import Any
 
 import ubelt as ub
@@ -19,25 +21,95 @@ class SecretRotator:
         self.config = config
         self.repodir = ub.Path(config['repodir'])
 
+    @staticmethod
+    def _github_repo_from_url(url: str) -> str | None:
+        """Extract a GitHub ``owner/repo`` from a Git remote URL."""
+        try:
+            info = GitURL(url).info
+        except (IndexError, KeyError, ValueError):
+            return None
+        if info.get('host', '').lower() != 'github.com':
+            return None
+        owner = info.get('group', '')
+        repo_name = info.get('repo_name', '').removesuffix('.git')
+        if owner and repo_name:
+            return f'{owner}/{repo_name}'
+        return None
+
+    def _matching_github_remotes(self, repo_name: str) -> list[str]:
+        """Find GitHub remotes for this project, ignoring unrelated remotes."""
+        try:
+            proc = subprocess.run(
+                ['git', 'remote', '-v'],
+                cwd=self.repodir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return []
+        if proc.returncode != 0:
+            return []
+
+        candidates: dict[str, str] = {}
+        for line in proc.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            full_name = self._github_repo_from_url(parts[1])
+            if full_name is None:
+                continue
+            if full_name.partition('/')[2].lower() == repo_name.lower():
+                candidates.setdefault(full_name.lower(), full_name)
+        return sorted(candidates.values())
+
     def _configured_github_repo_full_name(self) -> str | None:
-        """Return ``owner/repo`` for an explicitly configured GitHub URL."""
-        candidate_urls = [
+        """Resolve a secret target without choosing an unrelated Git remote.
+
+        An explicit GitHub URL wins. Otherwise, use an explicitly configured
+        GitHub group, a known owner tag, or a uniquely matching GitHub remote.
+        An explicitly supplied ``GH_REPO`` always takes precedence.
+        """
+        env_repo = os.environ.get('GH_REPO')
+        if env_repo:
+            return env_repo.removeprefix('github.com/')
+
+        for url in [
             self.config.get('github_url', None),
             self.config.get('url', None),
-        ]
-        for url in candidate_urls:
-            if not isinstance(url, str) or not url:
-                continue
-            try:
-                info = GitURL(url).info
-            except (IndexError, ValueError):
-                continue
-            if info.get('host', '').lower() != 'github.com':
-                continue
-            owner = info.get('group', '')
-            repo_name = info.get('repo_name', '').removesuffix('.git')
-            if owner and repo_name:
-                return f'{owner}/{repo_name}'
+        ]:
+            if isinstance(url, str) and url:
+                full_name = self._github_repo_from_url(url)
+                if full_name is not None:
+                    return full_name
+
+        repo_name = self.config.get('repo_name', None)
+        if not isinstance(repo_name, str) or not repo_name:
+            return None
+
+        host = self.config.get('remote_host', None)
+        group = self.config.get('remote_group', None)
+        if isinstance(host, str) and isinstance(group, str) and group:
+            host = host.removeprefix('https://').removeprefix('http://')
+            if host.rstrip('/').lower() == 'github.com':
+                return f'{group}/{repo_name}'
+
+        # These tags already select owner-specific GitHub credentials.
+        # Match the owner used by xcookie's regular remote-info defaults.
+        tags = set(self.config['tags'])
+        if 'erotemic' in tags:
+            return f'Erotemic/{repo_name}'
+        if 'pyutils' in tags:
+            return f'pyutils/{repo_name}'
+
+        matches = self._matching_github_remotes(repo_name)
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(
+                f'Ambiguous GitHub targets for {repo_name!r}: {matches!r}. '
+                'Set GH_REPO=owner/repo or configure github_url.'
+            )
         return None
 
     def _github_org_environ(self) -> str:
@@ -136,14 +208,16 @@ class SecretRotator:
             )
             if is_github and backend.get('repo_full_name'):
                 repo_full_name = shlex.quote(backend['repo_full_name'])
+                # The caller's GH_REPO takes precedence over config and
+                # remote inference, including in older generated scripts.
                 script.sync().submit(
-                    f'export GH_REPO={repo_full_name}', log=False
+                    'if [[ -z "${GH_REPO:-}" ]]; then '
+                    f'export GH_REPO={repo_full_name}; fi',
+                    log=False,
                 )
-                # Older generated setup_secrets.sh files only inspect origin.
-                # Override their helper so xcookie secrets works immediately
-                # for a GitLab-primary checkout with an explicit GitHub mirror.
                 script.sync().submit(
-                    "github_repo_full_name(){ printf '%s' \"$GH_REPO\"; }",
+                    'github_repo_full_name(){ '
+                    "printf '%s' \"${GH_REPO#github.com/}\"; }",
                     log=False,
                 )
             script.sync().submit(f'{environ_export}', log=False)
